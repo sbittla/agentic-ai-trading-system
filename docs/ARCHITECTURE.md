@@ -82,7 +82,7 @@ If Postgres is down, `trader-core` blocks new entries (no journal, no trade) whi
 ## 2. Repository layout
 
 ```
-AIAgentsTrading/
+agentic-ai-trading-system/
 ├── README.md
 ├── .devcontainer/devcontainer.json   # from tools/devcontainer.json (protected folder; copy manually)
 ├── config/

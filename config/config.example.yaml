@@ -1,4 +1,4 @@
-# AIAgentsTrading configuration (example with v1 defaults)
+# Agentic AI Trading System configuration (example with v1 defaults)
 # Copy to config/config.yaml. Loaded once at start; changes take effect the next trading day.
 # Rule IDs refer to docs/REQUIREMENTS.md. See docs/CONFIG_REFERENCE.md for every field.
 
@@ -97,7 +97,7 @@ data:
   stale_after_sec: 60
   news_poll_min: 15
   reddit_subreddits: [stocks, investing, wallstreetbets, StockMarket]
-  sec_user_agent: "AIAgentsTrading your-name your-email@example.com"
+  sec_user_agent: "agentic-ai-trading-system your-name your-email@example.com"
 
 llm:
   provider: ollama

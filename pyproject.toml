@@ -1,5 +1,5 @@
 [project]
-name = "aiagentstrading"
+name = "agentic-ai-trading-system"
 version = "0.1.0"
 description = "Disciplined agent-based day and swing trading for a fixed list of 10 large-cap US stocks"
 requires-python = ">=3.12,<3.13"

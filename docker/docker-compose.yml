@@ -1,10 +1,10 @@
-# AIAgentsTrading runtime (see docs/ARCHITECTURE.md §1)
+# Agentic AI Trading System runtime (see docs/ARCHITECTURE.md §1)
 #   Start:           docker compose -f docker/docker-compose.yml up -d
 #   Replay a day:    docker compose -f docker/docker-compose.yml --profile replay run --rm replay replay --day 2026-10-15
 #   Dashboards:      docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana
 # Pin every image to a version tag or digest before paper trading (SEC-10).
 
-name: aiagentstrading
+name: agentic-ai-trading-system
 
 x-app: &app
   build:

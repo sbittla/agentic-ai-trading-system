@@ -34,7 +34,7 @@ jobs:
       - name: Build container images
         run: |
           for target in core news notifier tools; do
-            docker build -f docker/Dockerfile --target $target -t aiagentstrading-$target:ci .
+            docker build -f docker/Dockerfile --target $target -t agentic-ai-trading-system-$target:ci .
           done
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2

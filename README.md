@@ -1,4 +1,4 @@
-# AIAgentsTrading
+# Agentic AI Trading System
 
 A disciplined, agent-based day and swing trading system for a fixed list of 10 large-cap US stocks.
 

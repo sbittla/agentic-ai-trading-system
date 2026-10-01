@@ -2,7 +2,7 @@
 // Opens the repo in VS Code inside the same image used in production (target "dev"),
 // with Postgres and Ollama from the main Compose file.
 {
-  "name": "AIAgentsTrading",
+  "name": "Agentic AI Trading System",
   "dockerComposeFile": ["../docker/docker-compose.yml"],
   "service": "dev",
   "runServices": ["postgres", "ollama"],
