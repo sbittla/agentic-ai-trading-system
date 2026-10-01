@@ -4,6 +4,7 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 - **Broker:** Alpaca (paper first, then live)
 - **Models:** Qwen running locally in Docker (Ollama); only code can size and place orders
+- **Runtime:** fully containerized with Docker Compose: `trader-core`, `news-sentiment`, `notifier`, `ollama`, `postgres`, `backup` (Python 3.12)
 - **Data:** free sources (Alpaca IEX feed, Finnhub, SEC EDGAR, Reddit)
 - **Trading hours:** first hour and last hour of the session only; no qualifying setup means no trade
 - **Discipline:** hard loss limits, no averaging down, wash-sale prevention, full journal of every decision

@@ -4,7 +4,7 @@
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 140 requirement IDs.
+**Totals:** 144 requirement IDs.
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -132,6 +132,7 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `SR-3` | Separate API keys for paper and live, stored outside the code and never sent to Qwen. | A7, A8, A10 | unit/test_safety.py | — |
 | `SR-4` | Every plan, signal, proposal, review, decision, order, fill, exit, lock and override is… | A7, A8, A10 | unit/test_safety.py | — |
 | `SR-5` | All settings (ticker list, windows, limits, wash-sale policy, modes, model version) live… | A7, A8, A10 | unit/test_safety.py | — |
+| `SR-6` | Everything runs in containers; only trader-core holds broker keys and can place orders; no inbound internet connections. | A10, compose | chaos/test_containers.py | — |
 | `SEC-1` | allow-list of owner phone numbers; messages from other numbers are ignored and logged | A10, notify | unit/test_security.py | CMD_REJECTED |
 | `SEC-2` | every approval request carries a 4-character one-time code (`YES K7Q2`); codes expire… | A10, notify | unit/test_security.py | CMD_REJECTED |
 | `SEC-3` | two-step confirmation: the system replies with a code that must be sent back within 60… | A10, notify | unit/test_security.py | CMD_REJECTED |
@@ -147,6 +148,9 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `SEC-13` | Alpaca account 2FA; daily reconcile flags any order not placed by the system | A10, notify | Manual: Alpaca 2FA enabled | CMD_REJECTED |
 | `SEC-14` | Every command received (sender, text, time, accepted or rejected, reason) is written to the journal. | A10, notify | unit/test_security.py | CMD_REJECTED |
 | `SEC-15` | The daily report lists all commands received and any rejected senders. | A11 | unit/test_a11_*.py | — |
+| `SEC-17` | One Postgres role per container; trigger limits outbox channels per role; news and notifier hold no Alpaca keys. | postgres, A10 | chaos/test_containers.py | CMD_REJECTED |
+| `SEC-18` | Each container reads only its own env file; live keys in a separate file. | compose | Manual: env file review at go-live | — |
+| `SEC-19` | No inbound ports or tunnels; notifier polls Twilio; containers read-only with no-new-privileges. | compose, notifier | chaos/test_containers.py | — |
 | `SEC-16` | Monthly security check: dependency alerts, key ages, config hash history, rejected commands. | Owner | Manual: monthly security check | — |
 
 ## How to use

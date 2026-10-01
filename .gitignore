@@ -1,7 +1,10 @@
 # Secrets and local config
 .env
-.env.live
+.env.*
 !.env.example
+secrets/
+backups/
+recordings/
 config/config.yaml
 
 # Runtime data (journal, bars, reports)

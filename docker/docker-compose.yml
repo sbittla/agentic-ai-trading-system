@@ -1,45 +1,169 @@
-# AIAgentsTrading runtime (see docs/ARCHITECTURE.md)
-# Usage: docker compose -f docker/docker-compose.yml up -d
+# AIAgentsTrading runtime (see docs/ARCHITECTURE.md §1)
+#   Start:           docker compose -f docker/docker-compose.yml up -d
+#   Replay a day:    docker compose -f docker/docker-compose.yml --profile replay run --rm replay replay --day 2026-10-15
+#   Dashboards:      docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana
+# Pin every image to a version tag or digest before paper trading (SEC-10).
 
 name: aiagentstrading
 
+x-app: &app
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  restart: unless-stopped
+  read_only: true                       # containers cannot modify their own filesystem
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  environment:
+    TZ: America/New_York
+    TRADER_CONFIG: /app/config/config.yaml
+  volumes:
+    - ../config:/app/config:ro          # config is read-only everywhere (DV-3)
+
 services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trader
+      POSTGRES_USER: trader_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
+    secrets: [pg_admin_password]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader_admin -d trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ollama:
-    image: ollama/ollama:latest          # pin an exact version tag before paper trading
+    image: ollama/ollama:latest         # pin before paper trading
     restart: unless-stopped
     volumes:
       - ollama-models:/root/.ollama
-    networks: [internal]                 # SEC-9: no host port published
-    gpus: all                            # requires Docker Desktop + WSL2 GPU support
+    networks: [internal]                # SEC-9: no host port
+    gpus: all
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  trader:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    restart: unless-stopped
+  trader-core:
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: core}
+    command: ["trader", "run", "--service", "core"]
+    env_file: [../.env.core]            # Alpaca keys + core DB password only
+    # env_file: [../.env.core, ../.env.live]   # SEC-7: add only at go-live
+    volumes:
+      - ../config:/app/config:ro
+      - bars:/app/data/bars
     depends_on:
-      ollama:
-        condition: service_healthy
-    env_file:
-      - ../.env                          # paper keys and data keys (git-ignored)
-      # - ../.env.live                   # SEC-7: add only at go-live
+      postgres: {condition: service_healthy}
+      ollama: {condition: service_healthy}
+    networks: [internal, egress]
+    healthcheck:
+      test: ["CMD", "trader", "health", "--service", "core"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  news-sentiment:
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: news}
+    command: ["trader", "run", "--service", "news"]
+    env_file: [../.env.news]            # Finnhub, Reddit, EDGAR user agent, news DB password
+    volumes:
+      - ../config:/app/config:ro
+      - hf-cache:/app/.cache/huggingface   # FinBERT weights (downloaded once)
+    tmpfs: [/tmp]
+    read_only: false                    # model cache writes; still no-new-privileges
+    depends_on:
+      postgres: {condition: service_healthy}
+      ollama: {condition: service_healthy}
+    networks: [internal, egress]
+    healthcheck:
+      test: ["CMD", "trader", "health", "--service", "news"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  notifier:
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: notifier}
+    command: ["trader", "run", "--service", "notifier"]
+    env_file: [../.env.notifier]        # Twilio keys, allowed senders, notifier DB password
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [internal, egress]
+    healthcheck:
+      test: ["CMD", "trader", "health", "--service", "notifier"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backup:
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: tools}
+    command: ["trader", "backup", "--daily-at", "18:00"]
+    env_file: [../.env.backup]          # read-only DB role
+    volumes:
+      - ../config:/app/config:ro
+      - bars:/app/data/bars:ro
+      - ${BACKUP_PATH:-../backups}:/backups
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [internal]
+
+  replay:
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: core}
+    profiles: [replay]
+    restart: "no"
+    entrypoint: ["trader"]
+    env_file: [../.env.replay]          # no broker keys: SimBroker only
+    volumes:
+      - ../config:/app/config:ro
+      - bars:/app/data/bars:ro
+      - ../runs:/app/runs
+      - ../recordings:/app/recordings:ro
+    networks: [internal]                # no internet: replays are offline
+
+  dev:                                  # used by the VS Code dev container (tools/devcontainer.json)
+    build: {context: .., dockerfile: docker/Dockerfile, target: dev}
+    profiles: [dev]
+    command: ["sleep", "infinity"]
+    env_file: [../.env.replay]          # no live or paper broker keys in development by default
     environment:
       TZ: America/New_York
-      TRADER_CONFIG: /app/config/config.yaml
     volumes:
-      - ../config:/app/config:ro         # config is read-only inside the container
-      - ../data:/app/data                # journal.db, bars, reports
+      - ..:/workspace
     networks: [internal, egress]
+
+  grafana:
+    image: grafana/grafana:latest       # pin before use
+    profiles: [monitoring]
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]      # localhost only
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks: [internal]
 
 networks:
   internal:
-    internal: true                       # ollama <-> trader only
-  egress: {}                             # trader -> Alpaca, Finnhub, EDGAR, Reddit, Twilio
+    internal: true                      # no internet access
+  egress: {}                            # outbound internet for core, news, notifier
 
 volumes:
+  pg-data: {}
   ollama-models: {}
+  bars: {}
+  hf-cache: {}
+  grafana-data: {}
+
+secrets:
+  pg_admin_password:
+    file: ../secrets/pg_admin_password.txt

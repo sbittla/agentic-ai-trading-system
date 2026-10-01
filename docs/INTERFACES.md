@@ -13,7 +13,8 @@ Every external dependency sits behind a small Python interface (`typing.Protocol
 | `Broker` | `AlpacaBroker` | `SimBroker` (see BACKTEST_ENGINE.md) |
 | `LLMClient` | `OllamaClient` | `CachedLLM` (responses keyed by input hash) |
 | `Notifier` | `WhatsAppNotifier` | `ConsoleNotifier` |
-| `Journal` | `SqlJournal` | `SqlJournal` on an in-memory SQLite |
+| `Journal` | `SqlJournal` on Postgres | `SqlJournal` on a per-run SQLite file |
+| `OutboxBus` | `PgOutboxBus` (Postgres `LISTEN/NOTIFY`) | `InMemoryOutbox` |
 
 ---
 
@@ -64,6 +65,12 @@ class Notifier(Protocol):
     async def request_approval(self, proposal: "TradeProposal", code: str,
                                timeout_s: int) -> "ApprovalResponse": ...
     def commands(self) -> AsyncIterator["Command"]: ...   # authenticated (SECURITY.md SEC-1..3)
+    # Real implementation polls Twilio's Messages API (ADR-013); no inbound webhook.
+
+class OutboxBus(Protocol):
+    async def publish(self, channel: str, payload: "BaseModel") -> int: ...   # returns outbox id
+    def subscribe(self, channel: str) -> AsyncIterator["OutboxMessage"]: ...
+    async def ack(self, outbox_id: int) -> None: ...
 ```
 
 ## 2. Core data types (Pydantic)
@@ -103,8 +110,10 @@ Other types (`Bar`, `Quote`, `NewsItem`, `Account`, `Position`, `Order`, `OrderU
 
 | File | Purpose |
 | --- | --- |
-| [`docker/docker-compose.yml`](../docker/docker-compose.yml) | `trader` and `ollama` services, internal network, GPU, volumes |
-| [`docker/Dockerfile`](../docker/Dockerfile) | Python 3.12 slim image for the trader |
+| [`docker/docker-compose.yml`](../docker/docker-compose.yml) | Six services (postgres, ollama, trader-core, news-sentiment, notifier, backup) plus replay, dev and monitoring profiles |
+| [`docker/Dockerfile`](../docker/Dockerfile) | One multi-stage file with targets `core`, `news`, `notifier`, `tools`, `dev` |
+| [`docker/postgres/init.sql`](../docker/postgres/init.sql) | Per-service roles and the outbox bus table |
+| [`tools/devcontainer.json`](../tools/devcontainer.json) | VS Code dev container; copy to `.devcontainer/devcontainer.json` |
 | [`pyproject.toml`](../pyproject.toml) | Package metadata, pinned dependencies, tool config |
 | [`tools/ci.yml`](../tools/ci.yml) | Lint, type check, unit and contract tests, secret scan on every push. Move to `.github/workflows/ci.yml` to enable |
-| [`.env.example`](../.env.example) | Names of every secret, no values |
+| [`.env.example`](../.env.example) | One block per container env file (`.env.core`, `.env.news`, `.env.notifier`, …), no values |

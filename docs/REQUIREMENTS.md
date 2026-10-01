@@ -15,6 +15,7 @@ The system trades only a fixed list of 10 large-cap US stocks, through Alpaca, u
 - Checklist item 8 clarified (resistance at least 1.5R above entry; T2 at least 2R), matching [STRATEGY_SPEC.md](STRATEGY_SPEC.md).
 - IDs added to the checklist (CK-1..CK-10), loss limits (LL-1..LL-11) and exit rules (XR-1..XR-6) so every rule is traceable ([TRACEABILITY.md](TRACEABILITY.md)).
 - Exact setup rules now live in STRATEGY_SPEC.md; security controls in SECURITY.md.
+- Fully containerized runtime (six services) with Postgres as journal and bus and outbound-only notifications: SR-6, A10-2 updated ([ARCHITECTURE.md](ARCHITECTURE.md), ADR-010 to ADR-013).
 
 ### What changed in 1.1
 
@@ -118,7 +119,7 @@ The system follows the same process every trading day. Each step writes to the j
 
 | Time (ET) | Step | Owner agent | Output |
 | --- | --- | --- | --- |
-| 7:00 AM | Health check: Alpaca, data, Qwen container, clock, account | A10 | Go / no-go for the day |
+| 7:00 AM | Health check: Alpaca, data, all containers, clock, account | A10 | Go / no-go for the day |
 | 7:15 AM | Load overnight news, 8-K filings, earnings calendar, macro calendar | A3 | Event flags per ticker |
 | 8:00 AM | Mark key levels per ticker: prior day high, low, close; pre-market high and low; 20/50-day EMAs | A4 | Level map |
 | 9:00 AM | Build the **game plan**: which tickers are in play, the setup to watch, the trigger price, the stop and the target; which tickers are off-limits today (earnings, wash-sale lock, loss streak) | A5 + A12 | Game plan (sent to WhatsApp) |
@@ -396,7 +397,7 @@ flowchart TD
 ### A10 Supervisor (code)
 
 - **A10-1:** Open and close the trading windows on the NYSE calendar, including half days, holidays and FOMC days.
-- **A10-2:** Health-check Alpaca, the data stream and the Qwen container every 30 seconds; pause entries if any fails.
+- **A10-2:** Health-check Alpaca, the data stream, Postgres and the `ollama`, `news-sentiment` and `notifier` containers every 30 seconds ([MONITORING.md](MONITORING.md)); pause entries if a required one fails.
 - **A10-3:** Kill switch via WhatsApp or a local command: cancel open entries, block new ones, keep broker-side stops.
 - **A10-4:** Run modes per style: paper, approve-each-trade, auto.
 - **Done when:** stopping the Qwen container pauses entries within 60 seconds and sends an alert.
@@ -460,6 +461,7 @@ flowchart TD
 - **SR-2:** Never use margin beyond 1x equity.
 - **SR-3:** Separate API keys for paper and live, stored outside the code and never sent to Qwen.
 - **SR-4:** Every plan, signal, proposal, review, decision, order, fill, exit, lock and override is written to the journal with timestamps.
+- **SR-6:** Everything runs in containers (ARCHITECTURE.md, ADR-010); only `trader-core` holds broker keys and can place orders; no inbound internet connections to the host (ADR-013).
 - **SR-5:** All settings (ticker list, windows, limits, wash-sale policy, modes, model version) live in one config file under version control; changes take effect the next trading day.
 
 ---

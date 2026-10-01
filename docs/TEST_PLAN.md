@@ -68,7 +68,11 @@ Record full market days (1-min bars, quotes, news) and replay them through the w
 | Scenario | Expected result |
 | --- | --- |
 | Kill the market data stream mid-window | Entries blocked within 60 s; back-fill; resume |
-| Stop the Qwen container | Entries blocked; exits continue; alert sent |
+| Stop the `ollama` container | Entries blocked; exits continue; alert sent |
+| Stop `news-sentiment` | News-dependent setups off within 5 min; other setups continue; alert |
+| Stop `notifier` during an approval | Approval expires, no trade; local kill still works |
+| Stop `postgres` with a position open | Entries blocked; broker-side stops hold; journal catches up on restart |
+| `news-sentiment` tries to publish on `inbound_cmd` | Rejected by the database trigger (SEC-17); incident logged |
 | Alpaca returns 500s for 2 minutes | Retries, then entries blocked; brackets protect open positions |
 | Restart the trader container with an open position | State rebuilt from journal; reconcile matches Alpaca; no duplicate orders |
 | Send the same proposal event twice | One order set only |

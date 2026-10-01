@@ -12,7 +12,11 @@ What the system measures about itself, what the owner sees, and when it alerts. 
 | --- | --- | --- | --- |
 | Alpaca Trading API | Responds < 1 s | 1–3 s | Errors or > 3 s, 3 times |
 | Market data stream | Message < 10 s old | 10–60 s | > 60 s in a window |
-| Qwen container | Health OK, p95 latency < 20 s | p95 20–45 s | Down or p95 > 45 s |
+| Qwen (`ollama`) | Health OK, p95 latency < 20 s | p95 20–45 s | Down or p95 > 45 s |
+| `postgres` | Healthy, query < 50 ms | 50–500 ms | Down |
+| `news-sentiment` heartbeat | < 2 min old | 2–5 min | > 5 min (news setups off) |
+| `notifier` heartbeat and Twilio poll | < 1 min old | 1–2 min | > 2 min (approve mode blocked) |
+| All containers | `healthy` in Docker | One restarted in the last hour | Restart loop (3 in 10 min) |
 | Clock drift vs Alpaca | < 0.5 s | 0.5–2 s | > 2 s |
 | Reconcile | Journal = Alpaca | — | Any mismatch |
 | Disk free (data volume) | > 20 GB | 5–20 GB | < 5 GB |
@@ -38,6 +42,8 @@ Pre-flight is **green** only if every check is green or amber; any red sends "NO
 | Time in market | Minutes with an open day trade outside windows | > 0 |
 
 ## 3. Dashboards (Grafana, optional from milestone M7)
+
+Grafana runs as the `monitoring` Compose profile, bound to `127.0.0.1:3000`, and reads Postgres through the `readonly` role. No separate metrics store is needed because every metric is a journal query (ADR-012).
 
 1. **Today:** health, open positions with stops and R, P&L vs limits, trades left today, locked tickers.
 2. **Pipeline:** setups → proposals → reviews → approvals → fills funnel per window, with reason codes.

@@ -114,10 +114,15 @@ notifications:
   approval_timeout_sec: 90      # unanswered approval = no trade
 
 storage:
-  journal_url: sqlite:///data/journal.db
-  bars_path: data/bars
-  backup_path: D:/Backups/AIAgentsTrading
+  journal_url_env: DATABASE_URL     # Postgres URL comes from each container's env file
+  bars_path: /app/data/bars
+  backup_daily_at: "18:00"
 
-# Secrets are NOT stored here. Set them as environment variables (see docs/RUNBOOK.md):
-# ALPACA_PAPER_KEY, ALPACA_PAPER_SECRET, ALPACA_LIVE_KEY, ALPACA_LIVE_SECRET,
-# FINNHUB_TOKEN, REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, TWILIO_SID, TWILIO_TOKEN, WHATSAPP_TO
+services:                         # ADR-010
+  heartbeat_sec: 30
+  news_stale_after_min: 5
+  notifier_stale_after_min: 2
+  notifier_poll_sec: {approval: 3, market_hours: 10, off_hours: 60}
+
+# Secrets are NOT stored here. Each container reads its own env file (.env.core, .env.news,
+# .env.notifier, ...); see .env.example and docs/SECURITY.md SEC-18.

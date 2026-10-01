@@ -26,16 +26,21 @@ One YAML file controls every tunable value. It is loaded once at start, snapshot
 | `data` | Feed, staleness, polling, subreddits, SEC User-Agent | SEC User-Agent contains an email |
 | `llm` | Ollama URL, pinned model tag, temperature, timeout, prompt versions | `temperature` = 0; prompt files exist |
 | `notifications` | WhatsApp on/off, approval timeout | Timeout ≤ 120 s |
-| `storage` | Journal URL, bar path, backup path | Paths writable |
+| `storage` | Env var holding the Postgres URL, bar path, backup time | Env var present; Postgres reachable |
+| `services` | Heartbeat interval, staleness limits for news and notifier, notifier polling intervals | Approval polling ≤ 5 s |
 
 ## Environment variables (secrets)
 
-| Variable | Used by |
-| --- | --- |
-| `ALPACA_PAPER_KEY`, `ALPACA_PAPER_SECRET` | Broker adapter in paper mode |
-| `ALPACA_LIVE_KEY`, `ALPACA_LIVE_SECRET` | Broker adapter in live mode only |
-| `FINNHUB_TOKEN` | A1, A3 |
-| `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` | A3 |
-| `TWILIO_SID`, `TWILIO_TOKEN`, `WHATSAPP_FROM`, `WHATSAPP_TO` | Notifications and approvals |
+Each container reads only its own env file (SECURITY.md SEC-18). Templates are in [`.env.example`](../.env.example).
 
-Store them in a `.env` file excluded by `.gitignore`, or in Windows Credential Manager, and pass them to the container through `docker-compose.yml` `env_file`. Live keys are loaded only when `mode.environment` is `live`.
+| File | Container | Variables |
+| --- | --- | --- |
+| `.env.core` | trader-core | `ALPACA_PAPER_KEY`, `ALPACA_PAPER_SECRET`, `DATABASE_URL` (role `core_rw`) |
+| `.env.live` | trader-core, go-live only | `ALPACA_LIVE_KEY`, `ALPACA_LIVE_SECRET` |
+| `.env.news` | news-sentiment | `FINNHUB_TOKEN`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `SEC_USER_AGENT`, `DATABASE_URL` (role `news_rw`) |
+| `.env.notifier` | notifier | `TWILIO_SID`, `TWILIO_TOKEN`, `WHATSAPP_FROM`, `WHATSAPP_TO`, `WHATSAPP_ALLOWED_SENDERS`, `DATABASE_URL` (role `notifier_rw`) |
+| `.env.backup` | backup | `DATABASE_URL` (role `readonly`) |
+| `.env.replay` | replay, dev | None required (offline) |
+| `secrets/pg_admin_password.txt` | postgres | Admin password, used at initialisation only |
+
+All of these are git-ignored. Live keys are loaded only when `mode.environment` is `live`.

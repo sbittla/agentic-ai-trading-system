@@ -12,10 +12,12 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 2. Create an Alpaca account; generate **paper** API keys. Keep live keys ungenerated until stage 5 of the test plan.
 3. Create a Finnhub key, a Reddit "script" app, and a Twilio WhatsApp sender.
 4. Copy `config/config.example.yaml` to `config/config.yaml`; review every value in `risk` and `wash_sale`.
-5. Copy `.env.example` to `.env` and fill in the paper keys and `WHATSAPP_ALLOWED_SENDERS` ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)); confirm `.env` is in `.gitignore`.
-6. `docker compose -f docker/docker-compose.yml up -d ollama` then `docker compose exec ollama ollama pull qwen3:14b` (pin the exact tag in config).
-7. `docker compose up -d trader`; check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day.
-8. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
+5. Create one env file per container from the blocks in `.env.example` (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) and `secrets/pg_admin_password.txt`; set strong, different Postgres role passwords and put the same ones in `docker/postgres/init.sql` before first start ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
+6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen3:14b` (pin the exact tag in config).
+7. `docker compose -f docker/docker-compose.yml run --rm trader-core trader migrate` to create the journal tables.
+8. `docker compose -f docker/docker-compose.yml up -d` to start all six services; `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
+9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works.
+10. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
 
 ## 2. Daily routine for the owner
 
@@ -35,8 +37,8 @@ Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals
 
 | Action | WhatsApp | Local |
 | --- | --- | --- |
-| Status | `STATUS` | `docker compose exec trader trader status` |
-| Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose exec trader trader kill` |
+| Status | `STATUS` | `docker compose -f docker/docker-compose.yml exec trader-core trader status` |
+| Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
 | Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `trader resume` |
 | Flatten everything now | `FLATTEN`, then the confirmation code | `trader flatten --confirm` |
 | Approve / reject a trade | `YES <code>` / `NO <code>` | — |
@@ -70,8 +72,15 @@ Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals
 2. Do not raise the limit to keep trading. Review the trades in the daily report.
 3. Monthly limit: live trading stays off until you review and set `mode.environment: live` again.
 
+### A container is unhealthy
+1. `docker compose -f docker/docker-compose.yml ps` shows which one; `docker compose -f docker/docker-compose.yml logs --tail 200 <service>` shows why.
+2. `news-sentiment` down: trading continues without news-dependent setups (GAP_AND_GO off); restart it.
+3. `notifier` down: approvals cannot arrive, so approve-mode entries stop; use local commands; restart it.
+4. `postgres` down: entries stop (no journal, no trade); exits continue; restart Postgres, then check the reconcile alert.
+5. `trader-core` restarting repeatedly: send `KILL` from the notifier or close positions in the Alpaca dashboard; check logs before restarting.
+
 ### PC restarted or lost power
-1. Containers restart automatically; the trader rebuilds state and reconciles before trading.
+1. Containers restart automatically; `trader-core` rebuilds state from Postgres and reconciles with Alpaca before trading.
 2. Check the WhatsApp alert for the reconcile result.
 
 ### Margin call or account restriction (should not happen at 1x leverage)
@@ -82,8 +91,9 @@ Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals
 
 | Task | When |
 | --- | --- |
-| Back up `data/` (journal and bars) to the backup path | Nightly, automatic |
-| Restore test from backup | Monthly |
+| Postgres dump and bar files copied to `BACKUP_PATH` by the `backup` container | Nightly, automatic |
+| Restore test: load last night's dump into a scratch Postgres container and run `trader validate-journal` | Monthly |
+| Update pinned image versions and dependency locks; rebuild; replay library diff | Monthly |
 | Rotate Alpaca and Finnhub keys | Every 90 days |
 | Update macro calendar (CPI, jobs, FOMC dates) | December for the next year; check monthly |
 | Pin new Ollama / Qwen versions | Only after the prompt evaluation set passes (AGENT_PROMPTS.md section 8) |

@@ -32,17 +32,19 @@ gantt
 ### M0 — Repository and tooling (1 week)
 
 - [ ] Python package skeleton under `src/trader/` per ARCHITECTURE.md §2
-- [ ] `pyproject.toml`; generate `requirements.lock` with hashes (`pip-compile --generate-hashes`)
+- [ ] `pyproject.toml`; generate hashed lock files per image in `requirements/` (`base`, `core`, `news`, `notifier`, `dev`) with `pip-compile --generate-hashes`
 - [ ] CI workflow green on an empty test suite; gitleaks secret scan on
 - [ ] Config loader with every validation rule in CONFIG_REFERENCE.md; `trader validate-config`
-- [ ] `docker compose up` starts `ollama` (GPU visible) and a `trader` that logs "hello" and exits
+- [ ] `docker compose up` starts all six services healthy: `postgres` with per-service roles, `ollama` with the GPU visible, and stub `trader-core`, `news-sentiment`, `notifier`, `backup` that report health
+- [ ] Dev container opens in VS Code (copy `tools/devcontainer.json`); CI workflow copied to `.github/workflows/`
 - **Done when:** a bad config value (for example `risk_per_trade_pct: 2`) makes `trader validate-config` fail with the rule name.
 
 ### M1 — Journal, message models, event bus (2 weeks)
 
 - [ ] SQLAlchemy models and migrations for every table in DATA_SPEC.md §3
 - [ ] Pydantic message types (DATA_SPEC.md §4) and the `TradeProposal` schema (AGENT_PROMPTS.md §5)
-- [ ] Event bus: publish = write to journal, then deliver; replay from journal on start
+- [ ] In-process event bus in `trader-core`: publish = write to journal, then deliver; replay from journal on start
+- [ ] Postgres outbox bus between containers with the role and channel trigger (SEC-17); Alembic migrations
 - [ ] Interfaces and fakes from INTERFACES.md; contract test harness
 - **Done when:** a test publishes 1,000 events, kills the process, restarts, and the rebuilt state matches.
 
@@ -89,7 +91,7 @@ gantt
 ### M7 — Supervisor, notifications and reports (2 weeks)
 
 - [ ] A10 schedule, health checks, kill switch, modes
-- [ ] WhatsApp with sender allow-list, approval codes and two-step confirmation (SECURITY.md SEC-1..3)
+- [ ] `notifier` container: WhatsApp sending and Twilio reply polling (ADR-013), sender allow-list, approval codes and two-step confirmation (SECURITY.md SEC-1..3)
 - [ ] A11 reports per REPORT_TEMPLATES.md; monitoring per MONITORING.md
 - **Done when:** a full replayed week produces every report, and all chaos tests in TEST_PLAN.md §6 pass.
 

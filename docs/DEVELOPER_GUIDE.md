@@ -1,6 +1,6 @@
 # Developer Guide
 
-**Version:** 1.0 (September 30, 2026)
+**Version:** 1.1 (September 30, 2026)
 
 How to set up a development environment, the coding rules for this repo, and the safe way to change strategies, prompts and limits.
 
@@ -8,14 +8,18 @@ How to set up a development environment, the coding rules for this repo, and the
 
 ## 1. Local setup (Windows)
 
+**Preferred:** open the repo in VS Code with the dev container (copy `tools/devcontainer.json` to `.devcontainer/devcontainer.json`, then *Reopen in Container*). It uses the same image as production (`dev` target) with Postgres and Ollama from Compose, so nothing but Docker Desktop and VS Code is installed on Windows.
+
+**Without the dev container:**
+
 ```powershell
 # Python 3.12 virtual environment
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -e ".[dev,notifier]"   # add ,news only if you work on FinBERT (large download)
 
-# Secrets for paper trading
-copy .env.example .env          # fill in paper keys only
+# Env files: replay needs none; paper trading needs .env.core, .env.news, .env.notifier
+copy .env.example .env.replay      # then keep only the .env.replay block
 copy config\config.example.yaml config\config.yaml
 
 # Model server

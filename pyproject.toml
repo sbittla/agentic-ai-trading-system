@@ -10,18 +10,19 @@ dependencies = [
   "pydantic>=2.7",
   "pyyaml>=6.0",
   "sqlalchemy>=2.0",
+  "psycopg[binary]>=3.2",     # Postgres driver (journal + outbox bus)
+  "alembic>=1.13",
   "pandas>=2.2",
   "pyarrow>=16.0",
   "numpy>=1.26",
   "apscheduler>=3.10,<4",
   "exchange-calendars>=4.5",  # backup to Alpaca's calendar endpoint
-  "transformers>=4.44",       # FinBERT
-  "torch>=2.3",
-  "twilio>=9.0",
   "structlog>=24.1",
 ]
 
 [project.optional-dependencies]
+news = ["transformers>=4.44", "torch>=2.3"]   # news-sentiment image only (FinBERT)
+notifier = ["twilio>=9.0"]                    # notifier image only
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10", "pip-tools>=7.4"]
 
 [project.scripts]

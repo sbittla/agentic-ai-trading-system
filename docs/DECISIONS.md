@@ -1,6 +1,6 @@
 # Decision Log
 
-**Version:** 1.0 (September 30, 2026)
+**Version:** 1.1 (September 30, 2026)
 
 Short records of the main design decisions, so later changes can see why things are the way they are. New decisions are appended; superseded ones are marked, not deleted.
 
@@ -14,7 +14,11 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-006 | 2026-09-30 | Only code can size and place orders | Accepted |
 | ADR-007 | 2026-09-30 | Strict wash-sale policy by default | Accepted |
 | ADR-008 | 2026-09-30 | Long only in v1 | Accepted |
-| ADR-009 | 2026-09-30 | One service with an event bus, not one container per agent | Accepted |
+| ADR-009 | 2026-09-30 | One service with an event bus, not one container per agent | Superseded by ADR-010 |
+| ADR-010 | 2026-09-30 | Containerize everything: six services split by isolation need | Accepted |
+| ADR-011 | 2026-09-30 | Python 3.12 for all application code | Accepted |
+| ADR-012 | 2026-09-30 | Postgres as journal and cross-container bus (outbox + LISTEN/NOTIFY) | Accepted |
+| ADR-013 | 2026-09-30 | Outbound-only notifications: poll Twilio for replies, no inbound endpoint | Accepted |
 
 ---
 
@@ -60,7 +64,29 @@ Short records of the main design decisions, so later changes can see why things 
 **Decision:** No short selling in v1.
 **Consequences:** Simpler margin and borrow handling; no trades on down days unless a long setup with relative strength appears.
 
-### ADR-009 One service with an event bus
+### ADR-009 One service with an event bus (superseded by ADR-010)
 
 **Decision:** All agents run in one Python process communicating through typed, journaled events.
 **Consequences:** Shared state is simple and fast; replay testing is straightforward. Agents can be split out later because messages are already typed.
+
+### ADR-010 Containerize everything, split by isolation need
+
+**Context:** The owner wants the system containerized as much as possible. Splitting has costs (network hops, more failure points) and benefits (isolation, smaller blast radius).
+**Decision:** Six always-on containers: `ollama`, `trader-core` (A1, A2, A4–A12), `news-sentiment` (A3), `notifier`, `postgres`, `backup`; plus on-demand `replay`, `dev` and (later) `grafana`. Split where it buys isolation: GPU model, heavy PyTorch dependencies, untrusted text, internet-facing messaging, data. Keep the decision-and-order path in one container.
+**Consequences:** The risk manager keeps exact in-memory state; Alpaca's one-connection market-data limit is respected by keeping the stream in `trader-core`; each container gets only its own secrets and Postgres role. More health checks to watch (MONITORING.md).
+
+### ADR-011 Python for application code
+
+**Decision:** Python 3.12 for every service; SQL for the journal; YAML for config; PowerShell for host scripts.
+**Consequences:** Official Alpaca SDK, pandas, Pydantic, FinBERT and the existing alert-bot code all work directly. The system acts in seconds, so Python's speed is sufficient. No second language toolchain in v1.
+
+### ADR-012 Postgres as journal and bus
+
+**Decision:** Postgres 16 holds the journal and an `outbox` table; cross-container messages are outbox rows announced with `LISTEN/NOTIFY`. Inside `trader-core`, an in-process bus handles high-rate events.
+**Consequences:** "Written before delivered" comes for free; one fewer service than Redis or NATS. Cross-container traffic is low-rate (flags, commands, reports), well within Postgres limits. If Postgres is down, entries stop.
+
+### ADR-013 Outbound-only notifications
+
+**Context:** Twilio normally delivers WhatsApp replies to a public webhook, which would need a tunnel into the home PC.
+**Decision:** The notifier polls Twilio's Messages API for inbound replies (every 3 s during approvals, every 10 s otherwise in market hours, every 60 s outside). No inbound ports or tunnels.
+**Consequences:** No internet-reachable endpoint on the host. Command latency up to 10 s (3 s for approvals), acceptable within the 90-second approval window; the local `trader kill` command is instant. Alternative if WhatsApp polling proves unreliable: a Telegram bot, which also works outbound-only.

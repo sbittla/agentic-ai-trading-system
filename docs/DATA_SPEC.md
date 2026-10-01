@@ -53,7 +53,11 @@ The existing alert-bot indicators (RSI, MACD, Bollinger, Keltner, OBV, CMF) are 
 
 ## 3. Journal tables
 
-SQLite in v1 (single file, WAL mode), Postgres when moving to a VM. Times stored in UTC; reports shown in ET.
+Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared by the containers with one role each (`docker/postgres/init.sql`). Replay and backtest runs write a per-run SQLite file with the same schema, so runs are self-contained. Times stored in UTC; reports shown in ET.
+
+**Writers by container:** `trader-core` writes every table except `news_items` and `event_flags` (written by `news-sentiment`) and inbound commands (written by `notifier` into `outbox`). Backups and Grafana use the read-only role.
+
+**Outbox bus (cross-container):** table `journal.outbox` (id, created_at, source, channel, payload JSONB, consumed_at). Channels: `news_flags` (news → core), `outbound_msg` (core → notifier), `inbound_cmd` (notifier → core), `heartbeat` (all). A trigger enforces which role may publish on which channel and issues `NOTIFY`.
 
 | Table | Key columns | Written by |
 | --- | --- | --- |
