@@ -1,0 +1,92 @@
+# Data Specification
+
+**Version:** 1.0 (September 30, 2026) · Companion to [REQUIREMENTS.md](REQUIREMENTS.md)
+
+Defines every external data source, how often it is called, the internal tables the agents write, and the exact definition of every indicator used in the playbook. Endpoint paths should be verified against each provider's current docs during the build.
+
+---
+
+## 1. External sources
+
+| Source | What we use | Endpoint / method | Frequency | Budget |
+| --- | --- | --- | --- | --- |
+| Alpaca Market Data (free, IEX) | Real-time 1-min bars, trades, quotes for 10 tickers + SPY, QQQ, SMH | WebSocket `wss://stream.data.alpaca.markets/v2/iex` | Streaming 9:25–4:05 | 13 of 30 stream symbols |
+| Alpaca Market Data | Historical daily and 1-min bars (back-fill, backtests) | REST `GET /v2/stocks/bars` | After close; on reconnect | Under 200 calls/min |
+| Alpaca Trading API | Account, positions, orders, calendar, clock | REST `/v2/account`, `/v2/positions`, `/v2/orders`, `/v2/calendar`, `/v2/clock` | Reconcile every minute | Low |
+| Finnhub | Company news, earnings calendar, company profile (market cap) | REST `company-news`, `calendar/earnings`, `stock/profile2` | News every 15 min; calendar daily; profile weekly | ~10 calls per cycle; under 60/min |
+| SEC EDGAR | Recent filings (8-K), shares outstanding | `data.sec.gov/submissions/CIK##########.json`, `companyfacts` | Every 15 min (filings); weekly (facts) | Fair-access; set User-Agent to name + email |
+| Reddit (PRAW) | Posts and comment counts mentioning the tickers | r/stocks, r/investing, r/wallstreetbets, r/StockMarket search | Every 15 min | Under 100 queries/min; non-commercial |
+| Macro calendar | CPI, jobs report, FOMC dates | Published BLS and Federal Reserve schedules, entered in config yearly | Yearly, checked monthly | — |
+
+**Data quality rules**
+
+- DQ-1: Every record stores `source`, `received_at` and `event_time`. Agents use `event_time`; staleness uses `received_at`.
+- DQ-2: IEX-only data means partial volume. RVOL and volume filters always compare IEX volume with IEX history, never with consolidated figures from other sites.
+- DQ-3: Bars with zero volume or prices more than 5% from the prior bar are flagged and excluded until confirmed by the next bar.
+- DQ-4: All fetched text (news, posts, filings) is untrusted. It is stored raw, but only cleaned text (no URLs, no markup, truncated to 2,000 characters) is ever passed to Qwen.
+- DQ-5: Gaps found on reconnect are back-filled from REST within 2 minutes; until then, indicators depending on them are marked incomplete and block entries.
+
+---
+
+## 2. Indicator definitions
+
+All intraday indicators reset at 9:30 ET and use regular-session bars only.
+
+| Indicator | Definition |
+| --- | --- |
+| VWAP | Σ(typical price × volume) / Σ(volume) from 9:30, typical price = (high + low + close) / 3, on 1-min bars |
+| Opening range (OR5, OR15) | High and low of 9:30–9:35 and 9:30–9:45 |
+| RVOL (time of day) | Cumulative volume since 9:30 ÷ average cumulative volume at the same minute over the last 20 sessions |
+| ATR(5-min) | 14-period Wilder ATR on 5-min bars, carried across days |
+| ATR(14-day) | 14-period Wilder ATR on daily bars |
+| EMA 9 / 20 (intraday) | On 5-min bars, carried across days |
+| EMA 20 / 50 (daily) | On daily closes |
+| Pre-market high / low | From 4:00–9:30 bars if the free feed provides them; otherwise marked unavailable and setups using them are disabled |
+| Gap % | (Today's open − prior close) / prior close |
+| Relative strength vs QQQ | Stock % change from open − QQQ % change from open |
+| Day range position | (Close − low of day) / (high of day − low of day) |
+| R (risk unit) | Entry − stop, per share |
+
+The existing alert-bot indicators (RSI, MACD, Bollinger, Keltner, OBV, CMF) are computed and stored for the strategy and review agents to read, but no playbook trigger depends on them in v1.
+
+---
+
+## 3. Journal tables
+
+SQLite in v1 (single file, WAL mode), Postgres when moving to a VM. Times stored in UTC; reports shown in ET.
+
+| Table | Key columns | Written by |
+| --- | --- | --- |
+| `config_snapshots` | id, effective_date, yaml_hash, yaml_text | A10 at start |
+| `universe` | effective_date, ticker, rank, market_cap, on_owner_list | A1 |
+| `bars_1m`, `bars_1d` | ticker, ts, o, h, l, c, v, vwap, source | A2 (Parquet for history) |
+| `levels` | date, ticker, prior_high, prior_low, prior_close, pm_high, pm_low, ema20d, ema50d, atr14d | A4 |
+| `news_items` | id, ticker, source, published_at, headline, cleaned_text, finbert_score | A3 |
+| `event_flags` | date, ticker, flag (EARNINGS_TODAY, EARNINGS_3D, NEW_8K, RATING_CHANGE, SOCIAL_SPIKE, FOMC, CPI), detail | A3 |
+| `game_plans` | id, date, window, ticker, setup, trigger, stop, target, notes, off_limits[] | A5 |
+| `setups` | id, ts, ticker, style, window, setup_name, trigger, stop, t1, t2, score, filters_json | A4 |
+| `proposals` | proposal_id, setup_id, json, valid, model, prompt_version, latency_ms, tokens | A5 |
+| `reviews` | proposal_id, verdict, main_risk, rules_broken[], json | A6 |
+| `compliance_checks` | proposal_id, result, locks_found[] | A12 |
+| `decisions` | proposal_id, result (APPROVE/REJECT/NEEDS_APPROVAL), reason_code, qty, risk_usd, checklist_json | A7 |
+| `approvals` | proposal_id, sent_at, answered_at, answer | A7 / WhatsApp |
+| `orders` | client_order_id, alpaca_id, proposal_id, leg, type, qty, limit, stop, status, ts | A8 |
+| `fills` | alpaca_id, ts, qty, price | A8 |
+| `positions` | position_id, ticker, style, opened_at, closed_at, qty, avg_entry, avg_exit, pnl, r_multiple, exit_reason | A8 / A9 |
+| `tax_lots` | lot_id, ticker, acquired_at, qty, cost, adjusted_basis, disposed_at, proceeds, disallowed_loss, wash_link_lot_id | A12 |
+| `locks` | ticker, lock_type (WASH, EARNINGS, LOSS_STREAK, REVENGE), from, until, reason | A12 / A7 |
+| `daily_metrics` | date, trades, wins, losses, pnl, peak_pnl, max_dd, expectancy_r, rule_breaches | A11 |
+| `llm_calls` | id, agent, prompt_version, input_hash, output, valid, latency_ms, tokens | ollama client |
+| `incidents` | id, ts, type, detail, resolved_at | A10 |
+
+**Retention:** journal kept for 7 years (tax records). Raw news text may be pruned after 90 days; headlines and scores are kept.
+
+---
+
+## 4. Message types (event bus)
+
+All are Pydantic models in `src/trader/models/`, serialized to the journal before delivery.
+
+`BarClosed` · `LevelsReady` · `EventFlagsUpdated` · `GamePlanPublished` · `SetupTriggered` · `TradeProposal` · `Review` · `ComplianceResult` · `Decision` · `ApprovalRequest` / `ApprovalResponse` · `OrderSubmitted` · `OrderFilled` · `OrderCancelled` · `PositionOpened` · `StopMoved` · `PositionClosed` · `LockCreated` · `LimitHit` · `KillSwitch` · `HealthStatus` · `ReportPublished`
+
+The `TradeProposal` schema is defined in [AGENT_PROMPTS.md](AGENT_PROMPTS.md#5-tradeproposal-schema).

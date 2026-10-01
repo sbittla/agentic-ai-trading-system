@@ -1,0 +1,66 @@
+# Decision Log
+
+**Version:** 1.0 (September 30, 2026)
+
+Short records of the main design decisions, so later changes can see why things are the way they are. New decisions are appended; superseded ones are marked, not deleted.
+
+| ID | Date | Decision | Status |
+| --- | --- | --- | --- |
+| ADR-001 | 2026-09-30 | Broker: Alpaca | Accepted |
+| ADR-002 | 2026-09-30 | Model: Qwen, local, in Docker via Ollama | Accepted |
+| ADR-003 | 2026-09-30 | Data: free sources only (Alpaca IEX, Finnhub, EDGAR, Reddit) | Accepted |
+| ADR-004 | 2026-09-30 | Universe: fixed owner list of 10 large caps | Accepted |
+| ADR-005 | 2026-09-30 | Trade only the first and last hour | Accepted |
+| ADR-006 | 2026-09-30 | Only code can size and place orders | Accepted |
+| ADR-007 | 2026-09-30 | Strict wash-sale policy by default | Accepted |
+| ADR-008 | 2026-09-30 | Long only in v1 | Accepted |
+| ADR-009 | 2026-09-30 | One service with an event bus, not one container per agent | Accepted |
+
+---
+
+### ADR-001 Broker: Alpaca
+
+**Context:** Webull's API needs a paid market data subscription; Robinhood's agent access is MCP-based and less controllable from custom code.
+**Decision:** Alpaca for paper and live trading.
+**Consequences:** Free $100K paper account, commission-free stocks, official Python SDK, bracket orders. Bracket orders require whole shares and regular hours only.
+
+### ADR-002 Model: Qwen in Docker
+
+**Context:** Cost and privacy; the owner already runs models locally.
+**Decision:** Qwen3 (14B default, 8B fallback) served by the Ollama Docker image, JSON-constrained output at temperature 0.
+**Consequences:** No per-call cost. Reasoning is weaker than large commercial models, so the rules, checklist and code validation carry the decisions; Qwen filters and explains. GPU memory and uptime become operational concerns.
+
+### ADR-003 Free data only
+
+**Decision:** Alpaca free feed (IEX real-time), Finnhub, SEC EDGAR, Reddit.
+**Consequences:** IEX is one exchange, so volume is partial; RVOL is always measured against the same feed. Upgrade path: Alpaca Algo Trader Plus ($99/month) if replays show IEX data hurts entries.
+
+### ADR-004 Fixed list of 10 stocks
+
+**Decision:** Trade only the owner's list (top 10 by market cap at the start). A1 reports changes weekly but never edits the list.
+**Consequences:** Deep liquidity and tight spreads; the agents learn a small set well. Wash-sale locks bite harder on a small list (see ADR-007).
+
+### ADR-005 First and last hour only
+
+**Decision:** Entries 9:35–10:15 and 3:00–3:40 (swing 3:30–3:50); morning trades closed by 10:30, day trades by 3:55.
+**Consequences:** Trades the highest-volume periods; avoids midday chop; fewer trades. Morning time stop may cut some winners early (open question: allow to 11:00?).
+
+### ADR-006 Only code can trade
+
+**Decision:** Qwen agents produce proposals, reviews and summaries. The risk manager (code) runs the checklist, sizes and approves; only the execution agent (code) calls the broker.
+**Consequences:** A model error or prompt injection cannot place an order. Some good trades will be skipped by strict rules; that is accepted.
+
+### ADR-007 Strict wash-sale policy
+
+**Decision:** 31-day lock on a ticker after any loss; strict year-end rule; balanced and year-end-only policies available by config.
+**Consequences:** Zero wash sales in this account, at the cost of fewer tradable tickers after losses. Policy to be confirmed with a tax advisor.
+
+### ADR-008 Long only
+
+**Decision:** No short selling in v1.
+**Consequences:** Simpler margin and borrow handling; no trades on down days unless a long setup with relative strength appears.
+
+### ADR-009 One service with an event bus
+
+**Decision:** All agents run in one Python process communicating through typed, journaled events.
+**Consequences:** Shared state is simple and fast; replay testing is straightforward. Agents can be split out later because messages are already typed.

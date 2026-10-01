@@ -1,0 +1,123 @@
+# AIAgentsTrading configuration (example with v1 defaults)
+# Copy to config/config.yaml. Loaded once at start; changes take effect the next trading day.
+# Rule IDs refer to docs/REQUIREMENTS.md. See docs/CONFIG_REFERENCE.md for every field.
+
+mode:
+  environment: paper            # paper | live
+  day_trades: approve           # paper | approve | auto
+  swing_trades: approve         # paper | approve | auto
+
+universe:                       # UR-1: the only tickers that can ever be traded
+  tickers: [NVDA, AAPL, GOOGL, MSFT, AMZN, TSM, SPCX, META, AVGO, TSLA]
+  context_symbols: [SPY, QQQ, SMH]  # watched, never traded
+  substantially_identical:      # WS-4: treated as one ticker for wash sales
+    GOOGL: [GOOG]
+  correlated_groups:            # max open per group
+    semis: {tickers: [NVDA, AVGO, TSM], max_open: 1}
+  min_history_days: 60          # UR-3
+
+windows:                        # US Eastern; TW-1 forbids entries before 09:35 or after 15:50
+  morning:
+    observe_from: "09:30"
+    entries_from: "09:35"
+    entries_until: "10:15"
+    flatten_at: "10:30"
+  afternoon:
+    entries_from: "15:00"
+    day_entries_until: "15:40"
+    swing_entries_from: "15:30"
+    swing_entries_until: "15:50"
+    flatten_at: "15:55"
+  macro_days:
+    cpi_jobs_morning_entries_from: "09:45"   # TW-5
+    skip_afternoon_on_fomc: true
+  macro_calendar_file: config/macro_calendar_2026_2027.yaml
+
+filters:                        # MF-1 .. MF-5
+  qqq_above_vwap_required: true
+  qqq_max_day_drop_pct: 1.0
+  smh_check_for: [NVDA, AVGO, TSM]
+  min_rvol: 1.5
+  max_spread_pct: 0.05
+  halt_lookback_min: 10
+
+entries:
+  max_chase_atr5: 0.25          # checklist item 6
+  max_day_stop_atr5: 1.0        # checklist item 7
+  min_t1_r: 1.5                 # checklist item 8
+  min_reward_risk: 2.0
+  min_confidence: 0.6
+  unplanned_size_factor: 0.5    # DR-7
+  cancel_unfilled_after_min: 3  # EX-3
+  cancel_if_runs_atr5: 0.5
+  limit_offset_pct: 0.03        # marketable limit offset above trigger
+
+exits:
+  day:
+    t1_r: 1.0
+    t1_fraction: 0.5
+    trail: ema9_5m               # or last_higher_low
+    time_stop_min: 15
+    time_stop_min_progress_r: 0.5
+  swing:
+    t1_r: 1.5
+    t1_fraction: 0.5
+    trail: ema10_1d
+    max_hold_days: 10
+    exit_before_earnings: true
+
+risk:                           # section 6; read-only to all agents
+  risk_per_trade_pct: 0.5
+  drawdown_risk_per_trade_pct: 0.25
+  drawdown_trigger_pct: 3.0     # RC-1
+  max_trades_per_day: 3
+  max_trades_morning: 2
+  max_trades_afternoon: 1
+  daily_loss_limit_pct: 1.5
+  stop_after_consecutive_losses: 2
+  weekly_loss_limit_pct: 3.0
+  monthly_drawdown_limit_pct: 6.0
+  profit_giveback_pct: 50       # after at least +1R on the day
+  max_open_positions: 3
+  max_open_day_trades: 2
+  max_position_pct: 25
+  max_leverage: 1.0             # SR-2
+  revenge_cooldown_min: 10      # DR-3
+  ticker_loss_streak_lock: {losses: 3, days: 5}   # RC-4
+  setup_disable_after_trades: 20                 # RC-3
+
+wash_sale:                      # section 7
+  policy: strict                # strict | balanced | year_end_only
+  lock_days: 31
+  balanced_min_loss_r: 0.5
+  year_end_strict_from: "12-01"
+
+data:
+  alpaca_feed: iex
+  stale_after_sec: 60
+  news_poll_min: 15
+  reddit_subreddits: [stocks, investing, wallstreetbets, StockMarket]
+  sec_user_agent: "AIAgentsTrading your-name your-email@example.com"
+
+llm:
+  provider: ollama
+  base_url: http://ollama:11434
+  model: qwen3:14b              # pin an exact tag in production
+  temperature: 0
+  timeout_sec: 60
+  retries: 1
+  max_context_tokens: 8192
+  prompt_versions: {a03: v1, a05_plan: v1, a05_proposal: v1, a06: v1, a11: v1}
+
+notifications:
+  whatsapp_enabled: true
+  approval_timeout_sec: 90      # unanswered approval = no trade
+
+storage:
+  journal_url: sqlite:///data/journal.db
+  bars_path: data/bars
+  backup_path: D:/Backups/AIAgentsTrading
+
+# Secrets are NOT stored here. Set them as environment variables (see docs/RUNBOOK.md):
+# ALPACA_PAPER_KEY, ALPACA_PAPER_SECRET, ALPACA_LIVE_KEY, ALPACA_LIVE_SECRET,
+# FINNHUB_TOKEN, REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, TWILIO_SID, TWILIO_TOKEN, WHATSAPP_TO

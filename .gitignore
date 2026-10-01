@@ -1,0 +1,13 @@
+# Secrets and local config
+.env
+config/config.yaml
+
+# Runtime data (journal, bars, reports)
+data/
+reports/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

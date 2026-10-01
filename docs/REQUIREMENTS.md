@@ -1,0 +1,500 @@
+# Trading Agents: Requirements Specification
+
+**Version:** 1.1 (September 30, 2026)
+**Owner:** Srinivasa Rao Bittla
+**Status:** Draft for build
+
+The system trades only a fixed list of 10 large-cap US stocks, through Alpaca, using free data and a Qwen model running locally in Docker. It trades only in the first hour and the last hour of the session, and only when an A-grade entry exists: **no setup, no trade**. It runs in paper mode first and never places an order that skips the risk manager.
+
+> No system can guarantee it will not lose money. These requirements are built to make losses small, rare and capped, and to stop trading before a bad day becomes a bad month. This is a design for personal research and automation, not financial or tax advice.
+
+**Related documents:** [Architecture](ARCHITECTURE.md) · [Data spec](DATA_SPEC.md) · [Agent prompts](AGENT_PROMPTS.md) · [Config reference](CONFIG_REFERENCE.md) · [Test plan](TEST_PLAN.md) · [Runbook](RUNBOOK.md) · [Decisions](DECISIONS.md)
+
+### What changed in 1.1
+
+- Trading windows: entries and exits only in the first hour (9:30–10:30 AM ET) and last hour (3:00–4:00 PM ET).
+- A day-trader playbook: pre-market preparation, named setups per window, an entry checklist, exit rules.
+- A no-trade rule: no qualifying entry means no trade, and the system logs why.
+- Capital-protection rules: daily, weekly and monthly loss limits, loss-streak stops, no averaging down, size reduction in drawdowns.
+- A wash-sale prevention process and a new agent, A12 Compliance guard.
+- A daily operating process from 7:00 AM preparation to the 4:30 PM review, plus weekly and monthly reviews.
+
+---
+
+## Contents
+
+1. [Scope and decisions](#1-scope-and-decisions)
+2. [Trading universe](#2-trading-universe)
+3. [Trading windows](#3-trading-windows)
+4. [Daily operating process](#4-daily-operating-process)
+5. [Day-trader playbook](#5-day-trader-playbook)
+6. [Discipline and capital protection](#6-discipline-and-capital-protection)
+7. [Wash-sale prevention process](#7-wash-sale-prevention-process)
+8. [Agent roster](#8-agent-roster)
+9. [Requirements per agent](#9-requirements-per-agent)
+10. [Shared requirements](#10-shared-requirements)
+11. [Acceptance tests](#11-acceptance-tests)
+12. [Open questions](#12-open-questions)
+13. [Sources](#13-sources)
+
+---
+
+## 1. Scope and decisions
+
+| Decision | Choice | Why it matters |
+| --- | --- | --- |
+| Broker | Alpaca (paper first, then live) | Official API, $100K paper account, commission-free stocks |
+| Model | Qwen in Docker (Ollama), on the local machine | No API cost; structured JSON output is supported; reasoning is weaker than paid models, so rules carry more weight |
+| Data | Free sources only | Alpaca free feed (IEX), Finnhub, SEC EDGAR, Reddit |
+| Universe | The owner's fixed list of 10 large-cap stocks (section 2) | Very liquid, tight spreads, heavy news coverage; fits Alpaca's 30-symbol free stream |
+| Trading hours | First hour and last hour only | Most volume and the cleanest moves; avoids the midday chop |
+| Styles | Day trades (primary) and swing trades (secondary) | Each trade is tagged one or the other at entry and managed by that style's rules |
+| Direction | Long only to start | Shorting adds borrow and margin rules; add later if wanted |
+| Default action | No trade | A trade happens only when every checklist item passes |
+
+**Out of scope for v1:** options, shorting, crypto, any stock outside the list, Webull, Robinhood.
+
+---
+
+## 2. Trading universe
+
+The system trades **only the 10 stocks on the owner's list**. The list lives in config and changes only when the owner edits it. Starting list (top 10 US-listed by market cap, September 29, 2026):
+
+| # | Ticker | Company | Market cap (Sep 29, 2026) |
+| --- | --- | --- | --- |
+| 1 | NVDA | Nvidia | $5.49T |
+| 2 | AAPL | Apple | $4.81T |
+| 3 | GOOGL | Alphabet (Class A only) | $4.17T |
+| 4 | MSFT | Microsoft | $3.78T |
+| 5 | AMZN | Amazon | $2.66T |
+| 6 | TSM | Taiwan Semiconductor (ADR) | $2.37T |
+| 7 | SPCX | SpaceX | $1.97T |
+| 8 | META | Meta Platforms | $1.88T |
+| 9 | AVGO | Broadcom | $1.70T |
+| 10 | TSLA | Tesla | $1.39T |
+
+**Context symbols (watched, never traded):** SPY, QQQ, SMH. They tell the agents whether the market and the chip sector are with or against a trade.
+
+### Universe rules
+
+- **UR-1:** Trade only tickers on the config list. Any proposal for another ticker is rejected and logged.
+- **UR-2:** One share class per company (GOOGL, never GOOG; they are treated as the same stock for wash sales).
+- **UR-3:** Each ticker must be tradable on Alpaca and have at least 60 trading days of history. SPCX must be checked against this rule.
+- **UR-4:** Every Sunday, A1 reports the current top 10 by market cap next to the owner's list and flags differences. It never changes the list on its own.
+- **UR-5:** Store the list with its effective date so backtests use the list that was active at the time.
+
+---
+
+## 3. Trading windows
+
+All times are US Eastern. Outside the windows, the system places no new orders except protective exits.
+
+| Window | Time | What is allowed |
+| --- | --- | --- |
+| Opening noise | 9:30–9:35 | Observe only. Build the opening range. No entries. |
+| **Morning window** | **9:35–10:30** | Day-trade entries 9:35–10:15; manage and exit. |
+| Morning exit deadline | 10:30 | Every morning day trade is closed by 10:30. |
+| Midday | 10:30–3:00 | No new entries. Broker-side stops on swing positions stay active. |
+| **Afternoon window** | **3:00–4:00** | Day-trade entries 3:00–3:40; swing entries 3:30–3:50; manage and exit. |
+| Afternoon exit deadline | 3:55 | Every day trade is closed by 3:55. |
+
+- **TW-1:** Window times are config values, but no entry can be configured inside 9:30–9:35 or after 3:50.
+- **TW-2:** A morning trade that hits neither stop nor target is closed at 10:30 with a marketable limit order (time stop).
+- **TW-3:** Swing trades enter only in the afternoon window, near the close, so the daily candle is nearly complete.
+- **TW-4:** Half days (early 1:00 PM close): only the morning window runs.
+- **TW-5:** Scheduled high-impact events: on CPI and jobs-report days (8:30 AM releases) the morning entries start at 9:45 instead of 9:35; on FOMC days the afternoon window is skipped entirely.
+
+---
+
+## 4. Daily operating process
+
+The system follows the same process every trading day. Each step writes to the journal.
+
+| Time (ET) | Step | Owner agent | Output |
+| --- | --- | --- | --- |
+| 7:00 AM | Health check: Alpaca, data, Qwen container, clock, account | A10 | Go / no-go for the day |
+| 7:15 AM | Load overnight news, 8-K filings, earnings calendar, macro calendar | A3 | Event flags per ticker |
+| 8:00 AM | Mark key levels per ticker: prior day high, low, close; pre-market high and low; 20/50-day EMAs | A4 | Level map |
+| 9:00 AM | Build the **game plan**: which tickers are in play, the setup to watch, the trigger price, the stop and the target; which tickers are off-limits today (earnings, wash-sale lock, loss streak) | A5 + A12 | Game plan (sent to WhatsApp) |
+| 9:30–9:35 | Observe; build the opening range | A2, A4 | Opening range per ticker |
+| 9:35–10:30 | Morning window: trade only game-plan setups that trigger | A4–A9 | Trades or "no trade" log |
+| 10:30 | Flatten morning day trades; morning summary | A9, A11 | Morning P&L |
+| 2:45 PM | Refresh game plan for the afternoon | A5 | Afternoon plan |
+| 3:00–4:00 | Afternoon window | A4–A9 | Trades or "no trade" log |
+| 3:55 PM | Flatten all day trades | A9 | Flat book (except swing) |
+| 4:30 PM | Daily review: each trade graded A/B/C, rule breaches, missed setups | A11 | Daily report |
+| Friday 5:00 PM | Weekly review: expectancy per setup, per ticker, per window | A11 | Weekly report; setups with negative expectancy go back to paper |
+| Month end | Monthly review, tax lot and wash-sale report | A11, A12 | Monthly report |
+
+---
+
+## 5. Day-trader playbook
+
+The agents analyze like a disciplined professional day trader: they plan before the open, trade only defined setups at defined levels, size from the stop, and cut losers fast.
+
+### 5.1 Market and stock filters (must pass before any setup is considered)
+
+- **MF-1 Market:** For long trades, QQQ is above its VWAP and not down more than 1% on the day. If QQQ is below VWAP, only A+ setups with relative strength are allowed (stock above VWAP while QQQ is below).
+- **MF-2 Sector:** For NVDA, AVGO and TSM, SMH must also be above VWAP.
+- **MF-3 Stock in play:** Relative volume (RVOL) at least 1.5 for the time of day, measured against the same IEX feed's history.
+- **MF-4 Spread:** Bid-ask spread under 0.05% of price at the moment of entry.
+- **MF-5 Clean data:** No trading halt, no stale data, no limit-up/limit-down band in the last 10 minutes.
+
+### 5.2 Morning setups (9:35–10:15 entries)
+
+| Setup | Trigger | Stop | Notes |
+| --- | --- | --- | --- |
+| Opening range breakout (ORB) | 5-minute candle closes above the 5- or 15-minute opening-range high with RVOL ≥ 1.5 | Below the opening-range low, or the midpoint if the range is wider than 1 ATR(5-min) | Strongest when the stock gapped up on news |
+| Gap-and-go | Gap up ≥ 1% on news holds above the pre-market high after the first 5 minutes | Below the pre-market high or the first 5-minute low | Skip if the gap is over 3x ATR(14-day) (exhaustion risk) |
+| VWAP reclaim | Stock dips below VWAP then a 5-minute candle closes back above with rising volume | Below the low of the dip | Needs MF-1 to pass |
+| First pullback | After a strong first move, first pullback to VWAP or the 9-EMA on the 5-minute chart holds | Below the pullback low | Entry on the break of the pullback candle's high |
+
+### 5.3 Afternoon setups (3:00–3:40 day entries; 3:30–3:50 swing entries)
+
+| Setup | Trigger | Stop | Notes |
+| --- | --- | --- | --- |
+| Power-hour breakout | Break of the high of day after 3:00 with RVOL rising | Below the last 15-minute higher low | Trend days only (above VWAP most of the day) |
+| VWAP trend continuation | Pullback to VWAP holds in an up-trend day; 5-minute candle closes off VWAP | Below VWAP by 0.25 ATR(5-min) | |
+| Swing: close near high | Daily candle closing in the top 25% of its range, above the 20-day EMA, after a pullback to the 20/50-day EMA | Below the swing low, or 1.5x ATR(14-day) | Swing entries only; held overnight |
+| Swing: base breakout | Close above a 20-day high with daily volume above average | Below the breakout level by 0.5 ATR(14-day) | Swing entries only |
+
+### 5.4 Entry checklist (every item must pass, or there is no trade)
+
+1. Ticker is on the list and not locked (earnings, wash-sale, loss-streak, kill switch).
+2. Inside an entry window.
+3. Market, sector and stock filters pass (MF-1 to MF-5).
+4. The setup is one of the named playbook setups and was on the game plan, or is flagged as unplanned (unplanned trades use half size).
+5. Trigger has actually fired on a closed candle; no anticipation.
+6. Entry price is no more than 0.25 ATR(5-min) above the trigger: **never chase**.
+7. Stop is at a structural level and no wider than 1 ATR(5-min) for day trades.
+8. First target is at least 1.5R away and the path to it is clear of the prior day high or other resistance; the overall reward-to-risk is at least 2:1.
+9. Review agent (A6) agrees.
+10. Risk manager (A7) approves the size and every limit.
+
+- **NT-1 No setup, no trade:** If no checklist passes in a window, the system places no order and logs "no qualifying setup" with the closest candidate and the item that failed.
+- **NT-2 No forcing:** There is no minimum trade count. Zero-trade days are normal and are not a failure.
+
+### 5.5 Entry execution
+
+- **EX-1:** Entries use limit orders at the trigger price plus a small offset (marketable limit), never market orders.
+- **EX-2:** Every entry is a bracket order so the stop sits at Alpaca from the moment of fill.
+- **EX-3:** Unfilled day-trade entries are cancelled after 3 minutes or when price moves 0.5 ATR(5-min) past the trigger.
+- **EX-4:** To scale out, the position is split into two bracket orders: half with a target at 1R, half with a target at the final target.
+
+### 5.6 Exit rules
+
+| Rule | Day trades | Swing trades |
+| --- | --- | --- |
+| Hard stop | At the broker from entry; never moved down | Same |
+| First target | Half off at 1R; move the stop on the rest to break-even | Half off at 1.5R |
+| Trail | Remaining half trails under the 9-EMA (5-minute) or the last higher low | Trails under the 10-day EMA |
+| Failed-trade exit | Exit if a 5-minute candle closes back below VWAP or the breakout level | Exit on a daily close below the 20-day EMA |
+| Time stop | Exit if not at +0.5R within 15 minutes; hard exit at 10:30 or 3:55 | Exit after 10 trading days if neither stop nor target hit |
+| Event exit | — | Close before an earnings release |
+
+---
+
+## 6. Discipline and capital protection
+
+These rules are hard limits enforced by code (A7). No agent and no prompt can change them; only the owner can, by editing config, and changes take effect the next trading day.
+
+### 6.1 Loss limits
+
+| Limit | Value | What happens |
+| --- | --- | --- |
+| Risk per trade | 0.5% of equity (0.25% during drawdown, see 6.3) | Size is computed from it |
+| Max trades per day | 3 (2 morning, 1 afternoon) | No more entries that day |
+| Daily loss limit | 1.5% of equity, realized + open | Flatten day trades, no more entries today |
+| Two losses in a row | Same day | Stop trading for the rest of the day |
+| Weekly loss limit | 3% of equity | Paper trading only until Monday |
+| Monthly drawdown limit | 6% from the month's peak | Live trading stops; paper only until the owner reviews and re-enables |
+| Profit give-back | Day's P&L falls 50% from its peak (after at least +1R) | Stop trading for the day |
+| Max open positions | 3 (no more than 2 day trades) | |
+| Max one position | 25% of equity | |
+| Correlated names (NVDA, AVGO, TSM) | Max 1 open at once | |
+| Margin | Never more than 1x equity | Even when buying power allows more |
+
+### 6.2 Behaviour rules
+
+- **DR-1 Never average down.** No adding to a losing position, ever.
+- **DR-2 Never widen a stop.** A stop can only move toward profit.
+- **DR-3 No revenge trades.** After a loss, the same ticker is locked for the rest of the window; after a stop-out, the next entry anywhere needs a 10-minute cooldown.
+- **DR-4 One trade per ticker per window.** Re-entering the same ticker in the same window is not allowed.
+- **DR-5 Add only to winners**, and only after the first target is hit, with the stop on the whole position at break-even or better.
+- **DR-6 No overnight day trades.** A day trade can never be converted into a swing trade to avoid taking a loss.
+- **DR-7 Unplanned trades at half size.** Setups not in the morning game plan trade at half risk.
+- **DR-8 Manual overrides are logged.** Any trade the owner forces through the kill switch or approval flow is tagged and reported separately.
+
+### 6.3 Drawdown and recovery
+
+- **RC-1:** When equity is 3% or more below its high-water mark, risk per trade halves to 0.25%.
+- **RC-2:** Full size returns only after a new equity high, or 10 trades with positive expectancy at reduced size.
+- **RC-3:** Any setup with negative expectancy over its last 20 trades is disabled for live trading and returns to paper.
+- **RC-4:** A ticker with 3 losing trades in a row is locked for 5 trading days.
+
+### 6.4 Performance standards (measured weekly)
+
+| Metric | Minimum to keep trading live |
+| --- | --- |
+| Expectancy per trade | > 0 after fees and slippage, over the last 30 trades |
+| Profit factor | ≥ 1.3 |
+| Average win / average loss | ≥ 1.5 |
+| Rule breaches | 0 |
+| Max drawdown | Inside the 6% monthly limit |
+
+---
+
+## 7. Wash-sale prevention process
+
+A wash sale happens when a stock is sold at a loss and the same or a substantially identical stock is bought within 30 days before or after the sale (a 61-day window). The loss is not deductible then; it is added to the cost basis of the replacement shares. Trading the same 10 stocks every day makes wash sales very likely unless the system manages them. The goal is **zero permanently lost deductions and as few wash sales as possible**.
+
+### 7.1 Rules
+
+- **WS-1 Loss lock (default policy):** After a position in a ticker is closed at a loss, that ticker is locked for new entries for 31 calendar days. Profitable exits create no lock.
+- **WS-2 Look-back check:** Before any entry, A12 checks the last 30 days for realized losses in that ticker; if found, the entry is blocked.
+- **WS-3 Look-forward check:** Before closing a position at a loss, A12 checks whether shares of that ticker were bought in the 30 days before (other open lots). If so, it flags the exit so the owner knows a wash sale will occur.
+- **WS-4 Substantially identical:** GOOGL and GOOG are treated as one ticker. Options on a locked ticker are also locked (options are out of scope in v1, but the rule stands).
+- **WS-5 Year-end hard rule:** From December 1, no entry in any ticker with a realized loss in the prior 30 days, and by December 31 no open position may carry a deferred wash-sale loss into the new year.
+- **WS-6 Other accounts:** The system cannot see the owner's other accounts. The daily report lists locked tickers so the owner avoids buying them in other accounts. Buying in an IRA during the window can make the loss permanently non-deductible (IRS Revenue Ruling 2008-5).
+- **WS-7 Tax-lot tracking:** Every lot (date, size, cost, adjusted basis, disallowed loss) is stored and reconciled monthly with Alpaca's statements; A12 produces a monthly wash-sale report and a year-end export for tax software.
+
+### 7.2 Trade-off and policy options
+
+With only 10 tickers, the 31-day loss lock can leave few tickers to trade after a losing streak. The policy is a config value:
+
+| Policy | Rule | Wash sales | Tickers available |
+| --- | --- | --- | --- |
+| **Strict (default)** | 31-day lock after any loss | None | Fewer |
+| Balanced | 31-day lock only for losses over 0.5R; small losses allowed to wash (the loss is deferred into the new lot's basis, not lost) | Few, deferred only | More |
+| Year-end only | No lock until December; strict from December 1 | Many, deferred | All |
+
+- **WS-8:** In every policy, WS-5 (year-end) and WS-6 (IRA warning) always apply.
+- **WS-9:** The owner should confirm the policy with a tax advisor. A trader who qualifies for trader tax status and elects mark-to-market accounting (Section 475(f)) is not subject to wash-sale rules; that is a tax decision outside this system.
+
+---
+
+## 8. Agent roster
+
+Twelve agents: four use Qwen, eight are plain code. Every Qwen output is a proposal or a summary; only code can size, place or cancel an order.
+
+```mermaid
+flowchart TD
+    A1[A1 Universe<br/>fixed list + weekly check] --> A2[A2 Market data<br/>Alpaca bars and quotes]
+    A2 --> A4[A4 Technical analysis<br/>levels, setups, triggers]
+    A3[A3 News and sentiment<br/>FinBERT + Qwen]:::qwen --> A5
+    A4 --> A5[A5 Strategy<br/>game plan + trade proposal]:::qwen
+    A5 --> A6[A6 Review<br/>argues against]:::qwen
+    A6 --> A12[A12 Compliance guard<br/>wash-sale and lock checks]
+    A12 --> A7[A7 Risk manager<br/>checklist, size, limits]
+    A7 <--> YOU([You: approve on WhatsApp]):::ext
+    A7 --> A8[A8 Execution<br/>bracket orders, reconcile]
+    A9[A9 Position monitor<br/>targets, trails, time stops] <--> A8
+    A8 --> ALP([Alpaca<br/>paper or live]):::ext
+    A8 --> J[(Journal + tax lots)]
+    J --> A11[A11 Reporter<br/>daily, weekly, monthly]:::qwen
+    J --> A12
+    A10{{A10 Supervisor<br/>windows, health checks, kill switch}} -.-> A2 & A5 & A7 & A8
+    classDef qwen fill:#e3eefc,stroke:#2f6fd6
+    classDef ext stroke-dasharray: 4 4
+```
+
+| # | Agent | Type | Runs (ET) | Output |
+| --- | --- | --- | --- | --- |
+| A1 | Universe | Code | Sundays | Owner's list + top-10 comparison |
+| A2 | Market data | Code | 7:00 AM–4:15 PM | 1-min and daily bars, quotes, opening range |
+| A3 | News and sentiment | Qwen + FinBERT | 7:15 AM, then every 15 min | Sentiment and event flags per ticker |
+| A4 | Technical analysis | Code | 8:00 AM levels; every closed 1/5-min candle in windows | Levels, setups, triggers |
+| A5 | Strategy | Qwen | 9:00 AM and 2:45 PM plans; on each trigger | Game plan; trade proposal (JSON) |
+| A6 | Review | Qwen | After each proposal | Agree / disagree with reasons |
+| A7 | Risk manager | Code | After A12 | Approve / reject / needs approval |
+| A8 | Execution | Code | On approval | Bracket orders at Alpaca |
+| A9 | Position monitor | Code | Every closed 1-min candle | Partial exits, trails, time stops, flatten |
+| A10 | Supervisor | Code | Always | Windows, health checks, kill switch |
+| A11 | Reporter | Qwen | 10:30 AM, 4:30 PM, Friday, month end | Reports to WhatsApp and files |
+| A12 | Compliance guard | Code | Before every entry and loss exit; monthly | Lock decisions, wash-sale report |
+
+---
+
+## 9. Requirements per agent
+
+### A1 Universe agent
+
+- **A1-1:** Load the owner's 10-ticker list from config; reject any ticker not on it (UR-1).
+- **A1-2:** Every Sunday at 6 PM, compare the list with the current top 10 by market cap (Finnhub, cross-checked with SEC EDGAR shares outstanding) and report differences. Never change the list.
+- **Done when:** a proposal for an off-list ticker is always rejected and logged.
+
+### A2 Market data agent
+
+- **A2-1:** Stream real-time 1-minute bars and quotes for the 10 tickers plus SPY, QQQ and SMH from Alpaca's free feed (IEX); fetch daily bars after the close.
+- **A2-2:** Build the 5- and 15-minute opening ranges and VWAP from 9:30.
+- **A2-3:** Keep at least 2 years of daily bars and 60 days of 1-minute bars locally.
+- **A2-4:** Mark data stale if no update for 60 seconds in a window; stale data blocks entries.
+- **A2-5:** Note that the free feed is IEX only; RVOL is always compared with the same feed's history.
+- **Done when:** a missed message or reconnect is detected and back-filled within 2 minutes.
+
+### A3 News and sentiment agent
+
+- **A3-1:** Pull company news (Finnhub), 8-K filings (SEC EDGAR), finance subreddit posts (Reddit), the earnings calendar and the macro calendar for the 10 tickers.
+- **A3-2:** Score each item with FinBERT; use Qwen only to summarize the top items per ticker in 3 sentences or fewer.
+- **A3-3:** Flag: earnings within 3 trading days, earnings today, new 8-K, analyst rating change, unusual post volume, FOMC or CPI day.
+- **A3-4:** Treat fetched text as untrusted data; strip links and instructions; never pass raw text to the execution path.
+- **Done when:** each ticker has fresh flags (under 15 minutes old) during the windows.
+
+### A4 Technical analysis agent
+
+- **A4-1:** At 8:00 AM, compute key levels per ticker: prior day high, low and close; pre-market high and low; 20/50-day EMAs; ATR(14-day).
+- **A4-2:** In the windows, compute VWAP, 9/20 EMAs, ATR(5-min), RVOL and the existing alert-bot indicators on every closed 1- and 5-minute candle.
+- **A4-3:** Detect only the playbook setups (sections 5.2 and 5.3), each with trigger, structural stop, targets and a signal score 0–100.
+- **A4-4:** Evaluate the market and stock filters (MF-1 to MF-5) and attach pass/fail to each setup.
+- **Done when:** backtest and live produce the same setups for the same bars.
+
+### A5 Strategy agent (Qwen)
+
+- **A5-1:** At 9:00 AM and 2:45 PM, write the game plan: tickers in play, the setup to watch, trigger, stop, target, and tickers off-limits today.
+- **A5-2:** When A4 fires a trigger, return a TradeProposal in the JSON schema (section 10.1), using only numbers from its input.
+- **A5-3:** Recommend "no trade" whenever the setup is weak, and say which checklist item is weakest.
+- **A5-4:** Proposal expires after 2 minutes for day trades and at 3:50 PM for swing trades.
+- **Done when:** 100% of outputs parse against the schema (one retry, then dropped).
+
+### A6 Review agent (Qwen)
+
+- **A6-1:** Argue against each proposal with a separate prompt at temperature 0, looking for the reasons an expert would pass: chasing, resistance overhead, weak market, news risk, late in the window.
+- **A6-2:** Return agree or disagree, the main risk in one sentence, and any rule the proposal breaks.
+- **A6-3:** A disagreement drops the trade in auto mode, or sends it to the owner in approve mode.
+- **Done when:** every executed trade has a stored review.
+
+### A7 Risk manager (code)
+
+- **A7-1:** Run the full entry checklist (section 5.4) on live data; any failure rejects the trade with the item that failed.
+- **A7-2:** Size from the stop distance and the current risk-per-trade (0.5%, or 0.25% in drawdown); round down.
+- **A7-3:** Enforce every limit and behaviour rule in section 6; limits are read-only to all agents.
+- **A7-4:** Block entries outside the windows, on stale data, after the daily stop, or with the kill switch on.
+- **Done when:** a test suite proves every limit and rule blocks an order that breaks it.
+
+### A8 Execution agent (code)
+
+- **A8-1:** Place entries as marketable limit bracket orders; split into two brackets for scaling out (EX-1 to EX-4).
+- **A8-2:** Use a unique client order ID per proposal; never send the same proposal twice.
+- **A8-3:** Cancel unfilled entries after 3 minutes or when price runs 0.5 ATR(5-min) past the trigger.
+- **A8-4:** Reconcile orders and positions with Alpaca every minute and after any reconnect.
+- **Done when:** a simulated disconnect never creates a duplicate or orphan order.
+
+### A9 Position monitor (code)
+
+- **A9-1:** Apply the exit rules (section 5.6): first target, break-even stop, trail, failed-trade exit, time stops.
+- **A9-2:** Flatten morning day trades at 10:30 and all day trades by 3:55.
+- **A9-3:** Swing trades: trail under the 10-day EMA; close before earnings; exit after 10 trading days.
+- **A9-4:** Never widen a stop or add to a loser (DR-1, DR-2).
+- **Done when:** no day trade is open at 10:31 (morning trades) or 4:00 PM in a full month of paper trading.
+
+### A10 Supervisor (code)
+
+- **A10-1:** Open and close the trading windows on the NYSE calendar, including half days, holidays and FOMC days.
+- **A10-2:** Health-check Alpaca, the data stream and the Qwen container every 30 seconds; pause entries if any fails.
+- **A10-3:** Kill switch via WhatsApp or a local command: cancel open entries, block new ones, keep broker-side stops.
+- **A10-4:** Run modes per style: paper, approve-each-trade, auto.
+- **Done when:** stopping the Qwen container pauses entries within 60 seconds and sends an alert.
+
+### A11 Reporter (Qwen)
+
+- **A11-1:** 10:30 AM morning summary; 4:30 PM daily review with each trade graded A/B/C against the checklist, rule breaches, missed setups and locked tickers.
+- **A11-2:** Friday weekly review and month-end review with the performance standards (section 6.4).
+- **A11-3:** Figures come from journal queries, never from the model.
+- **Done when:** every figure in a report matches a journal query.
+
+### A12 Compliance guard (code)
+
+- **A12-1:** Before every entry, check the ticker against wash-sale locks (WS-1, WS-2, WS-4, WS-5), earnings locks, loss-streak locks and the owner's list.
+- **A12-2:** Before every loss exit, run the look-forward check (WS-3) and record the expected wash-sale effect.
+- **A12-3:** Maintain tax lots and adjusted basis (WS-7); produce the monthly wash-sale report and the year-end export.
+- **A12-4:** Publish the list of locked tickers and unlock dates every morning in the game plan.
+- **Done when:** a year of simulated trades under the strict policy produces zero wash sales, and the lot ledger matches Alpaca's statements.
+
+---
+
+## 10. Shared requirements
+
+### 10.1 TradeProposal message (A5 output)
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| proposal_id | UUID | Also used as Alpaca's client order ID |
+| ticker | string | Must be on the owner's list and not locked |
+| style | `day` or `swing` | Decides exit rules and expiry |
+| window | `morning` or `afternoon` | Must match the current window |
+| side | `buy` | Long only in v1 |
+| setup | string | One of the playbook setup names |
+| planned | boolean | Whether the setup was in the game plan |
+| trigger, entry, stop, target_1, target_2 | numbers | Within 1% of the live quote; reward-to-risk at least 2:1 |
+| confidence | 0–1 | Below 0.6 is not traded |
+| thesis | text, 3 sentences max | Shown in approvals and the journal |
+| expires_at | timestamp | 2 min for day trades; 3:50 PM for swing |
+| model, prompt_version | strings | For audit and comparison |
+
+### 10.2 Qwen model serving
+
+- **QW-1:** Run Qwen with the official Ollama Docker image, model version pinned in config (Qwen3 14B by default; 8B if the GPU has under 12 GB).
+- **QW-2:** Request JSON output by passing the Pydantic schema in Ollama's `format` field, repeat the schema in the prompt, temperature 0, then validate with Pydantic.
+- **QW-3:** 60-second timeout per call; one retry; then skip the trade (never trade without a review).
+- **QW-4:** Load the model by 9:00 AM and keep it loaded through 4:30 PM; expose a health check.
+- **QW-5:** Log every prompt, response, latency and token count to the journal.
+
+### 10.3 Data sources
+
+| Source | Used by | Free limit to respect |
+| --- | --- | --- |
+| Alpaca market data | A2, A4, A7 | 200 calls/min; 30 symbols on the stream (13 used); IEX only |
+| Finnhub | A1, A3 | About 60 calls/min; personal use |
+| SEC EDGAR | A1, A3 | Fair access; User-Agent header required |
+| Reddit (PRAW) | A3 | 100 queries/min; non-commercial |
+
+### 10.4 Account and safety
+
+- **SR-1:** Alpaca retired the pattern day trader rule on June 4, 2026; margin accounts with $2,000+ get intraday buying power and unlimited day trades. Do not use the removed `daytrade_count` and `daytrading_buying_power` API fields.
+- **SR-2:** Never use margin beyond 1x equity.
+- **SR-3:** Separate API keys for paper and live, stored outside the code and never sent to Qwen.
+- **SR-4:** Every plan, signal, proposal, review, decision, order, fill, exit, lock and override is written to the journal with timestamps.
+- **SR-5:** All settings (ticker list, windows, limits, wash-sale policy, modes, model version) live in one config file under version control; changes take effect the next trading day.
+
+---
+
+## 11. Acceptance tests
+
+The system is ready for live money only when it passes every test below in paper trading.
+
+- [ ] Runs 20 straight trading days in paper mode without manual restarts
+- [ ] At least 100 paper trades, expectancy positive after estimated fees and slippage, profit factor ≥ 1.3, max drawdown under 6%
+- [ ] Zero orders outside the trading windows (except protective exits)
+- [ ] Zero orders for tickers outside the owner's list
+- [ ] Zero orders placed without a full checklist pass and a stored risk-manager approval
+- [ ] Zero morning day trades open after 10:30 and zero day trades open after 3:55
+- [ ] Days with no qualifying setup produce no trades and a "no qualifying setup" log
+- [ ] Daily loss limit, two-loss stop and give-back rule each tested and halt trading as specified
+- [ ] Zero wash sales under the strict policy across the paper period; the lot ledger matches Alpaca
+- [ ] No stop ever moved down; no position ever added to at a loss
+- [ ] 100% of Qwen outputs parse against the schema or are cleanly dropped
+- [ ] Kill switch tested: entries cancelled and blocked within 10 seconds, broker-side stops kept
+- [ ] Every figure in the reports matches the journal
+
+## 12. Open questions
+
+- [ ] Live account size, and whether it is a margin account (the $2,000 minimum applies only to margin)
+- [ ] Confirm the 10-ticker list: keep SPCX (check its trading history) and TSM (ADR), or swap in others?
+- [ ] Confirm the loss limits: 0.5% per trade, 1.5% daily, 3% weekly, 6% monthly
+- [ ] Morning trades: hard exit at 10:30, or allow holding a winner to 11:00?
+- [ ] Wash-sale policy: strict (default), balanced or year-end only? Confirm with a tax advisor
+- [ ] Approve every trade on WhatsApp at first, or auto mode for swing trades only?
+- [ ] Machine GPU and memory, to pick Qwen 8B or 14B
+
+## 13. Sources
+
+- [Largest companies by market cap, September 2026](https://www.stocktitan.net/rankings/companies-market-cap) (StockTitan)
+- [FINRA retires the PDT rule: Alpaca's intraday margin framework](https://alpaca.markets/blog/finra-retires-the-pdt-rule-introducing-alpacas-new-intraday-margin-framework/) (Alpaca)
+- [The Intraday Margin Rule](https://docs.alpaca.markets/us/docs/the-intraday-margin-rule) (Alpaca docs)
+- [Alpaca market data plans](https://alpaca.markets/data)
+- [IRS Publication 550: wash sales](https://www.irs.gov/publications/p550)
+- [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs)
+- [Finnhub free tier](https://apicostcalc.com/finnhub.html)
+- [SEC EDGAR APIs](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)
+- [Reddit API limits 2026](https://www.socialcrawl.dev/blog/reddit-api-key-limits-alternatives-2026)
+- [Qwen3 hardware requirements](https://llmhardware.io/guides/qwen3-hardware-requirements)
