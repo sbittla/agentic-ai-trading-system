@@ -1,0 +1,2 @@
+-c base.lock
+alpaca-py>=0.30

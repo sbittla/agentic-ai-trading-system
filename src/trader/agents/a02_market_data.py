@@ -318,6 +318,7 @@ class MarketDataAgent:
         st = self.state[symbol]
         if st.open_price is None or st.hod is None or st.lod is None or st.last_price is None:
             return None
-        assert st.day is not None
+        if st.day is None:
+            return None
         return Bar(symbol=symbol, ts=et_datetime(st.day, OPEN).astimezone(ET), timeframe="1Day",
                    o=st.open_price, h=st.hod, l=st.lod, c=st.last_price, v=int(st.cum_vol))

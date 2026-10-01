@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,notifier]"
+      - name: Lint
+        run: ruff check src tests
+      - name: Type check
+        run: mypy
+      - name: Unit, contract, replay and chaos tests
+        run: pytest -q   # integration tests (real Postgres / Ollama) skip without their env vars
+      - name: Requirement coverage
+        # Every automated rule ID needs a test (enforced: the safety core is built).
+        run: python tools/check_traceability.py docs/TRACEABILITY.md tests
+      - name: Build container images
+        run: |
+          for target in core news notifier tools; do
+            docker build -f docker/Dockerfile --target $target -t agentic-ai-trading-system-$target:ci .
+          done
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

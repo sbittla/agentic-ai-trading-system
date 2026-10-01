@@ -230,8 +230,10 @@ class ExecutionAgent:
             self.journal.update(s.orders, {"broker_id": o.id}, {"status": f"canceled:{reason}"})
 
     # -- reconcile (A8-4, SEC-13) ------------------------------------------------------------
-    async def reconcile(self, expected_qty: dict[str, int]) -> list[str]:
-        """Compare broker positions with ours; flag orders the system did not place."""
+    async def reconcile(self, expected_qty: dict[str, int], known_ids: set[str] | None = None
+                        ) -> list[str]:
+        """Compare broker positions with ours; flag orders the system did not place (SEC-13).
+        After a restart, orders are recognised from the journal and the restored legs."""
         problems: list[str] = []
         try:
             positions = await self.broker.positions()
@@ -243,10 +245,18 @@ class ExecutionAgent:
             if have.get(sym, 0) != expected_qty.get(sym, 0):
                 problems.append(f"position {sym}: broker {have.get(sym, 0)} vs journal "
                                 f"{expected_qty.get(sym, 0)}")
-        known = set(self.order_index)
+        known = set(self.order_index) | (known_ids or set())
+        pids = set(self.tickets)
+        if self.journal is not None:
+            for r in self.journal.rows(s.orders):
+                if r["broker_id"]:
+                    known.add(r["broker_id"])
+                if r["proposal_id"]:
+                    pids.add(r["proposal_id"])
         for o in orders:
-            base = o.client_order_id.rsplit("-", 1)[0]
-            if o.id not in known and base not in self.tickets and o.parent_id not in known:
+            ours = (o.id in known or (o.parent_id is not None and o.parent_id in known)
+                    or any(o.client_order_id.startswith(pid) for pid in pids))
+            if not ours:
                 problems.append(f"unknown order {o.id} {o.symbol} {o.side} {o.qty} "
                                 f"(not placed by the system, SEC-13)")
         return problems

@@ -34,7 +34,8 @@ from trader.timeutil import et_date
 
 log = structlog.get_logger(__name__)
 D0 = Decimal(0)
-TOL = Decimal("0.011")   # rounding tolerance (prices are in cents)
+TOL = Decimal("0.0099")      # stops are rounded down to the cent: R can grow by < 1 cent
+TOL_ENTRY = Decimal("0.005")  # entries are rounded half-up: at most half a cent
 
 
 @dataclass
@@ -352,7 +353,7 @@ class RiskManager:
         chase = s.entry - s.trigger
         max_chase = Decimal(str(cfg.entries.max_chase_atr5)) * atr5
         runaway = s.trigger + Decimal(str(cfg.entries.cancel_if_runs_atr5)) * atr5
-        ok6 = chase <= max_chase + TOL and ctx.last_price < runaway
+        ok6 = chase <= max_chase + TOL_ENTRY and ctx.last_price < runaway
         items.append(ChecklistItem(
             id="CK-6", passed=ok6,
             detail="" if ok6 else f"{Reason.NT_CK6}: entry {s.entry} vs trigger {s.trigger} "

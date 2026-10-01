@@ -1,0 +1,10 @@
+-c base.lock
+-c core.lock
+pytest>=8
+pytest-asyncio>=0.23
+hypothesis>=6
+ruff>=0.5
+mypy>=1.10
+pip-tools>=7.4
+types-PyYAML
+pandas-stubs

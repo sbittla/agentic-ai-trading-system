@@ -10,12 +10,12 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Literal
 
 import structlog
 
-from trader.calendar import MarketCalendar, MacroCalendar
+from trader.calendar import MacroCalendar, MarketCalendar
 from trader.config import Config
 from trader.models.messages import HealthStatus
 from trader.timeutil import et_datetime, to_et

@@ -1,0 +1,5 @@
+-c base.lock
+--extra-index-url https://download.pytorch.org/whl/cpu
+praw>=7.7
+transformers>=4.44
+torch>=2.3

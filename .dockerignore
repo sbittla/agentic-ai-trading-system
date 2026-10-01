@@ -1,0 +1,22 @@
+# Keep secrets, local data and tooling out of the image build context (SEC-6, SEC-18)
+.git
+.github
+.devcontainer
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.env
+.env.*
+secrets/
+backups/
+recordings/
+runs/
+reports/
+data/
+llm_cache/
+config/config.yaml
+tests/
+docs/

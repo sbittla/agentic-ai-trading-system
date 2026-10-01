@@ -1,0 +1,21 @@
+// with Postgres and Ollama from the main Compose file.
+{
+  "name": "Agentic AI Trading System",
+  "dockerComposeFile": ["../docker/docker-compose.yml"],
+  "service": "dev",
+  "runServices": ["postgres", "ollama"],
+  "workspaceFolder": "/workspace",
+  "overrideCommand": true,
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "bierner.markdown-mermaid",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+  "postCreateCommand": "pip install -e '.[dev]' && trader validate-config --config config/config.example.yaml"
+}

@@ -13,7 +13,7 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 3. Create a Finnhub key, a Reddit "script" app, and a Twilio WhatsApp sender.
 4. Copy `config/config.example.yaml` to `config/config.yaml`; review every value in `risk` and `wash_sale`.
 5. Create one env file per container from the blocks in `.env.example` (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) and `secrets/pg_admin_password.txt`; set strong, different Postgres role passwords and put the same ones in `docker/postgres/init.sql` before first start ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
-6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen3:14b` (pin the exact tag in config).
+6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull` to download the model set in `OLLAMA_MODEL` (default `qwen3:8b`; set `OLLAMA_MODEL=qwen3:14b` with a GPU of 12 GB or more, and pin the same tag in `llm.model`). The runtime `ollama` service has no internet access (SEC-9), so it cannot pull models itself.
 7. `docker compose -f docker/docker-compose.yml run --rm trader-core trader migrate` to create the journal tables.
 8. `docker compose -f docker/docker-compose.yml up -d` to start all six services; `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
 9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works.

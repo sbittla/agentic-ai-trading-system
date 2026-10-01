@@ -108,7 +108,8 @@ class StrategyAgent:
                             off_limits=tuple(off), source="llm")
         self.plans[(d, window)] = plan
         if self.journal is not None:
-            rows = [{"date": d, "window": window, "ticker": i.ticker, "setup": i.setup,
+            rows: list[dict[str, Any]] = [
+                {"date": d, "window": window, "ticker": i.ticker, "setup": i.setup,
                      "trigger": i.trigger, "stop": i.stop, "target": i.target_1,
                      "notes": i.why, "off_limits": [list(x) for x in plan.off_limits],
                      "source": plan.source} for i in plan.watch]

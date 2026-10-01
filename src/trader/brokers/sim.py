@@ -170,7 +170,7 @@ class SimBroker:
         self._emit("new", o)
         return self._snap(o)
 
-    async def order_updates(self) -> AsyncIterator[OrderUpdate]:   # type: ignore[override]
+    async def order_updates(self) -> AsyncIterator[OrderUpdate]:
         self._streaming = True
         while True:
             yield await self._updates.get()

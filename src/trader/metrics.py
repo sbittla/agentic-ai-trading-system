@@ -6,7 +6,7 @@ Identical in replay, paper and live because every figure is a journal query (A11
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -47,7 +47,7 @@ def max_drawdown_pct(equity_curve: Iterable[float]) -> float:
         peak = e if peak is None else max(peak, e)
         if peak and peak > 0:
             worst = min(worst, (e - peak) / peak * 100)
-    return round(-worst, 3)
+    return abs(round(-worst, 3))
 
 
 def by(trades: Iterable[Mapping[str, Any]], key: str) -> dict[str, dict[str, Any]]:
@@ -57,7 +57,7 @@ def by(trades: Iterable[Mapping[str, Any]], key: str) -> dict[str, dict[str, Any
     return {k: summarize(v) for k, v in sorted(groups.items())}
 
 
-def standards(trades: list[Mapping[str, Any]], breaches: int, max_dd_pct: float,
+def standards(trades: Sequence[Mapping[str, Any]], breaches: int, max_dd_pct: float,
               monthly_limit_pct: float = 6.0) -> dict[str, Any]:
     """REQUIREMENTS §6.4 performance standards over the last 30 trades."""
     s = summarize(trades[-30:])

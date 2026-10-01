@@ -16,13 +16,14 @@ from typing import Any
 import structlog
 
 from trader.agents.a02_market_data import MarketDataAgent, SymbolState
-from trader.calendar import MarketCalendar, MacroCalendar
+from trader.calendar import MacroCalendar, MarketCalendar
 from trader.config import Config
 from trader.indicators import atr_series, day_range_position, ema_series, gap_pct
 from trader.models.messages import Bar, EventFlags, Levels, SetupTriggered
 from trader.timeutil import cents, cents_down, minutes_since_open, to_et
 
 log = structlog.get_logger(__name__)
+BELOW_HOD_SETUPS = ("VWAP_RECLAIM", "FIRST_PULLBACK", "VWAP_TREND")
 
 
 def compute_levels(ticker: str, day: date, daily: list[Bar], pm_high: float | None = None,
@@ -128,7 +129,11 @@ class TechnicalAgent:
         cap = trigger + e.max_chase_atr5 * atr5
         return cents(min(raw, cap))
 
-    def resistance(self, ticker: str, entry: float, st: SymbolState) -> float | None:
+    def resistance(self, ticker: str, entry: float, st: SymbolState, include_hod: bool = True
+                   ) -> float | None:
+        """Nearest of prior day high, pre-market high, 20-day high and - only for setups that
+        trigger below the high of day - HOD (STRATEGY_SPEC §1). A breakout's own bar is not
+        resistance."""
         lv = self.levels.get(ticker)
         cands: list[float] = []
         if lv is not None:
@@ -137,7 +142,7 @@ class TechnicalAgent:
                 cands.append(lv.pm_high)
             if lv.high20d is not None:
                 cands.append(lv.high20d)
-        if st.hod is not None:
+        if include_hod and st.hod is not None:
             cands.append(st.hod)
         above = [c for c in cands if c > entry]
         return min(above) if above else None
@@ -165,7 +170,8 @@ class TechnicalAgent:
             s += 5
         if (st.ema9_5m.value or 0) > (st.ema20_5m.value or 0):
             s += 5
-        tone = self.news.get(ticker).tone if ticker in self.news else "neutral"
+        nf = self.news.get(ticker)
+        tone = nf.tone if nf is not None else "neutral"
         s += {"positive": 10, "neutral": 5, "mixed": 5, "negative": 0}[tone]
         return int(round(max(0.0, min(s, 100.0))))
 
@@ -221,7 +227,7 @@ class TechnicalAgent:
         t2 = cents(entry + Decimal(str(t2_r)) * r)
         if t2_floor is not None and Decimal(str(t2_floor)) > t2:
             t2 = cents(t2_floor)
-        res = self.resistance(ticker, float(entry), st)
+        res = self.resistance(ticker, float(entry), st, include_hod=setup in BELOW_HOD_SETUPS)
         sc = self.score(ticker, st, float(entry), float(r), res)
         ctx = {"atr14d": (self.levels[ticker].atr14d if ticker in self.levels else None),
                "hod": st.hod, "ema9_5m": st.ema9_5m.value, "ema20_5m": st.ema20_5m.value,

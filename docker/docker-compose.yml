@@ -52,6 +52,17 @@ services:
       timeout: 10s
       retries: 3
 
+  model-pull:                           # one-off model download (RUNBOOK §1 step 6):
+    image: ollama/ollama:latest         #   docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull
+    profiles: [setup]                   # the runtime `ollama` stays on the internal network (SEC-9)
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "ollama serve >/dev/null 2>&1 & sleep 5 && ollama pull $${OLLAMA_MODEL:-qwen3:8b}"]
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [egress]
+
   trader-core:
     <<: *app
     build: {context: .., dockerfile: docker/Dockerfile, target: core}
@@ -61,6 +72,8 @@ services:
     volumes:
       - ../config:/app/config:ro
       - bars:/app/data/bars
+      - ../reports:/app/reports             # A11 report files
+      - ../recordings:/app/recordings       # recorded days for the replay library (RP-1)
     depends_on:
       postgres: {condition: service_healthy}
       ollama: {condition: service_healthy}

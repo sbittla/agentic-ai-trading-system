@@ -21,6 +21,7 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [SECURITY.md](SECURITY.md) | Threat model, WhatsApp command authentication, key management, audit |
 | [ALERT_BOT_REUSE.md](ALERT_BOT_REUSE.md) | What moves over from the existing alert bot, what changes, what is dropped |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Milestones M0–M9, tasks, done criteria, risks |
+| [BUILD_STATUS.md](BUILD_STATUS.md) | What is built and verified, design corrections found during the build, what the owner must provide |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Local setup, coding rules, safe change procedures |
 
 ## How to prove it works

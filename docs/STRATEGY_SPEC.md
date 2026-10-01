@@ -20,7 +20,7 @@ This document turns each playbook setup into exact, codeable rules, so backtest,
 | Tick buffer `b` | 0.05 × ATR5 (stops sit this far beyond the level) |
 | R | entry − stop, per share |
 | Trend day | At least 70% of closed 5-min bars since 9:30 closed above VWAP |
-| Resistance | Nearest of: prior day high, pre-market high, HOD (for setups below HOD), 20-day high, above entry |
+| Resistance | Nearest of: prior day high, pre-market high, HOD (for setups below HOD), 20-day high, above entry. "Setups below HOD" are VWAP_RECLAIM, FIRST_PULLBACK and VWAP_TREND; for breakout setups (ORB, GAP_AND_GO, POWER_HOUR_BREAKOUT, swing setups) the breakout bar's own high is not resistance |
 
 **Rounding:** prices to $0.01; stops rounded down, entries and targets rounded to the nearest cent.
 
@@ -168,6 +168,8 @@ NVDA, morning, ORB. Account equity $25,000, not in drawdown, planned setup.
 | qty_cap (25%) | floor(6,250 / 190.49) = **32 shares** ← binding |
 | Orders | Leg A 16 sh, TP $191.37; leg B 16 sh, TP $192.25; both stop $189.61 |
 | Actual risk | 32 × 0.88 = $28.16 (0.11% of equity) |
+
+**Correction found during the build (2026-10-01):** as printed, this example fails checklist item 7, because R = $0.88 is wider than 1.0 × ATR5 = $0.85. The code enforces R ≤ 1.0 × ATR5, so read the example with ATR5 ≥ $0.88 (the tests use $0.90). The example also leaves out the marketable offset (`entries.limit_offset_pct`). The sizing arithmetic (32 shares, legs 16/16, $28.16 risk) is unchanged and tested.
 
 **Lesson from the example:** with a $25K account, the 25% position cap, not the 0.5% risk rule, limits size on high-priced stocks with tight stops. Actual risk per trade will often be well under 0.5%. This is intended: the cap protects against gaps through the stop.
 

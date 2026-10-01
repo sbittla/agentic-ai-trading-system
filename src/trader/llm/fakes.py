@@ -8,7 +8,7 @@ for schema/retry/injection tests.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -58,7 +58,8 @@ class RulesLLM:
             top = max(items, key=lambda x: abs(x.get("score", 0)), default=None)
             cat = top["headline"][:150] if top and abs(top.get("score", 0)) >= 0.3 else "none"
             avg = sum(x.get("score", 0) for x in items) / len(items) if items else 0.0
-            tone = "positive" if avg > 0.2 else "negative" if avg < -0.2 else "neutral"
+            tone: Literal["positive", "negative", "neutral"] = (
+                "positive" if avg > 0.2 else "negative" if avg < -0.2 else "neutral")
             value = NewsSummaryOut(ticker=data.get("ticker", ""), summary="; ".join(
                 x["headline"] for x in items[:3])[:390], catalyst=cat, tone=tone,
                 risk_events=[])

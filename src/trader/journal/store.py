@@ -12,7 +12,18 @@ from decimal import Decimal
 from typing import Any
 
 import structlog
-from sqlalchemy import Engine, Table, and_, create_engine, desc, event, select, text, update
+from sqlalchemy import (
+    JSON,
+    Engine,
+    Table,
+    and_,
+    create_engine,
+    desc,
+    event,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from trader.journal import schema as s
@@ -56,8 +67,13 @@ class SqlJournal:
     def create_all(self) -> None:
         try:
             if not self.is_sqlite:
+                # init.sql creates the schema owned by core_rw; the role has no database-level
+                # CREATE (least privilege), and Postgres checks that even for IF NOT EXISTS.
                 with self.engine.begin() as c:
-                    c.execute(text(f"CREATE SCHEMA IF NOT EXISTS {s.SCHEMA}"))
+                    exists = c.execute(text("SELECT 1 FROM information_schema.schemata "
+                                            "WHERE schema_name = :n"), {"n": s.SCHEMA}).first()
+                    if exists is None:
+                        c.execute(text(f"CREATE SCHEMA {s.SCHEMA}"))
             s.metadata.create_all(self.engine, checkfirst=True)
         except OperationalError as exc:
             raise JournalUnavailable(str(exc)) from exc
@@ -94,7 +110,7 @@ class SqlJournal:
 
     # -- generic ---------------------------------------------------------------------------
     def insert(self, table: Table, row: Mapping[str, Any]) -> int | None:
-        values = {k: (_jsonable(v) if isinstance(table.c[k].type, s.JSON) else v)
+        values = {k: (_jsonable(v) if isinstance(table.c[k].type, JSON) else v)
                   for k, v in row.items()}
         try:
             with self.engine.begin() as c:
@@ -109,12 +125,12 @@ class SqlJournal:
             return
         with self.engine.begin() as c:
             c.execute(table.insert(), [
-                {k: (_jsonable(v) if isinstance(table.c[k].type, s.JSON) else v)
+                {k: (_jsonable(v) if isinstance(table.c[k].type, JSON) else v)
                  for k, v in r.items()} for r in rows])
 
     def update(self, table: Table, where: Mapping[str, Any], values: Mapping[str, Any]) -> int:
         cond = and_(*[table.c[k] == v for k, v in where.items()])
-        vals = {k: (_jsonable(v) if isinstance(table.c[k].type, s.JSON) else v)
+        vals = {k: (_jsonable(v) if isinstance(table.c[k].type, JSON) else v)
                 for k, v in values.items()}
         with self.engine.begin() as c:
             return int(c.execute(update(table).where(cond).values(**vals)).rowcount)
