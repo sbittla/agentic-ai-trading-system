@@ -1,6 +1,6 @@
 # Trading Agents: Requirements Specification
 
-**Version:** 1.1 (September 30, 2026)
+**Version:** 1.2 (September 30, 2026)
 **Owner:** Srinivasa Rao Bittla
 **Status:** Draft for build
 
@@ -8,7 +8,13 @@ The system trades only a fixed list of 10 large-cap US stocks, through Alpaca, u
 
 > No system can guarantee it will not lose money. These requirements are built to make losses small, rare and capped, and to stop trading before a bad day becomes a bad month. This is a design for personal research and automation, not financial or tax advice.
 
-**Related documents:** [Architecture](ARCHITECTURE.md) · [Data spec](DATA_SPEC.md) · [Agent prompts](AGENT_PROMPTS.md) · [Config reference](CONFIG_REFERENCE.md) · [Test plan](TEST_PLAN.md) · [Runbook](RUNBOOK.md) · [Decisions](DECISIONS.md)
+**Related documents:** [Architecture](ARCHITECTURE.md) · [Data spec](DATA_SPEC.md) · [Agent prompts](AGENT_PROMPTS.md) · [Config reference](CONFIG_REFERENCE.md) · [Test plan](TEST_PLAN.md) · [Runbook](RUNBOOK.md) · [Decisions](DECISIONS.md) · [Strategy spec](STRATEGY_SPEC.md) · [Security](SECURITY.md) · [Interfaces](INTERFACES.md) · [Implementation plan](IMPLEMENTATION_PLAN.md) · [Traceability](TRACEABILITY.md)
+
+### What changed in 1.2
+
+- Checklist item 8 clarified (resistance at least 1.5R above entry; T2 at least 2R), matching [STRATEGY_SPEC.md](STRATEGY_SPEC.md).
+- IDs added to the checklist (CK-1..CK-10), loss limits (LL-1..LL-11) and exit rules (XR-1..XR-6) so every rule is traceable ([TRACEABILITY.md](TRACEABILITY.md)).
+- Exact setup rules now live in STRATEGY_SPEC.md; security controls in SECURITY.md.
 
 ### What changed in 1.1
 
@@ -160,16 +166,16 @@ The agents analyze like a disciplined professional day trader: they plan before 
 
 ### 5.4 Entry checklist (every item must pass, or there is no trade)
 
-1. Ticker is on the list and not locked (earnings, wash-sale, loss-streak, kill switch).
-2. Inside an entry window.
-3. Market, sector and stock filters pass (MF-1 to MF-5).
-4. The setup is one of the named playbook setups and was on the game plan, or is flagged as unplanned (unplanned trades use half size).
-5. Trigger has actually fired on a closed candle; no anticipation.
-6. Entry price is no more than 0.25 ATR(5-min) above the trigger: **never chase**.
-7. Stop is at a structural level and no wider than 1 ATR(5-min) for day trades.
-8. First target is at least 1.5R away and the path to it is clear of the prior day high or other resistance; the overall reward-to-risk is at least 2:1.
-9. Review agent (A6) agrees.
-10. Risk manager (A7) approves the size and every limit.
+1. **CK-1:** Ticker is on the list and not locked (earnings, wash-sale, loss-streak, kill switch).
+2. **CK-2:** Inside an entry window.
+3. **CK-3:** Market, sector and stock filters pass (MF-1 to MF-5).
+4. **CK-4:** The setup is one of the named playbook setups and was on the game plan, or is flagged as unplanned (unplanned trades use half size).
+5. **CK-5:** Trigger has actually fired on a closed candle; no anticipation.
+6. **CK-6:** Entry price is no more than 0.25 ATR(5-min) above the trigger: **never chase**.
+7. **CK-7:** Stop is at a structural level and no wider than 1 ATR(5-min) for day trades.
+8. **CK-8:** The nearest resistance is at least 1.5R above entry, and the final target is at least 2R above entry (exact rules in STRATEGY_SPEC.md).
+9. **CK-9:** Review agent (A6) agrees.
+10. **CK-10:** Risk manager (A7) approves the size and every limit.
 
 - **NT-1 No setup, no trade:** If no checklist passes in a window, the system places no order and logs "no qualifying setup" with the closest candidate and the item that failed.
 - **NT-2 No forcing:** There is no minimum trade count. Zero-trade days are normal and are not a failure.
@@ -183,14 +189,14 @@ The agents analyze like a disciplined professional day trader: they plan before 
 
 ### 5.6 Exit rules
 
-| Rule | Day trades | Swing trades |
-| --- | --- | --- |
-| Hard stop | At the broker from entry; never moved down | Same |
-| First target | Half off at 1R; move the stop on the rest to break-even | Half off at 1.5R |
-| Trail | Remaining half trails under the 9-EMA (5-minute) or the last higher low | Trails under the 10-day EMA |
-| Failed-trade exit | Exit if a 5-minute candle closes back below VWAP or the breakout level | Exit on a daily close below the 20-day EMA |
-| Time stop | Exit if not at +0.5R within 15 minutes; hard exit at 10:30 or 3:55 | Exit after 10 trading days if neither stop nor target hit |
-| Event exit | — | Close before an earnings release |
+| ID | Rule | Day trades | Swing trades |
+| --- | --- | --- | --- |
+| XR-1 | Hard stop | At the broker from entry; never moved down | Same |
+| XR-2 | First target | Half off at 1R; move the stop on the rest to break-even | Half off at 1.5R |
+| XR-3 | Trail | Remaining half trails under the 9-EMA (5-minute) or the last higher low | Trails under the 10-day EMA |
+| XR-4 | Failed-trade exit | Exit if a 5-minute candle closes back below VWAP or the breakout level | Exit on a daily close below the 20-day EMA |
+| XR-5 | Time stop | Exit if not at +0.5R within 15 minutes; hard exit at 10:30 or 3:55 | Exit after 10 trading days if neither stop nor target hit |
+| XR-6 | Event exit | — | Close before an earnings release |
 
 ---
 
@@ -200,19 +206,19 @@ These rules are hard limits enforced by code (A7). No agent and no prompt can ch
 
 ### 6.1 Loss limits
 
-| Limit | Value | What happens |
-| --- | --- | --- |
-| Risk per trade | 0.5% of equity (0.25% during drawdown, see 6.3) | Size is computed from it |
-| Max trades per day | 3 (2 morning, 1 afternoon) | No more entries that day |
-| Daily loss limit | 1.5% of equity, realized + open | Flatten day trades, no more entries today |
-| Two losses in a row | Same day | Stop trading for the rest of the day |
-| Weekly loss limit | 3% of equity | Paper trading only until Monday |
-| Monthly drawdown limit | 6% from the month's peak | Live trading stops; paper only until the owner reviews and re-enables |
-| Profit give-back | Day's P&L falls 50% from its peak (after at least +1R) | Stop trading for the day |
-| Max open positions | 3 (no more than 2 day trades) | |
-| Max one position | 25% of equity | |
-| Correlated names (NVDA, AVGO, TSM) | Max 1 open at once | |
-| Margin | Never more than 1x equity | Even when buying power allows more |
+| ID | Limit | Value | What happens |
+| --- | --- | --- | --- |
+| LL-1 | Risk per trade | 0.5% of equity (0.25% during drawdown, see 6.3) | Size is computed from it |
+| LL-2 | Max trades per day | 3 (2 morning, 1 afternoon) | No more entries that day |
+| LL-3 | Daily loss limit | 1.5% of equity, realized + open | Flatten day trades, no more entries today |
+| LL-4 | Two losses in a row | Same day | Stop trading for the rest of the day |
+| LL-5 | Weekly loss limit | 3% of equity | Paper trading only until Monday |
+| LL-6 | Monthly drawdown limit | 6% from the month's peak | Live trading stops; paper only until the owner reviews and re-enables |
+| LL-7 | Profit give-back | Day's P&L falls 50% from its peak (after at least +1R) | Stop trading for the day |
+| LL-8 | Max open positions | 3 (no more than 2 day trades) | |
+| LL-9 | Max one position | 25% of equity | |
+| LL-10 | Correlated names (NVDA, AVGO, TSM) | Max 1 open at once | |
+| LL-11 | Margin | Never more than 1x equity | Even when buying power allows more |
 
 ### 6.2 Behaviour rules
 

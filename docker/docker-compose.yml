@@ -1,0 +1,45 @@
+# AIAgentsTrading runtime (see docs/ARCHITECTURE.md)
+# Usage: docker compose -f docker/docker-compose.yml up -d
+
+name: aiagentstrading
+
+services:
+  ollama:
+    image: ollama/ollama:latest          # pin an exact version tag before paper trading
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [internal]                 # SEC-9: no host port published
+    gpus: all                            # requires Docker Desktop + WSL2 GPU support
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  trader:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file:
+      - ../.env                          # paper keys and data keys (git-ignored)
+      # - ../.env.live                   # SEC-7: add only at go-live
+    environment:
+      TZ: America/New_York
+      TRADER_CONFIG: /app/config/config.yaml
+    volumes:
+      - ../config:/app/config:ro         # config is read-only inside the container
+      - ../data:/app/data                # journal.db, bars, reports
+    networks: [internal, egress]
+
+networks:
+  internal:
+    internal: true                       # ollama <-> trader only
+  egress: {}                             # trader -> Alpaca, Finnhub, EDGAR, Reddit, Twilio
+
+volumes:
+  ollama-models: {}

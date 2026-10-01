@@ -12,8 +12,8 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 2. Create an Alpaca account; generate **paper** API keys. Keep live keys ungenerated until stage 5 of the test plan.
 3. Create a Finnhub key, a Reddit "script" app, and a Twilio WhatsApp sender.
 4. Copy `config/config.example.yaml` to `config/config.yaml`; review every value in `risk` and `wash_sale`.
-5. Create `.env` with the secrets listed in [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets); confirm `.env` is in `.gitignore`.
-6. `docker compose up -d ollama` then `docker compose exec ollama ollama pull qwen3:14b` (pin the exact tag in config).
+5. Copy `.env.example` to `.env` and fill in the paper keys and `WHATSAPP_ALLOWED_SENDERS` ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)); confirm `.env` is in `.gitignore`.
+6. `docker compose -f docker/docker-compose.yml up -d ollama` then `docker compose exec ollama ollama pull qwen3:14b` (pin the exact tag in config).
 7. `docker compose up -d trader`; check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day.
 8. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
 
@@ -31,13 +31,16 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 
 ## 3. Commands
 
+Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals need the one-time code, and destructive commands need a second confirmation code ([SECURITY.md](SECURITY.md) SEC-1..3).
+
 | Action | WhatsApp | Local |
 | --- | --- | --- |
 | Status | `STATUS` | `docker compose exec trader trader status` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose exec trader trader kill` |
-| Resume after kill | `RESUME` (only after the cause is understood) | `trader resume` |
-| Flatten everything now | `FLATTEN` (asks for confirmation) | `trader flatten --confirm` |
+| Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `trader resume` |
+| Flatten everything now | `FLATTEN`, then the confirmation code | `trader flatten --confirm` |
 | Approve / reject a trade | `YES <code>` / `NO <code>` | — |
+| Acknowledge a critical alert | `ACK` | — |
 | Pause one style | `PAUSE DAY` / `PAUSE SWING` | `trader pause day` |
 
 ## 4. Incident playbooks

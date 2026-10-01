@@ -80,9 +80,13 @@ AIAgentsTrading/
 │   ├── llm/ollama_client.py       # the only module that talks to Qwen
 │   ├── prompts/                   # versioned prompt files (see AGENT_PROMPTS.md)
 │   └── notify/whatsapp.py
-├── backtest/                      # replay engine using the same agents
+├── backtest/                      # replay engine using the same agents (BACKTEST_ENGINE.md)
+├── tools/check_traceability.py    # CI: every rule ID has a test
+├── .github/workflows/ci.yml       # from tools/ci.yml
+├── pyproject.toml
 └── tests/
     ├── unit/                      # one test file per rule ID (A7-1, WS-1, DR-3, ...)
+    ├── contract/                  # same tests for real and fake interfaces (INTERFACES.md)
     ├── replay/                    # recorded market days replayed through the system
     └── chaos/                     # disconnects, timeouts, duplicate events
 ```

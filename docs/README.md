@@ -1,14 +1,53 @@
 # Documentation
 
-| Document | What it covers | Read it when |
-| --- | --- | --- |
-| [REQUIREMENTS.md](REQUIREMENTS.md) | What the system must do: universe, trading windows, daily process, day-trader playbook, discipline rules, wash-sale process, every agent's requirements, acceptance tests | First; the source of truth |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Containers, repo layout, event flow, trade states, scheduling, failure handling | Before writing code |
-| [DATA_SPEC.md](DATA_SPEC.md) | External sources and endpoints, indicator definitions, journal tables, message types | Building agents A1–A4 and the journal |
-| [AGENT_PROMPTS.md](AGENT_PROMPTS.md) | Qwen prompts, JSON schemas, validation, evaluation set | Building agents A3, A5, A6, A11 |
-| [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field, validation rules, secrets | Changing any setting |
-| [TEST_PLAN.md](TEST_PLAN.md) | Unit, replay, backtest, paper, live and chaos tests; go-live gates | Before paper and before live |
-| [RUNBOOK.md](RUNBOOK.md) | Setup, daily routine, commands, incident playbooks, go-live checklist | Running the system |
-| [DECISIONS.md](DECISIONS.md) | Why the main choices were made | Before changing a design choice |
+Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (for example `A7-2`, `WS-1`, `CK-6`) are used across all documents, in tests and in journal reason codes, so every behaviour can be traced from requirement to test to trade ([TRACEABILITY.md](TRACEABILITY.md)).
 
-Requirement IDs (for example `A7-2`, `WS-1`, `DR-3`) are used across all documents, in tests and in journal reason codes, so every behaviour can be traced from requirement to test to trade.
+## What to build
+
+| Document | What it covers |
+| --- | --- |
+| [REQUIREMENTS.md](REQUIREMENTS.md) | Source of truth: universe, trading windows, daily process, playbook, discipline rules, wash-sale process, every agent's requirements, acceptance tests |
+| [STRATEGY_SPEC.md](STRATEGY_SPEC.md) | Exact, codeable rules for each setup, sizing algorithm, worked example, edge cases |
+| [DECISIONS.md](DECISIONS.md) | Why the main design choices were made |
+
+## How to build it
+
+| Document | What it covers |
+| --- | --- |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Containers, repo layout, event flow, trade states, scheduling, failure handling |
+| [INTERFACES.md](INTERFACES.md) | Python interfaces for broker, data, LLM, notifier, clock; build files |
+| [DATA_SPEC.md](DATA_SPEC.md) | External sources, indicator definitions, journal tables, message types |
+| [AGENT_PROMPTS.md](AGENT_PROMPTS.md) | Qwen prompts, JSON schemas, validation, evaluation set |
+| [SECURITY.md](SECURITY.md) | Threat model, WhatsApp command authentication, key management, audit |
+| [ALERT_BOT_REUSE.md](ALERT_BOT_REUSE.md) | What moves over from the existing alert bot, what changes, what is dropped |
+| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Milestones M0–M9, tasks, done criteria, risks |
+| [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Local setup, coding rules, safe change procedures |
+
+## How to prove it works
+
+| Document | What it covers |
+| --- | --- |
+| [TEST_PLAN.md](TEST_PLAN.md) | Unit, replay, backtest, paper, live and chaos tests; go-live gates |
+| [BACKTEST_ENGINE.md](BACKTEST_ENGINE.md) | Replay and backtest modes, fill model, LLM caching, walk-forward |
+| [TRACEABILITY.md](TRACEABILITY.md) | Every requirement ID → agent → test → reason code |
+
+## How to run it
+
+| Document | What it covers |
+| --- | --- |
+| [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |
+| [RUNBOOK.md](RUNBOOK.md) | Setup, daily routine, commands, incident playbooks, go-live checklist |
+| [MONITORING.md](MONITORING.md) | Health score, trading metrics, dashboards, alert routing |
+| [REPORT_TEMPLATES.md](REPORT_TEMPLATES.md) | Pre-flight, game plan, approvals, trade events, daily/weekly/monthly reports |
+
+## Other files
+
+| File | Purpose |
+| --- | --- |
+| [`config/config.example.yaml`](../config/config.example.yaml) | All settings with v1 defaults |
+| [`config/macro_calendar_2026_2027.yaml`](../config/macro_calendar_2026_2027.yaml) | CPI, jobs report and FOMC dates (2027 CPI and jobs dates still to add) |
+| [`docker/`](../docker/) | `docker-compose.yml` and `Dockerfile` |
+| [`pyproject.toml`](../pyproject.toml) | Package and tool configuration |
+| [`tools/ci.yml`](../tools/ci.yml) | CI workflow: lint, types, tests, traceability, secret scan. Move it to `.github/workflows/ci.yml` to enable it |
+| [`tools/check_traceability.py`](../tools/check_traceability.py) | Fails CI when a rule ID has no test |
+| [`.env.example`](../.env.example) | Names of every secret |

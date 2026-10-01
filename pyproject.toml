@@ -1,0 +1,53 @@
+[project]
+name = "aiagentstrading"
+version = "0.1.0"
+description = "Disciplined agent-based day and swing trading for a fixed list of 10 large-cap US stocks"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alpaca-py>=0.30",          # broker + market data (pin exact versions in requirements.lock)
+  "httpx>=0.27",              # Ollama, Finnhub, EDGAR
+  "praw>=7.7",                # Reddit
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+  "sqlalchemy>=2.0",
+  "pandas>=2.2",
+  "pyarrow>=16.0",
+  "numpy>=1.26",
+  "apscheduler>=3.10,<4",
+  "exchange-calendars>=4.5",  # backup to Alpaca's calendar endpoint
+  "transformers>=4.44",       # FinBERT
+  "torch>=2.3",
+  "twilio>=9.0",
+  "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10", "pip-tools>=7.4"]
+
+[project.scripts]
+trader = "trader.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]   # S = bandit security rules
+
+[tool.mypy]
+strict = true
+packages = ["trader"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "rule(id): requirement ID covered by this test (see docs/TRACEABILITY.md)",
+]

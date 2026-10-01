@@ -1,10 +1,14 @@
 # Secrets and local config
 .env
+.env.live
+!.env.example
 config/config.yaml
 
 # Runtime data (journal, bars, reports)
 data/
 reports/
+runs/
+llm_cache/
 
 # Python
 __pycache__/

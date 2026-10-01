@@ -1,0 +1,26 @@
+# Scheduled high-impact US macro events (US Eastern time)
+# Used by TW-5: on CPI and jobs-report days morning entries start at 09:45;
+# on FOMC decision days (second day of the meeting, statement 14:00) the afternoon window is skipped.
+#
+# Sources (checked 2026-09-30):
+#   FOMC:  https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm  (2027 dates are tentative)
+#   CPI:   https://www.bls.gov/schedule/news_release/cpi.htm
+#   Jobs:  https://www.bls.gov/schedule/news_release/empsit.htm
+# 2027 CPI and jobs dates were not yet published; add them when BLS releases its 2027 schedule
+# (RUNBOOK maintenance task, December). A10 refuses to start if today is past the last listed CPI date.
+
+fomc_decision_days:            # statement at 14:00 ET on these days
+  2026: ["2026-10-28", "2026-12-09"]
+  2027: ["2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09",
+         "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08"]   # tentative
+
+cpi_release_days:              # 08:30 ET
+  2026: ["2026-10-14", "2026-11-10", "2026-12-10"]
+  2027: []                     # TODO: fill from BLS 2027 schedule
+
+jobs_report_days:              # Employment Situation, 08:30 ET
+  2026: ["2026-10-02", "2026-11-06", "2026-12-04"]
+  2027: []                     # TODO: fill from BLS 2027 schedule
+
+# Optional: other events the owner wants treated like CPI days (morning entries from 09:45)
+extra_caution_days: []

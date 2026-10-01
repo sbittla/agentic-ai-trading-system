@@ -14,6 +14,10 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
+## Key documents
+
+- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md)
+
 ## Status
 
-Design phase. Next: build the journal, market data and risk manager (stage 1 of [docs/TEST_PLAN.md](docs/TEST_PLAN.md)).
+Design phase. Next: milestone M0 (repo, CI, config loader, Docker) in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
