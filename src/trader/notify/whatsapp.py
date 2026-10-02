@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -72,26 +73,57 @@ class OutboxNotifier:
 class WhatsAppNotifier:
     """Twilio WhatsApp: send with retries; poll inbound replies (outbound-only, ADR-013)."""
 
-    def __init__(self, sid: str, token: str, from_: str, to: str, retries: int = 3) -> None:
+    def __init__(self, sid: str, token: str, from_: str, to: str, retries: int = 3,
+                 content_sid: str | None = None, content_var: str = "1") -> None:
         from twilio.rest import Client
 
         self.client = Client(sid, token)
         self.from_ = from_
         self.to = to
         self.retries = retries
+        self.content_sid = content_sid or None
+        self.content_var = content_var
         self._seen: set[str] = set()
         self._since = datetime.now(UTC) - timedelta(minutes=5)
         self.last_poll_ok: float | None = None
+        self.last_inbound_at: datetime | None = None
+
+    def session_open(self, now: datetime | None = None) -> bool:
+        """WhatsApp allows free-form business messages only within 24 h of the owner's last
+        message; outside it a pre-approved template is required."""
+        now = now or datetime.now(UTC)
+        return self.last_inbound_at is not None and now - self.last_inbound_at < timedelta(
+            hours=23, minutes=30)
+
+    def message_args(self, text: str, now: datetime | None = None) -> dict[str, str]:
+        if self.content_sid and not self.session_open(now):
+            return {"content_sid": self.content_sid,
+                    "content_variables": json.dumps({self.content_var: text[:1000]})}
+        return {"body": text[:1500]}
 
     async def send(self, text: str, *, kind: str) -> None:
         for attempt in range(self.retries):
             try:
                 await asyncio.to_thread(self.client.messages.create, from_=self.from_,
-                                        to=self.to, body=text[:1500])
+                                        to=self.to, **self.message_args(text))
                 return
             except Exception as exc:   # noqa: BLE001 - twilio/requests errors
                 log.warning("whatsapp_send_failed", attempt=attempt, error=str(exc))
                 await asyncio.sleep(2 ** attempt)
+
+    async def prime_session(self) -> datetime | None:
+        """At start-up, find the owner's last message in the past 24 h so a WhatsApp session
+        that is already open is known. These old messages are marked seen and are never
+        executed as commands (an old FLATTEN must not fire again)."""
+        since = datetime.now(UTC) - timedelta(hours=24)
+        msgs = await asyncio.to_thread(self.client.messages.list, to=self.from_,
+                                       date_sent_after=since, limit=200)
+        for m in msgs:
+            self._seen.add(m.sid)
+            if m.direction == "inbound" and str(m.from_) == self.to and m.date_sent:
+                self.last_inbound_at = max(self.last_inbound_at or m.date_sent, m.date_sent)
+        self._since = datetime.now(UTC) - timedelta(seconds=5)
+        return self.last_inbound_at
 
     async def poll(self) -> list[tuple[str, str, datetime]]:
         """Inbound messages to our number since the last poll: (sender, body, sent_at)."""
@@ -103,7 +135,10 @@ class WhatsAppNotifier:
             if m.sid in self._seen or m.direction != "inbound":
                 continue
             self._seen.add(m.sid)
-            out.append((str(m.from_), str(m.body or ""), m.date_sent or datetime.now(UTC)))
+            sent = m.date_sent or datetime.now(UTC)
+            out.append((str(m.from_), str(m.body or ""), sent))
+            if str(m.from_) == self.to:
+                self.last_inbound_at = max(self.last_inbound_at or sent, sent)
         if msgs:
             self._since = max(m.date_sent for m in msgs if m.date_sent) - timedelta(seconds=1)
         return out

@@ -1,0 +1,2 @@
+*.sh text eol=lf
+docker/postgres/*.sql text eol=lf

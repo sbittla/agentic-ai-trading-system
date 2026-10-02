@@ -337,7 +337,7 @@ class Command(Msg):
     arg: str = ""
     sender: str = "local"
     received_at: datetime
-    source: Literal["whatsapp", "local"] = "local"
+    source: Literal["whatsapp", "telegram", "local"] = "local"
 
 
 class HealthStatus(Msg):

@@ -39,15 +39,20 @@ The system can move real money, so anything that can send it a command, feed it 
 
 ## 3. Key management
 
+Creating each key and password: [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md). Postgres passwords live only in git-ignored files in `secrets/` (Docker secrets) and the matching env files; `docker/postgres/init.sql` contains none. Role names can carry a prefix (`DB_ROLE_PREFIX`); the outbox guard matches roles by suffix.
+
 | Key | Where stored | Rotation | Scope |
 | --- | --- | --- | --- |
 | Alpaca paper | `.env.core` | 90 days | Paper account only |
 | Alpaca live | `.env.live` (trader-core only) | 90 days, and after any suspected leak | Live account; created only at go-live |
 | Finnhub, Reddit | `.env.news` | 180 days | Read-only data |
+| Telegram bot token | `.env.notifier` | 180 days, and after any suspected leak (BotFather `/revoke`) | Send and read the bot's messages |
 | Twilio | `.env.notifier` | 180 days | WhatsApp send and message history |
-| Postgres role passwords | each service's env file; admin in `secrets/pg_admin_password.txt` | 180 days | One role per service |
+| Postgres role passwords | `secrets/pg_<role>_password.txt` and that service's env file | 180 days | One role per service |
 
 **Leak response:** revoke the key in the provider dashboard first, then send `KILL`, then rotate, then review the journal and Alpaca activity for the exposure period.
+
+**Network destinations of the `notifier` container:** `api.telegram.org` (default channel, ADR-014) or `api.twilio.com`, both outbound HTTPS only; no webhook is ever registered, and the Telegram token is never written to logs or errors (it is part of the request URL).
 
 ## 4. Audit
 

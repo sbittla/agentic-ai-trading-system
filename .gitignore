@@ -1,19 +1,32 @@
-# Secrets and local config
+# ---- Secrets and owner-specific config: never commit (SEC-6, SEC-18) ----
+# Env files anywhere (.env, .env.core, docker/.env, ...); only the *.example templates are tracked
 .env
 .env.*
-!.env.example
-secrets/
-backups/
-recordings/
+!*.example
+secrets/*
+!secrets/README.md
+*.pem
+*.key
+*.p12
+*.pfx
 config/config.yaml
+config/*.local.yaml
+.claude/settings.local.json
 
-# Runtime data (journal, bars, reports)
-data/
-reports/
-runs/
-llm_cache/
+# ---- Runtime and personal trading data (journal, bars, reports, backups) ----
+/data/
+/reports/
+/runs/
+/recordings/
+/backups/
+/llm_cache/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.dump
 
-# Python
+# ---- Python / tooling ----
 __pycache__/
 *.pyc
 .venv/

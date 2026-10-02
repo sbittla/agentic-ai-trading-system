@@ -46,10 +46,12 @@ Synthetic results only prove the plumbing; they say nothing about whether the st
 
 ## What the owner needs to provide (M8)
 
+Step-by-step instructions for every item: [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
+
 1. **Alpaca paper keys** in `.env.core` (`ALPACA_PAPER_KEY`, `ALPACA_PAPER_SECRET`).
-2. **Finnhub token**, **Reddit script app**, **SEC User-Agent with your email** in `.env.news`; set `data.sec_user_agent` in `config/config.yaml`.
-3. **Twilio WhatsApp** sender and your number in `.env.notifier` (`WHATSAPP_ALLOWED_SENDERS`).
-4. Strong role passwords in `docker/postgres/init.sql` and each `.env.*` file (they are placeholders now).
+2. **Finnhub token** and **SEC User-Agent with your email** in `.env.news` (Reddit script app optional); set `data.sec_user_agent` in `config/config.yaml`.
+3. **Telegram bot** token and your chat id in `.env.notifier` (default channel, ADR-014), or Twilio WhatsApp.
+4. Postgres passwords in `secrets/pg_<role>_password.txt` and each `.env.*` file; database/role names in `docker/.env`.
 5. The model: `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull`.
 6. Then: `trader fetch-history`, `trader eval-prompts --llm ollama`, `docker compose ... up -d`, and 20+ days of paper trading in approve mode (RUNBOOK §1, TEST_PLAN stage 4).
 

@@ -17,7 +17,7 @@ flowchart LR
             DEC[A1, A4–A12<br/>strategy · review · risk · execution · positions · supervisor · reports]
         end
         NEWS[news-sentiment<br/>A3 + FinBERT]
-        NOTI[notifier<br/>WhatsApp out + polled replies]
+        NOTI[notifier<br/>Telegram or WhatsApp out + polled replies]
         OLL[ollama<br/>Qwen3 14B · GPU]
         PG[(postgres<br/>journal + outbox bus)]
         BK[backup<br/>nightly]
@@ -47,7 +47,7 @@ flowchart LR
 | 1 | `ollama` | `ollama/ollama` (pinned digest) | Always | internal only | GPU, large model, no internet needed |
 | 2 | `trader-core` | `docker/Dockerfile` target `core` | Always | internal + egress to Alpaca | The only container that can trade. Holds A1, A2, A4–A12 so the risk manager always sees exact positions, live quotes and limits in memory |
 | 3 | `news-sentiment` | target `news` (adds PyTorch + FinBERT) | Always in market days | internal + egress to Finnhub, EDGAR, Reddit | Heavy image; reads untrusted text, so it is kept away from order code and holds no Alpaca keys |
-| 4 | `notifier` | target `notifier` | Always | internal + egress to Twilio | Holds the Twilio keys; sends messages and **polls** Twilio for replies, so nothing on the host is reachable from the internet |
+| 4 | `notifier` | target `notifier` | Always | internal + egress to Telegram (default, ADR-014) or Twilio | Holds the channel keys; sends messages and **polls** for replies (Telegram `getUpdates` long polling or Twilio's Messages API), so nothing on the host is reachable from the internet |
 | 5 | `postgres` | `postgres:16` (pinned) | Always | internal only | Journal, tax lots and the cross-container outbox bus |
 | 6 | `backup` | target `tools` | Always (sleeps; runs nightly) | internal + local backup folder | Nightly `pg_dump` and Parquet copy |
 | — | `replay` | target `core` | On demand (`--profile replay`) | internal only | Backtests and replays use the same code as live, with fake broker and data |
@@ -239,7 +239,7 @@ The trading calendar comes from Alpaca's calendar endpoint (early closes include
 
 ## 7. Windows host notes
 
-- Docker Desktop with the WSL2 backend; NVIDIA GPU passed through to the `ollama` container (`gpus: all` in compose).
+- Docker Desktop with the WSL2 backend; NVIDIA GPU passed through to the `ollama` container (`gpus: all` in compose), tuned for an 8 GB card (one model, one request at a time, flash attention, 8-bit KV cache). `trader check-connections --service llm` reports how much of the model is in GPU memory ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
 - Disable sleep and automatic restarts for updates during market hours (Windows Update active hours 6 AM–5 PM ET).
 - Keep the Postgres volume and the Parquet bar files on a local SSD, backed up nightly by the `backup` container.
 - If home uptime proves unreliable, the same Compose file runs on a US-East cloud VM; `ollama` needs a GPU VM there, or Qwen calls stay at home over a private VPN (Tailscale) with entries blocked whenever the link is down.

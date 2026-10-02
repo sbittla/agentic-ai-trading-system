@@ -19,6 +19,7 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-011 | 2026-09-30 | Python 3.12 for all application code | Accepted |
 | ADR-012 | 2026-09-30 | Postgres as journal and cross-container bus (outbox + LISTEN/NOTIFY) | Accepted |
 | ADR-013 | 2026-09-30 | Outbound-only notifications: poll Twilio for replies, no inbound endpoint | Accepted |
+| ADR-014 | 2026-10-01 | Telegram bot as the default notifier channel; WhatsApp kept as an option | Accepted |
 
 ---
 
@@ -90,3 +91,9 @@ Short records of the main design decisions, so later changes can see why things 
 **Context:** Twilio normally delivers WhatsApp replies to a public webhook, which would need a tunnel into the home PC.
 **Decision:** The notifier polls Twilio's Messages API for inbound replies (every 3 s during approvals, every 10 s otherwise in market hours, every 60 s outside). No inbound ports or tunnels.
 **Consequences:** No internet-reachable endpoint on the host. Command latency up to 10 s (3 s for approvals), acceptable within the 90-second approval window; the local `trader kill` command is instant. Alternative if WhatsApp polling proves unreliable: a Telegram bot, which also works outbound-only.
+
+### ADR-014 Telegram bot as the default notifier channel
+
+**Context:** During setup (October 1, 2026) the owner's Twilio trial WhatsApp number rejected every free-form message with "ContentSid Required", even inside the 24-hour window, and the only available template was Twilio's fixed sample. A permanent WhatsApp sender needs a paid account, Meta business verification and approved templates.
+**Decision:** The notifier supports two channels behind the same interface. Telegram (Bot API) is the default when `TELEGRAM_BOT_TOKEN` is set (`NOTIFIER_CHANNEL` overrides). It stays outbound-only, as ADR-013 requires: `sendMessage` to send, `getUpdates` long polling to receive, no webhook. Only allow-listed chat IDs can issue commands (SEC-1); approval codes and two-step confirmations are unchanged (SEC-2, SEC-3). At start-up the notifier skips messages that arrived while it was down, so an old command is never executed.
+**Consequences:** Free, no templates and no 24-hour window; replies arrive within about a second. New network destination `api.telegram.org` for the `notifier` container only (SECURITY.md). Requirement text that says "WhatsApp" applies to whichever channel is active.

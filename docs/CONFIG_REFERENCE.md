@@ -31,16 +31,17 @@ One YAML file controls every tunable value. It is loaded once at start, snapshot
 
 ## Environment variables (secrets)
 
-Each container reads only its own env file (SECURITY.md SEC-18). Templates are in [`.env.example`](../.env.example).
+Each container reads only its own env file (SECURITY.md SEC-18). Templates are the `.env.<name>.example` files in the repo root (`trader init-env` creates the real files); how to obtain every value is in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md). Reddit values may be left empty (the news service runs without them).
 
 | File | Container | Variables |
 | --- | --- | --- |
 | `.env.core` | trader-core | `ALPACA_PAPER_KEY`, `ALPACA_PAPER_SECRET`, `DATABASE_URL` (role `core_rw`) |
 | `.env.live` | trader-core, go-live only | `ALPACA_LIVE_KEY`, `ALPACA_LIVE_SECRET` |
 | `.env.news` | news-sentiment | `FINNHUB_TOKEN`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `SEC_USER_AGENT`, `DATABASE_URL` (role `news_rw`) |
-| `.env.notifier` | notifier | `TWILIO_SID`, `TWILIO_TOKEN`, `WHATSAPP_FROM`, `WHATSAPP_TO`, `WHATSAPP_ALLOWED_SENDERS`, `DATABASE_URL` (role `notifier_rw`) |
+| `.env.notifier` | notifier | Telegram (default, ADR-014): `NOTIFIER_CHANNEL=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, optional `TELEGRAM_ALLOWED_CHAT_IDS`. WhatsApp: `TWILIO_SID`, `TWILIO_TOKEN`, `WHATSAPP_FROM`, `WHATSAPP_TO`, `WHATSAPP_ALLOWED_SENDERS`, optional `WHATSAPP_CONTENT_SID` / `WHATSAPP_CONTENT_VARIABLE`, `DATABASE_URL` (role `notifier_rw`) |
 | `.env.backup` | backup | `DATABASE_URL` (role `readonly`) |
 | `.env.replay` | replay, dev | None required (offline) |
-| `secrets/pg_admin_password.txt` | postgres | Admin password, used at initialisation only |
+| `secrets/pg_<role>_password.txt` | postgres | Admin and the four role passwords, read at initialisation only |
+| `docker/.env` | Compose | `PG_DATABASE`, `PG_ADMIN_USER`, `DB_ROLE_PREFIX`, `OLLAMA_MODEL` (template: `docker/.env.example`) |
 
 All of these are git-ignored. Live keys are loaded only when `mode.environment` is `live`.

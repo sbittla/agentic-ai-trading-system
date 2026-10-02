@@ -24,12 +24,13 @@ from trader.brokers.alpaca_adapter import AlpacaBroker
 from trader.bus import SqlOutbox
 from trader.calendar import MacroCalendar, MarketCalendar
 from trader.data.alpaca_data import AlpacaHistory, AlpacaIEXFeed
-from trader.data.store import BarStore, DayRecorder
+from trader.data.store import BarStore, DayRecorder, resolve_bars_path
 from trader.engine import TradingEngine
 from trader.journal import schema as s
 from trader.journal.store import SqlJournal
 from trader.llm.ollama_client import OllamaClient
 from trader.models.messages import Command, EventFlags
+from trader.notify.commands import command_source
 from trader.notify.whatsapp import OutboxNotifier
 from trader.services.runtime import require_env, touch_health
 from trader.timeutil import et_date, to_et
@@ -108,8 +109,7 @@ class CoreService:
         self.engine, self.journal, self.llm, self.broker = engine, journal, llm, broker
         self.outbox, self.notifier = outbox, notifier
         self.cfg = cfg
-        self.store = BarStore(base / cfg.storage.bars_path) if not cfg.storage.bars_path.startswith(
-            "/") else BarStore(cfg.storage.bars_path)
+        self.store = BarStore(resolve_bars_path(cfg.storage.bars_path, base))
         self.recorder = DayRecorder(base / "recordings")
         await self._warm_history(history)
         await engine.start()
@@ -298,7 +298,7 @@ class CoreService:
             p = m.payload
             cmd = Command(name=p["name"], arg=p.get("arg", ""), sender=p.get("sender", "?"),
                           received_at=datetime.fromisoformat(p["received_at"]),
-                          source="local" if p.get("source") == "local" else "whatsapp")
+                          source=command_source(p.get("source")))
             await self.engine.handle_command(cmd)   # resolves approvals via notifier.resolve
             await self.outbox.ack(m.id)
 

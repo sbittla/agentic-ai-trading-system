@@ -17,6 +17,7 @@ x-app: &app
   environment:
     TZ: America/New_York
     TRADER_CONFIG: /app/config/config.yaml
+    DB_ROLE_PREFIX: ${DB_ROLE_PREFIX:-}   # role names for `trader migrate` grants
   volumes:
     - ../config:/app/config:ro          # config is read-only everywhere (DV-3)
 
@@ -24,17 +25,20 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: trader
-      POSTGRES_USER: trader_admin
+    environment:                        # names from docker/.env (git-ignored); see docker/.env.example
+      POSTGRES_DB: ${PG_DATABASE:-trader}
+      POSTGRES_USER: ${PG_ADMIN_USER:-trader_admin}
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
-    secrets: [pg_admin_password]
+      DB_ROLE_PREFIX: ${DB_ROLE_PREFIX:-}
+    secrets: [pg_admin_password, pg_core_password, pg_news_password, pg_notifier_password,
+              pg_readonly_password]
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+      - ./postgres/init.sql:/init/init.sql:ro
     networks: [internal]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trader_admin -d trader"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,7 +49,15 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     networks: [internal]                # SEC-9: no host port
-    gpus: all
+    gpus: all                           # NVIDIA GPU via Docker Desktop + WSL2 (RUNBOOK §1 step 1)
+    environment:                        # sized for an 8 GB GPU (RTX 4060 Laptop) with qwen3:8b
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      OLLAMA_KEEP_ALIVE: 8h             # QW-4: stay loaded through the trading day
+      OLLAMA_MAX_LOADED_MODELS: "1"     # one model in VRAM at a time
+      OLLAMA_NUM_PARALLEL: "1"          # agents call Qwen one at a time; saves KV-cache VRAM
+      OLLAMA_FLASH_ATTENTION: "1"       # lower VRAM use for the 8K context
+      OLLAMA_KV_CACHE_TYPE: q8_0        # halves KV-cache VRAM; needs flash attention
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 30s
@@ -59,6 +71,7 @@ services:
     entrypoint: ["/bin/sh", "-c", "ollama serve >/dev/null 2>&1 & sleep 5 && ollama pull $${OLLAMA_MODEL:-qwen3:8b}"]
     environment:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_MAX_TRANSFER_STREAMS: "2"  # gentler download; 4 parallel streams crashed Docker Desktop's WSL engine
     volumes:
       - ollama-models:/root/.ollama
     networks: [egress]
@@ -177,6 +190,14 @@ volumes:
   hf-cache: {}
   grafana-data: {}
 
-secrets:
+secrets:                                # git-ignored files, one password per line
   pg_admin_password:
     file: ../secrets/pg_admin_password.txt
+  pg_core_password:
+    file: ../secrets/pg_core_password.txt
+  pg_news_password:
+    file: ../secrets/pg_news_password.txt
+  pg_notifier_password:
+    file: ../secrets/pg_notifier_password.txt
+  pg_readonly_password:
+    file: ../secrets/pg_readonly_password.txt

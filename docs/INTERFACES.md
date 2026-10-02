@@ -116,4 +116,4 @@ Other types (`Bar`, `Quote`, `NewsItem`, `Account`, `Position`, `Order`, `OrderU
 | [`tools/devcontainer.json`](../tools/devcontainer.json) | VS Code dev container; copy to `.devcontainer/devcontainer.json` |
 | [`pyproject.toml`](../pyproject.toml) | Package metadata, pinned dependencies, tool config |
 | [`tools/ci.yml`](../tools/ci.yml) | Lint, type check, unit and contract tests, secret scan on every push. Move to `.github/workflows/ci.yml` to enable |
-| [`.env.example`](../.env.example) | One block per container env file (`.env.core`, `.env.news`, `.env.notifier`, …), no values |
+| `.env.<name>.example` | One template per container env file (`.env.core`, `.env.news`, `.env.notifier`, …), no values; `trader init-env` creates the real files |

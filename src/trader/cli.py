@@ -104,7 +104,12 @@ def cmd_status(a: argparse.Namespace) -> int:
 
 def cmd_migrate(a: argparse.Namespace) -> int:
     j = _journal()
-    j.apply_grants()
+    failed = j.apply_grants()
+    if failed:
+        print("journal tables created; FAILED grants (check DB_ROLE_PREFIX and the roles):")
+        for st in failed:
+            print(f"  - {st}")
+        return 1
     print("journal tables created; grants applied")
     return 0
 
@@ -153,7 +158,7 @@ def cmd_replay(a: argparse.Namespace) -> int:
         data = generate(date.fromisoformat(a.start), a.synthetic, seed=a.seed)
         minutes, daily, news, seed_min = data.minutes, data.daily, data.news, data.seed_minutes
     else:
-        from trader.data.store import BarStore, load_recorded_day
+        from trader.data.store import BarStore, load_recorded_day, resolve_bars_path
 
         days = [date.fromisoformat(d) for d in a.day]
         minutes, news = {}, {}
@@ -161,7 +166,7 @@ def cmd_replay(a: argparse.Namespace) -> int:
             rec = load_recorded_day(Path(a.recordings) / d.isoformat())
             minutes[d] = rec["bars"]
             news[d] = rec["news"]
-        store = BarStore(cfg.storage.bars_path)
+        store = BarStore(resolve_bars_path(cfg.storage.bars_path))
         daily = {sym: store.read("daily", sym) for sym in store.symbols("daily")}
         seed_min = [b for sym in store.symbols("minute") for b in store.read("minute", sym)
                     if b.ts < min(minutes[d][0].ts for d in days)]
@@ -220,12 +225,12 @@ def cmd_eval(a: argparse.Namespace) -> int:
 
 def cmd_fetch_history(a: argparse.Namespace) -> int:
     from trader.data.alpaca_data import AlpacaHistory
-    from trader.data.store import BarStore
+    from trader.data.store import BarStore, resolve_bars_path
 
     cfg = _cfg(a.config)
     key, secret = os.environ["ALPACA_PAPER_KEY"], os.environ["ALPACA_PAPER_SECRET"]
     hist = AlpacaHistory(key, secret, feed=cfg.data.alpaca_feed)
-    store = BarStore(cfg.storage.bars_path)
+    store = BarStore(resolve_bars_path(cfg.storage.bars_path))
     end = date.today()
 
     async def go() -> None:
@@ -264,6 +269,289 @@ def cmd_backup(a: argparse.Namespace) -> int:
         if a.once:
             return 0
         time.sleep(60)
+
+
+def load_env_file(path: str) -> None:
+    """Load KEY=value lines (no quotes, no inline comments) into os.environ."""
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+def cmd_check(a: argparse.Namespace) -> int:
+    """Read-only checks of external credentials: no orders, no messages (ACCOUNT_SETUP §8)."""
+    for f in a.env_file or []:
+        load_env_file(f)
+    results: list[tuple[str, bool, str]] = []
+
+    async def check(name: str, coro: Any) -> None:
+        try:
+            detail = await asyncio.wait_for(coro, 30)
+            results.append((name, True, str(detail)))
+        except Exception as exc:   # noqa: BLE001 - report every failure
+            results.append((name, False, f"{type(exc).__name__}: {str(exc)[:200]}"))
+
+    async def alpaca() -> None:
+        from trader.brokers.alpaca_adapter import AlpacaBroker
+        from trader.data.alpaca_data import AlpacaHistory
+
+        key, secret = os.environ["ALPACA_PAPER_KEY"], os.environ["ALPACA_PAPER_SECRET"]
+        b = AlpacaBroker(key, secret, paper=True)
+
+        async def account() -> str:
+            acct = await b.account()
+            return f"paper account {acct.status}, equity ${acct.equity:,.2f}"
+
+        async def drift() -> str:
+            d = (datetime.now(UTC) - await b.clock_time()).total_seconds()
+            if abs(d) > 2:
+                raise RuntimeError(f"clock drift {d:+.2f}s > 2s (A10 would refuse to start)")
+            return f"clock drift {d:+.2f}s"
+
+        async def assets() -> str:
+            cfg = _cfg(a.config)
+            bad = [t for t in cfg.universe.tickers if not await b.is_tradable(t)]
+            if bad:
+                raise RuntimeError(f"not tradable on Alpaca: {', '.join(bad)} (UR-3)")
+            return f"all {len(cfg.universe.tickers)} tickers tradable"
+
+        async def history() -> str:
+            h = AlpacaHistory(key, secret)
+            end = date.today()
+            daily = await h.daily_bars("SPY", end - timedelta(days=120), end)
+            mins = await h.minute_bars("SPY", datetime.now(UTC) - timedelta(days=5),
+                                       datetime.now(UTC) - timedelta(minutes=20))
+            if len(daily) < 60:
+                raise RuntimeError(f"only {len(daily)} daily bars")
+            return f"IEX history ok: {len(daily)} daily, {len(mins)} 1-min bars (SPY)"
+
+        await check("alpaca account", account())
+        await check("alpaca clock", drift())
+        await check("alpaca assets", assets())
+        await check("alpaca history", history())
+
+    async def news() -> None:
+        from trader.news.sources import EdgarFilings, FinnhubNews
+
+        async def finnhub() -> str:
+            fh = FinnhubNews(os.environ["FINNHUB_TOKEN"])
+            items = await fh.fetch(["NVDA"], datetime.now(UTC) - timedelta(days=2))
+            caps = await fh.market_caps(["NVDA"])
+            return f"{len(items)} NVDA items; market cap ${caps.get('NVDA', 0) / 1e12:.2f}T"
+
+        async def edgar() -> str:
+            ua = os.environ.get("SEC_USER_AGENT") or _cfg(a.config).data.sec_user_agent
+            filings = await EdgarFilings(ua).fetch(["NVDA"], datetime.now(UTC) - timedelta(
+                days=120))
+            return f"{len(filings)} NVDA 8-K/6-K filings in 120 days"
+
+        await check("finnhub", finnhub())
+        await check("sec edgar", edgar())
+
+    async def notifier() -> None:
+        from trader.services.notifier_main import channel_from_env
+
+        async def telegram() -> str:
+            from trader.notify.telegram import TelegramNotifier
+
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+            if not token:
+                raise RuntimeError("TELEGRAM_BOT_TOKEN is empty")
+            me = await TelegramNotifier(token, chat or "0").get_me()
+            if not chat:
+                raise RuntimeError(f"bot @{me['username']} ok, but TELEGRAM_CHAT_ID is empty: "
+                                   "message the bot, then run `trader telegram-chats`")
+            return f"bot @{me['username']} ok, chat {chat} (no message sent)"
+
+        async def twilio() -> str:
+            sid, token = os.environ.get("TWILIO_SID", ""), os.environ.get("TWILIO_TOKEN", "")
+            if not token:
+                raise RuntimeError("TWILIO_TOKEN is empty")
+            from twilio.rest import Client
+
+            acct = await asyncio.to_thread(lambda: Client(sid, token).api.v2010.accounts(
+                sid).fetch())
+            return f"account '{acct.friendly_name}' {acct.status} (no message sent)"
+
+        if channel_from_env() == "telegram":
+            await check("telegram", telegram())
+        else:
+            await check("twilio", twilio())
+
+    async def llm() -> None:
+        from trader.llm.ollama_client import OllamaClient
+        from trader.models.llm_schemas import NewsSummaryOut
+
+        cfg = _cfg(a.config)
+        url = os.environ.get("OLLAMA_URL", cfg.llm.base_url)
+        client = OllamaClient(url, cfg.llm.model, num_ctx=cfg.llm.max_context_tokens,
+                              keep_alive=cfg.llm.keep_alive)
+
+        async def model() -> str:
+            if not await client.healthy():
+                raise RuntimeError(f"Ollama at {url} is down or model {cfg.llm.model} is not "
+                                   "pulled (run the model-pull service)")
+            return f"{cfg.llm.model} present at {url}"
+
+        async def generate() -> str:
+            res = await client.structured(
+                agent="check", prompt_version="v1",
+                system="Summarize the items for a trader. Return JSON matching the schema.",
+                data={"ticker": "NVDA", "items": [{"headline": "Nvidia signs a supply deal",
+                                                   "score": 0.6}]},
+                schema=NewsSummaryOut, timeout_s=180)
+            if not res.ok:
+                raise RuntimeError(res.error or "invalid output")
+            return f"valid JSON in {res.latency_ms / 1000:.1f}s ({res.output_tokens} tokens)"
+
+        async def gpu() -> str:
+            st = await client.gpu_status()
+            m = st.get(cfg.llm.model) or next(iter(st.values()), None)
+            if m is None:
+                raise RuntimeError("model not loaded")
+            if m["gpu_pct"] < 100:
+                raise RuntimeError(f"only {m['gpu_pct']}% of {m['size_gb']} GB in GPU memory: "
+                                   "part runs on the CPU (slow); use a smaller model or context")
+            return f"100% on GPU ({m['vram_gb']} GB VRAM)"
+
+        await check("llm model", model())
+        await check("llm generate", generate())
+        await check("llm gpu", gpu())
+
+    async def database() -> None:
+        async def db() -> str:
+            from trader.journal.store import SqlJournal
+
+            url = os.environ["DATABASE_URL"]
+            if a.db_host:
+                url = url.replace("@postgres:", f"@{a.db_host}:")
+            ok = await asyncio.to_thread(SqlJournal(url, create=False).ping)
+            if not ok:
+                raise RuntimeError("cannot connect")
+            return "connected"
+
+        await check("database", db())
+
+    async def go() -> None:
+        for svc in a.service:
+            await {"core": alpaca, "news": news, "notifier": notifier, "llm": llm,
+                   "db": database}[svc]()
+
+    configure_logging("ERROR", json_logs=False)
+    asyncio.run(go())
+    for name, ok, detail in results:
+        print(f"{'PASS' if ok else 'FAIL'}  {name:<16} {detail}")
+    return 0 if all(ok for _, ok, _ in results) else 1
+
+
+ENV_ROLES = {".env.core": ("core", "core_rw"), ".env.news": ("news", "news_rw"),
+             ".env.notifier": ("notifier", "notifier_rw"), ".env.backup": ("readonly", "readonly")}
+REQUIRED_KEYS = {".env.core": ("ALPACA_PAPER_KEY", "ALPACA_PAPER_SECRET"),
+                 ".env.news": ("FINNHUB_TOKEN", "SEC_USER_AGENT"),
+                 ".env.notifier": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")}
+
+
+def read_kv(path: Path) -> dict[str, str]:
+    out = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.lstrip().startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                out[k.strip()] = v.strip()
+    return out
+
+
+def cmd_init_env(a: argparse.Namespace) -> int:
+    """Create missing local setup files from the *.example templates (never overwrites)."""
+    import secrets as pysecrets
+    import string
+
+    root = Path(a.root).resolve()
+    created: list[str] = []
+    kept: list[str] = []
+
+    def write_new(path: Path, text: str) -> None:
+        if path.exists():
+            kept.append(str(path.relative_to(root)))
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+        created.append(str(path.relative_to(root)))
+
+    # docker/.env: database and role names
+    denv = root / "docker" / ".env"
+    if not denv.exists():
+        t = (root / "docker" / ".env.example").read_text(encoding="utf-8")
+        prefix = f"{a.prefix.rstrip('_')}_" if a.prefix else ""
+        db = a.database or (f"{prefix}trader" if prefix else "trader")
+        admin = f"{prefix}admin" if prefix else "trader_admin"
+        t = (t.replace("PG_DATABASE=trader", f"PG_DATABASE={db}")
+             .replace("PG_ADMIN_USER=trader_admin", f"PG_ADMIN_USER={admin}")
+             .replace("DB_ROLE_PREFIX=\n", f"DB_ROLE_PREFIX={prefix}\n"))
+        write_new(denv, t)
+    else:
+        kept.append("docker/.env")
+    names = read_kv(denv)
+    prefix, db = names.get("DB_ROLE_PREFIX", ""), names.get("PG_DATABASE", "trader")
+
+    # secrets/: one random password per role
+    alphabet = string.ascii_letters + string.digits
+    for role in ("admin", "core", "news", "notifier", "readonly"):
+        write_new(root / "secrets" / f"pg_{role}_password.txt",
+                  "".join(pysecrets.choice(alphabet) for _ in range(28)))
+
+    # env files with the database URL filled in
+    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay"):
+        t = (root / f"{name}.example").read_text(encoding="utf-8")
+        if name in ENV_ROLES:
+            role, user = ENV_ROLES[name]
+            pw = (root / "secrets" / f"pg_{role}_password.txt").read_text(encoding="utf-8").strip()
+            t = "\n".join(
+                f"DATABASE_URL=postgresql+psycopg://{prefix}{user}:{pw}@postgres:5432/{db}"
+                if ln.startswith("DATABASE_URL=") else ln for ln in t.splitlines()) + "\n"
+        write_new(root / name, t)
+
+    # config.yaml
+    write_new(root / "config" / "config.yaml",
+              (root / "config" / "config.example.yaml").read_text(encoding="utf-8"))
+
+    print("created: " + (", ".join(created) or "nothing"))
+    if kept:
+        print("kept existing (not changed): " + ", ".join(kept))
+    missing = [f"{name}: {k}" for name, keys in REQUIRED_KEYS.items()
+               for k in keys if not read_kv(root / name).get(k)
+               or "<" in read_kv(root / name).get(k, "")]
+    cfg_text = (root / "config" / "config.yaml").read_text(encoding="utf-8")
+    if "your-email@example.com" in cfg_text or "owner@example.com" in cfg_text:
+        missing.append("config/config.yaml: data.sec_user_agent (name + email)")
+    if missing:
+        print("still to fill in (docs/ACCOUNT_SETUP.md):")
+        for m in missing:
+            print(f"  - {m}")
+    print("then: trader check-connections --service core --service news --service notifier "
+          "--env-file .env.core --env-file .env.news --env-file .env.notifier")
+    return 0
+
+
+def cmd_telegram_chats(a: argparse.Namespace) -> int:
+    """List chats that messaged the bot, to find TELEGRAM_CHAT_ID (setup helper)."""
+    from trader.notify.telegram import TelegramNotifier
+
+    for f in a.env_file or []:
+        load_env_file(f)
+    tg = TelegramNotifier(os.environ["TELEGRAM_BOT_TOKEN"], "0")
+    me = asyncio.run(tg.get_me())
+    chats = asyncio.run(tg.recent_chats())
+    print(f"bot @{me['username']}")
+    if not chats:
+        print("no messages yet: open the bot in Telegram, press Start or send STATUS, rerun")
+        return 1
+    for cid, name in chats.items():
+        print(f"chat id {cid}  ({name})")
+    return 0
 
 
 def cmd_validate_journal(a: argparse.Namespace) -> int:
@@ -346,6 +634,20 @@ def build_parser() -> argparse.ArgumentParser:
     bk.add_argument("--once", action="store_true")
     bk.set_defaults(fn=cmd_backup)
     sub.add_parser("validate-journal").set_defaults(fn=cmd_validate_journal)
+    ck = sub.add_parser("check-connections", help="read-only credential checks")
+    ck.add_argument("--service", action="append",
+                    choices=["core", "news", "notifier", "llm", "db"], required=True)
+    ck.add_argument("--env-file", action="append", help="load KEY=value file(s) first")
+    ck.add_argument("--db-host", default=None, help="replace host 'postgres' (host runs)")
+    ck.set_defaults(fn=cmd_check)
+    ie = sub.add_parser("init-env", help="create missing setup files from the examples")
+    ie.add_argument("--root", default=".")
+    ie.add_argument("--prefix", default="", help="database role prefix, e.g. srb")
+    ie.add_argument("--database", default="", help="database name (default <prefix>_trader)")
+    ie.set_defaults(fn=cmd_init_env)
+    tc = sub.add_parser("telegram-chats", help="show chat ids that messaged the bot")
+    tc.add_argument("--env-file", action="append")
+    tc.set_defaults(fn=cmd_telegram_chats)
     return p
 
 

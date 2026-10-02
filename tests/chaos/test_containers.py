@@ -31,15 +31,11 @@ def test_only_trader_core_has_broker_keys() -> None:
     assert env_files["trader-core"] == ["../.env.core"]
     assert env_files["news-sentiment"] == ["../.env.news"]
     assert env_files["notifier"] == ["../.env.notifier"]
-    ex = (ROOT / ".env.example").read_text(encoding="utf-8")
     blocks = {}
-    current = None
-    for line in ex.splitlines():
-        if line.startswith("# ---- .env."):
-            current = line.split()[2]
-            blocks[current] = []
-        elif current and "=" in line and not line.startswith("#"):
-            blocks[current].append(line.split("=")[0])
+    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup"):
+        ex = (ROOT / f"{name}.example").read_text(encoding="utf-8")
+        blocks[name] = [ln.split("=")[0] for ln in ex.splitlines()
+                        if "=" in ln and not ln.startswith("#")]
     assert any(k.startswith("ALPACA") for k in blocks[".env.core"])
     for other in (".env.news", ".env.notifier", ".env.backup"):
         assert not any(k.startswith("ALPACA") for k in blocks[other]), other
@@ -62,8 +58,11 @@ def test_no_inbound_ports_and_hardened_containers() -> None:
 def test_init_sql_roles_and_trigger() -> None:
     sql = (ROOT / "docker" / "postgres" / "init.sql").read_text(encoding="utf-8")
     for role in ("core_rw", "news_rw", "notifier_rw", "readonly"):
-        assert f"ROLE {role}" in sql
+        assert f":prefix '{role}'" in sql
     assert "outbox_guard" in sql and "RAISE EXCEPTION" in sql
+    assert "PASSWORD '" not in sql   # passwords come from Docker secrets, never from git
+    sh = (ROOT / "docker" / "postgres" / "init.sh").read_bytes()
+    assert b"/run/secrets/" in sh and bytes([13, 10]) not in sh   # LF only (Linux)
 
 
 @pytest.mark.integration

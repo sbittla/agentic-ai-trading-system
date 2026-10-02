@@ -116,6 +116,19 @@ class OllamaClient:
         except httpx.HTTPError:
             return False
 
+    async def gpu_status(self) -> dict[str, Any]:
+        """Loaded models and how much of each is in GPU memory (Ollama ``/api/ps``)."""
+        async with self._client(10) as c:
+            r = await c.get("/api/ps")
+            r.raise_for_status()
+        out: dict[str, Any] = {}
+        for m in r.json().get("models", []):
+            size, vram = int(m.get("size", 0)), int(m.get("size_vram", 0))
+            out[m.get("name", "?")] = {"size_gb": round(size / 1e9, 2),
+                                       "vram_gb": round(vram / 1e9, 2),
+                                       "gpu_pct": round(100 * vram / size) if size else 0}
+        return out
+
     def p95_ms(self) -> int:
         xs = sorted(self.latencies_ms[-50:])
         return xs[int(len(xs) * 0.95) - 1] if xs else 0

@@ -107,8 +107,10 @@ def test_secrets_not_committed_and_redacted(monkeypatch: pytest.MonkeyPatch) -> 
 def test_live_banner_and_separate_live_env() -> None:
     compose = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8"))
     assert compose["services"]["trader-core"]["env_file"] == ["../.env.core"]
-    ex = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "# ALPACA_LIVE_KEY=" in ex   # commented out until go-live
+    live = (ROOT / ".env.live.example").read_text(encoding="utf-8")
+    assert "ALPACA_LIVE_KEY=" in live and "go-live only" in live
+    core = (ROOT / ".env.core.example").read_text(encoding="utf-8")
+    assert "ALPACA_LIVE" not in core   # live keys only in their own file
 
 
 @pytest.mark.rule("SEC-8")
@@ -177,8 +179,71 @@ def test_no_print_statements_in_src() -> None:
     assert offenders == []
 
 
-def test_env_example_has_one_block_per_container() -> None:
-    ex = (ROOT / ".env.example").read_text(encoding="utf-8")
-    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay"):
-        assert name in ex
-    assert os.path.exists(ROOT / ".env.example")
+def test_one_example_per_env_file_and_examples_hold_no_secrets() -> None:
+    for name in (".env.core", ".env.live", ".env.news", ".env.notifier", ".env.backup",
+                 ".env.replay"):
+        ex = ROOT / f"{name}.example"
+        assert os.path.exists(ex), name
+        for ln in ex.read_text(encoding="utf-8").splitlines():
+            if "=" in ln and not ln.startswith("#"):
+                key, _, val = ln.partition("=")
+                if re.search(r"(KEY|SECRET|TOKEN|SID)$", key):
+                    assert val == "", f"{name}: {key} must be empty in the example"
+    assert (ROOT / "docker" / ".env.example").exists()
+    assert (ROOT / "secrets" / "README.md").exists()
+
+
+def test_init_env_creates_files_without_overwriting(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import shutil
+
+    from trader.cli import main, read_kv
+
+    for name in (".env.core", ".env.live", ".env.news", ".env.notifier", ".env.backup",
+                 ".env.replay"):
+        shutil.copy(ROOT / f"{name}.example", tmp_path / f"{name}.example")
+    (tmp_path / "docker").mkdir()
+    shutil.copy(ROOT / "docker" / ".env.example", tmp_path / "docker" / ".env.example")
+    (tmp_path / "config").mkdir()
+    shutil.copy(ROOT / "config" / "config.example.yaml", tmp_path / "config" /
+                "config.example.yaml")
+    assert main(["init-env", "--root", str(tmp_path), "--prefix", "srb"]) == 0
+    names = read_kv(tmp_path / "docker" / ".env")
+    assert names["DB_ROLE_PREFIX"] == "srb_" and names["PG_DATABASE"] == "srb_trader"
+    pw = (tmp_path / "secrets" / "pg_news_password.txt").read_text()
+    assert re.fullmatch(r"[A-Za-z0-9]{28}", pw)
+    url = read_kv(tmp_path / ".env.news")["DATABASE_URL"]
+    assert url == f"postgresql+psycopg://srb_news_rw:{pw}@postgres:5432/srb_trader"
+    (tmp_path / ".env.core").write_text("ALPACA_PAPER_KEY=mine\n")
+    assert main(["init-env", "--root", str(tmp_path)]) == 0     # second run changes nothing
+    assert (tmp_path / ".env.core").read_text() == "ALPACA_PAPER_KEY=mine\n"
+    assert (tmp_path / "secrets" / "pg_news_password.txt").read_text() == pw
+
+
+def test_whatsapp_uses_template_outside_24h_session() -> None:
+    from trader.notify.whatsapp import WhatsAppNotifier
+
+    wa = WhatsAppNotifier.__new__(WhatsAppNotifier)
+    wa.content_sid, wa.content_var, wa.to = "HXtest", "1", "whatsapp:+1"
+    wa.last_inbound_at = None
+    args = wa.message_args("hello", NOW)
+    assert args["content_sid"] == "HXtest" and '"1": "hello"' in args["content_variables"]
+    wa.last_inbound_at = NOW - timedelta(hours=2)
+    assert wa.message_args("hello", NOW) == {"body": "hello"}
+    wa.content_sid = None
+    wa.last_inbound_at = None
+    assert wa.message_args("hello", NOW) == {"body": "hello"}
+
+
+async def test_whatsapp_prime_session_never_replays_old_commands() -> None:
+    from types import SimpleNamespace
+
+    from trader.notify.whatsapp import WhatsAppNotifier
+
+    old = SimpleNamespace(sid="SM1", direction="inbound", from_="whatsapp:+1", body="FLATTEN",
+                          date_sent=datetime.now(UTC) - timedelta(hours=3))
+    wa = WhatsAppNotifier.__new__(WhatsAppNotifier)
+    wa.client = SimpleNamespace(messages=SimpleNamespace(list=lambda **kw: [old]))
+    wa.to, wa.from_ = "whatsapp:+1", "whatsapp:+2"
+    wa._seen, wa.last_inbound_at, wa.content_sid = set(), None, None
+    assert await wa.prime_session() == old.date_sent and wa.session_open()
+    assert await wa.poll() == []   # the old FLATTEN is known but never executed

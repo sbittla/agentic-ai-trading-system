@@ -36,6 +36,7 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 
 | Document | What it covers |
 | --- | --- |
+| [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |
 | [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |
 | [RUNBOOK.md](RUNBOOK.md) | Setup, daily routine, commands, incident playbooks, go-live checklist |
 | [MONITORING.md](MONITORING.md) | Health score, trading metrics, dashboards, alert routing |
@@ -52,4 +53,4 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [`pyproject.toml`](../pyproject.toml) | Package and tool configuration |
 | [`tools/ci.yml`](../tools/ci.yml) | CI workflow: lint, types, tests, traceability, secret scan. Move it to `.github/workflows/ci.yml` to enable it |
 | [`tools/check_traceability.py`](../tools/check_traceability.py) | Fails CI when a rule ID has no test |
-| [`.env.example`](../.env.example) | One block per container env file |
+| `.env.<name>.example`, [`docker/.env.example`](../docker/.env.example), [`secrets/README.md`](../secrets/README.md) | Templates for every local setup file; `trader init-env` creates the real ones ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md)) |

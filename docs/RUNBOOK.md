@@ -8,15 +8,15 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 
 ## 1. One-time setup
 
-1. Install Docker Desktop (WSL2 backend) and the NVIDIA driver with WSL GPU support; confirm `docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` works.
+1. Install Docker Desktop (WSL2 backend) and the NVIDIA driver with WSL GPU support; confirm `docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` works ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
 2. Create an Alpaca account; generate **paper** API keys. Keep live keys ungenerated until stage 5 of the test plan.
-3. Create a Finnhub key, a Reddit "script" app, and a Twilio WhatsApp sender.
+3. Create a Finnhub key, a Reddit "script" app (optional), and a Twilio WhatsApp sandbox sender. Step-by-step instructions for every account, key and password are in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
 4. Copy `config/config.example.yaml` to `config/config.yaml`; review every value in `risk` and `wash_sale`.
-5. Create one env file per container from the blocks in `.env.example` (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) and `secrets/pg_admin_password.txt`; set strong, different Postgres role passwords and put the same ones in `docker/postgres/init.sql` before first start ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
-6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull` to download the model set in `OLLAMA_MODEL` (default `qwen3:8b`; set `OLLAMA_MODEL=qwen3:14b` with a GPU of 12 GB or more, and pin the same tag in `llm.model`). The runtime `ollama` service has no internet access (SEC-9), so it cannot pull models itself.
+5. Run `trader init-env --prefix <your prefix>` to create the env files (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) from their `.example` templates and the five password files in `secrets/` (`pg_admin_password.txt`, `pg_core_password.txt`, `pg_news_password.txt`, `pg_notifier_password.txt`, `pg_readonly_password.txt`); optionally set the database and role names in `docker/.env`. Run `trader check-connections` to verify the keys ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §6, §8) ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
+6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull` to download the model set in `OLLAMA_MODEL` (default `qwen3:8b`; set `OLLAMA_MODEL=qwen3:14b` with a GPU of 12 GB or more, and pin the same tag in `llm.model`). The runtime `ollama` service has no internet access (SEC-9), so it cannot pull models itself. If Docker Desktop is unstable during large downloads, use `tools/fetch_ollama_model.py` and `tools/import_ollama_model.ps1` instead ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
 7. `docker compose -f docker/docker-compose.yml run --rm trader-core trader migrate` to create the journal tables.
 8. `docker compose -f docker/docker-compose.yml up -d` to start all six services; `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
-9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works.
+9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works. With the Twilio sandbox, WhatsApp delivers free-form messages only within 24 hours of your last message, so reply `STATUS` once a day ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §5).
 10. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
 
 ## 2. Daily routine for the owner
@@ -33,9 +33,9 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 
 ## 3. Commands
 
-Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals need the one-time code, and destructive commands need a second confirmation code ([SECURITY.md](SECURITY.md) SEC-1..3).
+Commands are accepted only from allow-listed senders (`TELEGRAM_ALLOWED_CHAT_IDS` / `TELEGRAM_CHAT_ID` with Telegram, the default channel per ADR-014; `WHATSAPP_ALLOWED_SENDERS` with WhatsApp); approvals need the one-time code, and destructive commands need a second confirmation code ([SECURITY.md](SECURITY.md) SEC-1..3).
 
-| Action | WhatsApp | Local |
+| Action | Telegram / WhatsApp | Local |
 | --- | --- | --- |
 | Status | `STATUS` | `docker compose -f docker/docker-compose.yml exec trader-core trader status` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
@@ -54,7 +54,7 @@ Commands are accepted only from numbers in `WHATSAPP_ALLOWED_SENDERS`; approvals
 
 ### Qwen container down or slow
 1. Entries are blocked automatically (no trade without review).
-2. `docker compose restart ollama`; check GPU with `nvidia-smi`.
+2. `docker compose restart ollama`; check GPU with `nvidia-smi` and `trader check-connections --service llm` (run inside `trader-core`): `llm gpu` must be 100% on GPU.
 3. If GPU memory is exhausted, switch `llm.model` to the 8B model for the next day.
 
 ### Alpaca API errors or outage

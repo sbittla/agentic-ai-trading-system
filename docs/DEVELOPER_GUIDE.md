@@ -18,13 +18,12 @@ py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev,notifier]"   # add ,news only if you work on FinBERT (large download)
 
-# Env files: replay needs none; paper trading needs .env.core, .env.news, .env.notifier
-copy .env.example .env.replay      # then keep only the .env.replay block
-copy config\config.example.yaml config\config.yaml
+# Local files from the *.example templates (never overwrites; replay needs no keys)
+trader init-env
 
-# Model server
+# Model server on the local NVIDIA GPU (ACCOUNT_SETUP.md §0)
 docker compose -f docker/docker-compose.yml up -d ollama
-docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen3:14b
+docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull
 
 # Checks
 ruff check src tests

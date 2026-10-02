@@ -14,6 +14,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Literal
 
 from trader.journal import schema as s
 from trader.journal.store import SqlJournal
@@ -41,7 +42,13 @@ def parse(text: str, sender: str, now: datetime, source: str = "whatsapp") -> Co
         else:
             return None
     return Command(name=name, arg=arg, sender=sender, received_at=now,
-                   source="local" if source == "local" else "whatsapp")
+                   source=command_source(source))
+
+
+def command_source(value: str | None) -> Literal["whatsapp", "telegram", "local"]:
+    if value == "local":
+        return "local"
+    return "telegram" if value == "telegram" else "whatsapp"
 
 
 def log_command(journal: SqlJournal | None, ts: datetime, sender: str, text: str,
@@ -57,16 +64,19 @@ class SenderFilter:
 
     allowed: frozenset[str]
     journal: SqlJournal | None = None
+    channel: str = "whatsapp"
 
     @classmethod
-    def from_env(cls, value: str, journal: SqlJournal | None = None) -> SenderFilter:
-        return cls(frozenset(x.strip() for x in value.split(",") if x.strip()), journal)
+    def from_env(cls, value: str, journal: SqlJournal | None = None,
+                 channel: str = "whatsapp") -> SenderFilter:
+        return cls(frozenset(x.strip() for x in value.split(",") if x.strip()), journal,
+                   channel)
 
     def accept(self, sender: str, text: str, now: datetime) -> bool:
         ok = sender in self.allowed
         if not ok:
             log_command(self.journal, now, sender, text, False, "CMD_REJECTED: sender not on "
-                        "allow-list (SEC-1)", "whatsapp")
+                        "allow-list (SEC-1)", self.channel)
         return ok
 
 

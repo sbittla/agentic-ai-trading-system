@@ -6,6 +6,8 @@ SQLite file with the same schema, so every run is self-contained (BACKTEST_ENGIN
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
@@ -78,24 +80,32 @@ class SqlJournal:
         except OperationalError as exc:
             raise JournalUnavailable(str(exc)) from exc
 
-    def apply_grants(self) -> None:
-        """Least-privilege grants per role (SEC-17); Postgres only, run by `trader migrate`."""
+    def apply_grants(self, prefix: str | None = None) -> list[str]:
+        """Least-privilege grants per role (SEC-17); Postgres only, run by `trader migrate`.
+        Role names carry ``DB_ROLE_PREFIX`` (e.g. ``srb_news_rw``). Returns failed statements."""
         if self.is_sqlite:
-            return
-        stmts = [f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO readonly",
-                 f"GRANT SELECT ON {s.SCHEMA}.config_snapshots TO news_rw, notifier_rw"]
+            return []
+        p = os.environ.get("DB_ROLE_PREFIX", "") if prefix is None else prefix
+        if not re.fullmatch(r"[a-z0-9_]*", p):
+            raise ValueError(f"invalid DB_ROLE_PREFIX {p!r}")
+        news, notifier, ro = f'"{p}news_rw"', f'"{p}notifier_rw"', f'"{p}readonly"'
+        stmts = [f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO {ro}",
+                 f"GRANT SELECT ON {s.SCHEMA}.config_snapshots TO {news}, {notifier}"]
         for t in s.NEWS_WRITES:
-            stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO news_rw")
-            stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO news_rw")
+            stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {news}")
+            stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {news}")
         for t in s.NOTIFIER_WRITES:
-            stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO notifier_rw")
-            stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO notifier_rw")
-        with self.engine.begin() as c:
-            for st in stmts:
-                try:
+            stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {notifier}")
+            stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {notifier}")
+        failed = []
+        for st in stmts:   # one transaction each: a failure must not abort the others
+            try:
+                with self.engine.begin() as c:
                     c.execute(text(st))
-                except SQLAlchemyError as exc:   # role missing in a dev database
-                    log.warning("grant_failed", stmt=st, error=str(exc))
+            except SQLAlchemyError as exc:
+                log.error("grant_failed", stmt=st, error=str(exc))
+                failed.append(st)
+        return failed
 
     def ping(self) -> bool:
         try:

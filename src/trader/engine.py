@@ -1018,7 +1018,7 @@ class TradingEngine:
             self.risk.state.paused_styles.discard(style)
         elif action == "STATUS":
             reply = self.status_text()
-        if cmd.source == "whatsapp" or action in ("NEED_CONFIRM", "STATUS"):
+        if cmd.source != "local" or action in ("NEED_CONFIRM", "STATUS"):
             await self.say(reply, "command_reply")
         return reply
 
