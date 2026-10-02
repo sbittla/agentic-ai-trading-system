@@ -47,6 +47,8 @@ Commands are accepted only from allow-listed senders (`TELEGRAM_ALLOWED_CHAT_IDS
 
 ## 4. Incident playbooks
 
+Setup and machine problems (Docker Desktop crashes, model loading, GPU, Telegram/Twilio, database names and passwords) are in [TROUBLESHOOTING.md](TROUBLESHOOTING.md), with a step-by-step recovery sequence.
+
 ### Data stream stale
 1. System blocks entries automatically and alerts.
 2. Check internet; check Alpaca status page.

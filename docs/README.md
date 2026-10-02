@@ -39,6 +39,7 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |
 | [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |
 | [RUNBOOK.md](RUNBOOK.md) | Setup, daily routine, commands, incident playbooks, go-live checklist |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Recovery sequence for Docker/WSL crashes and model loading; known problems with symptom, cause and fix |
 | [MONITORING.md](MONITORING.md) | Health score, trading metrics, dashboards, alert routing |
 | [REPORT_TEMPLATES.md](REPORT_TEMPLATES.md) | Pre-flight, game plan, approvals, trade events, daily/weekly/monthly reports |
 

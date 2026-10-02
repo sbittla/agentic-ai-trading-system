@@ -44,7 +44,7 @@ Qwen runs in the `ollama` container on the local NVIDIA GPU (QW-1).
 
 Compose already passes the GPU through (`gpus: all`) and sizes Ollama for an 8 GB card: one model loaded, one request at a time, flash attention and an 8-bit KV cache, kept loaded for 8 hours. If `llm gpu` reports less than 100%, part of the model runs on the CPU and calls take minutes: close other GPU programs, lower `llm.max_context_tokens`, or use a smaller model.
 
-**Docker Desktop stability (seen on this machine):** large downloads inside Docker crashed Docker Desktop's WSL engine several times (`wsl-bootstrap` exit status 0xc00000fd), even with the `model-pull` service limited to 2 download streams. The reliable path is to download the model on Windows and copy it into the volume (resumable, sha256-verified, and the runtime `ollama` still never touches the internet):
+**Docker Desktop stability (seen on this machine; full recovery sequence in [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §1):** large downloads inside Docker crashed Docker Desktop's WSL engine several times (`wsl-bootstrap` exit status 0xc00000fd), even with the `model-pull` service limited to 2 download streams. The reliable path is to download the model on Windows and copy it into the volume (resumable, sha256-verified, and the runtime `ollama` still never touches the internet):
 
 ```powershell
 .venv\Scripts\python tools/fetch_ollama_model.py qwen3:8b data/ollama_models   # rerun to resume
