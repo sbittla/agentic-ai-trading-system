@@ -1,0 +1,17 @@
+# Journal data source (docs/MONITORING.md §3). Read-only role; password from a Docker secret.
+apiVersion: 1
+datasources:
+  - name: Journal
+    uid: journal
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: ${PG_READONLY_USER}
+    secureJsonData:
+      password: $__file{/run/secrets/pg_readonly_password}
+    jsonData:
+      database: ${PG_DATABASE}
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: false

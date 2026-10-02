@@ -28,7 +28,7 @@ The system can move real money, so anything that can send it a command, feed it 
 | T6 | API keys leaked through git, logs or prompts | **SEC-6** keys only in `.env` / Windows Credential Manager; `.env` git-ignored; secret scanning in CI; log redaction of anything matching key patterns; keys never passed to the Ollama client |
 | T7 | Live keys used during development | **SEC-7** live keys loaded only when `environment: live`; separate `.env.live` file readable only by the trader container; startup banner shows PAPER or LIVE on every WhatsApp message |
 | T8 | Unauthorised config change loosening limits | **SEC-8** config is in git; A10 logs the config hash daily; loosening needs the CF-3 paper period; a hash change not matching a commit blocks start |
-| T9 | Ollama or Postgres reachable from the network | **SEC-9** both run on the internal Docker network only; no host ports published (Grafana binds to 127.0.0.1 only) |
+| T9 | Ollama or Postgres reachable from the network | **SEC-9** both run on the internal Docker network only; no host ports published (Grafana is internal too; only its `grafana-proxy` binds to 127.0.0.1) |
 | T10 | Compromised Python dependency | **SEC-10** pinned versions with hashes (`pip-compile --generate-hashes`); Dependabot alerts; no packages installed at runtime |
 | T11 | Host compromise or theft | **SEC-11** BitLocker on the data drive; Windows account with a strong password; backups encrypted |
 | T12 | Runaway loop sends many orders | **SEC-12** order-rate guard in A8: at most 10 order submissions per minute and 30 per day, then automatic kill switch |

@@ -1,0 +1,310 @@
+{
+  "uid": "trader-data",
+  "title": "5. Data quality",
+  "tags": [
+    "trader"
+  ],
+  "timezone": "America/New_York",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-3d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Latest bar per ticker",
+      "description": "During a window the stream must be < 10 s old; > 60 s blocks entries.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ticker, max(ts) AS last_bar, extract(epoch FROM now() - max(ts))::int AS age_s,\n       count(*) FILTER (WHERE ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York') AS bars_today\nFROM journal.bars_1m GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Stream gaps (> 1 min between bars, market hours)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 7,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ticker, count(*) AS gaps, max(gap) AS longest FROM (\n  SELECT ticker, ts - lag(ts) OVER (PARTITION BY ticker, (ts AT TIME ZONE 'America/New_York')::date\n                                    ORDER BY ts) AS gap\n  FROM journal.bars_1m WHERE $__timeFilter(ts)) g\nWHERE gap > interval '1 minute' GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Health problems (non-green checks)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 17,
+        "y": 0,
+        "w": 7,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT s.ts, h.key AS check, h.value AS status\nFROM journal.status_snapshots s, json_each_text(s.json->'health') h\nWHERE $__timeFilter(s.ts) AND h.value <> 'green' ORDER BY s.ts DESC LIMIT 300"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "green": {
+                  "color": "green",
+                  "index": 0
+                },
+                "amber": {
+                  "color": "orange",
+                  "index": 1
+                },
+                "red": {
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Bars per hour",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(ts, '1h'), ticker AS metric, count(*) AS value FROM journal.bars_1m\nWHERE $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "News items per hour by source",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(received_at, '1h'), source AS metric, count(*) AS value\nFROM journal.news_items WHERE $__timeFilter(received_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Service heartbeats (last seen)",
+      "description": "news-sentiment: red after 5 min; notifier: red after 2 min.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT source AS service, max(created_at) AS last_heartbeat,\n       extract(epoch FROM now() - max(created_at))::int AS age_s\nFROM journal.outbox WHERE channel = 'heartbeat' GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent news",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 19,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT received_at, ticker, source, round(finbert_score::numeric, 2) AS sentiment, suspicious,\n       headline\nFROM journal.news_items WHERE $__timeFilter(received_at) ORDER BY received_at DESC LIMIT 200"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Incidents",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ts, type, detail, resolved_at FROM journal.incidents\nWHERE $__timeFilter(ts) ORDER BY ts DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}

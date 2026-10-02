@@ -41,17 +41,33 @@ Pre-flight is **green** only if every check is green or amber; any red sends "NO
 | Rule breaches | Any order without a full decision record, any day trade open past its flatten time | Any (immediate alert, kill switch) |
 | Time in market | Minutes with an open day trade outside windows | > 0 |
 
-## 3. Dashboards (Grafana, optional from milestone M7)
+## 3. Dashboards (Grafana, `monitoring` profile)
 
-Grafana runs as the `monitoring` Compose profile, bound to `127.0.0.1:3000`, and reads Postgres through the `readonly` role. No separate metrics store is needed because every metric is a journal query (ADR-012).
+Start or stop the browser view (it is optional; trading does not depend on it):
 
-1. **Today:** health, open positions with stops and R, P&L vs limits, trades left today, locked tickers.
-2. **Pipeline:** setups → proposals → reviews → approvals → fills funnel per window, with reason codes.
-3. **Performance:** equity curve, drawdown, expectancy by setup, by ticker, by window, by weekday.
-4. **LLM:** latency p50/p95, validity, skip rate, tokens per call, by prompt version.
-5. **Data quality:** stream gaps, back-fills, stale minutes, IEX volume vs history.
+```powershell
+docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana grafana-proxy
+docker compose -f docker/docker-compose.yml --profile monitoring stop grafana grafana-proxy
+```
 
-Until Grafana is set up, the same views are produced as a static HTML report at 4:30 PM.
+Open http://localhost:3000, user `admin`, password in `secrets/grafana_admin_password.txt`. The home page is **Today**; the others are under Dashboards → Trader.
+
+How it is wired (SEC-9, SEC-17):
+
+- `grafana` (`grafana/grafana:13.2.3`) is on the `internal` network only, so it has no internet and no host port. Plugin auto-install is off (`GF_PLUGINS_PREINSTALL_DISABLED`), so it runs the plugins bundled in the image.
+- `grafana-proxy` (`nginx:1.30.5-alpine`) is the only door: it publishes `127.0.0.1:3000` and forwards to Grafana. An `internal` network cannot publish ports, and Docker Desktop ignores "no NAT" bridge options, hence the proxy.
+- The `Journal` data source logs in as the `<prefix>readonly` role (SELECT only), with the password read from the `pg_readonly_password` Docker secret. No separate metrics store is needed because every metric is a journal query (ADR-012).
+- Data source and dashboards are provisioned from `docker/grafana/` and cannot be edited in the UI. To change a panel, edit `tools/build_grafana_dashboards.py`, run `python tools/build_grafana_dashboards.py`, and Grafana picks it up within 30 s. A unit test fails if the JSON is stale or a query writes.
+
+| Dashboard | Shows |
+| --- | --- |
+| **1. Today** (refresh 10 s) | System alive, kill switch, equity, day P&L vs the 1.5% limit, trades left, health checks, open positions, locks, today's decisions, game plan, open incidents |
+| **2. Pipeline** | Funnel setups → proposals → LLM agreed → risk approved → owner yes → entry orders → fills; no-trade reasons; decisions over time; approvals with response time; LLM reviews |
+| **3. Performance** | Win rate, expectancy (R), profit factor, P&L, drawdown; equity curve; expectancy by setup, ticker, window and weekday; daily metrics; closed trades |
+| **4. LLM (Qwen)** | Calls, JSON validity, p50/p95 latency by agent, disagree rate, tokens, errors, per prompt version, recent calls with output |
+| **5. Data quality** | Last bar age per ticker, stream gaps, non-green health history, bars and news per hour, service heartbeats, incidents |
+
+Thresholds on the panels match the tables in §1 and §2. Panels stay empty until the system has traded or replayed a day. The 4:30 PM static HTML report is still produced.
 
 ## 4. Alert routing
 

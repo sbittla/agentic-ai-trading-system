@@ -1,0 +1,250 @@
+{
+  "uid": "trader-pipeline",
+  "title": "2. Pipeline",
+  "tags": [
+    "trader"
+  ],
+  "timezone": "America/New_York",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "bargauge",
+      "title": "Funnel (selected time range)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT * FROM (\n  SELECT 1 AS n, '1 setups' AS stage, count(*) AS count FROM journal.setups WHERE $__timeFilter(ts)\n  UNION ALL SELECT 2, '2 proposals', count(*) FROM journal.proposals WHERE $__timeFilter(ts)\n  UNION ALL SELECT 3, '3 LLM agreed', count(*) FROM journal.reviews\n            WHERE $__timeFilter(ts) AND verdict = 'agree'\n  UNION ALL SELECT 4, '4 risk approved', count(*) FROM journal.decisions\n            WHERE $__timeFilter(ts) AND result IN ('APPROVE', 'NEEDS_APPROVAL')\n  UNION ALL SELECT 5, '5 owner said yes', count(*) FROM journal.approvals\n            WHERE $__timeFilter(sent_at) AND answer = 'yes'\n  UNION ALL SELECT 6, '6 entry orders', count(*) FROM journal.orders\n            WHERE $__timeFilter(ts) AND leg = 'entry'\n  UNION ALL SELECT 7, '7 entry fills', count(*) FROM journal.fills f\n            JOIN journal.orders o USING (client_order_id) WHERE $__timeFilter(f.ts) AND o.leg = 'entry'\n) t ORDER BY n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": true,
+          "fields": "/count/"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "barchart",
+      "title": "No-trade reasons",
+      "description": "MONITORING \u00a72: one code above 70% for 5 days may mean a miscalibrated filter.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT coalesce(reason_code, result) AS reason, count(*) AS count FROM journal.decisions\nWHERE $__timeFilter(ts) AND result NOT IN ('APPROVE', 'NEEDS_APPROVAL')\nGROUP BY 1 ORDER BY 2 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "reason"
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Decisions over time",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(ts, '1h'), result AS metric, count(*) AS value FROM journal.decisions\nWHERE $__timeFilter(ts) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Approvals (response time, answer)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT sent_at, proposal_id, answer,\n       extract(epoch FROM answered_at - sent_at)::int AS seconds_to_answer\nFROM journal.approvals WHERE $__timeFilter(sent_at) ORDER BY sent_at DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "LLM reviews",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT r.ts, p.ticker, r.verdict, r.main_risk, r.rules_broken\nFROM journal.reviews r LEFT JOIN journal.proposals p USING (proposal_id)\nWHERE $__timeFilter(r.ts) ORDER BY r.ts DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "All decisions",
+      "description": "",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "journal"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "journal"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ts, ticker, setup, style, \"window\", result, reason_code, qty, risk_usd, override, detail\nFROM journal.decisions WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}

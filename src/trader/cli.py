@@ -497,10 +497,11 @@ def cmd_init_env(a: argparse.Namespace) -> int:
     names = read_kv(denv)
     prefix, db = names.get("DB_ROLE_PREFIX", ""), names.get("PG_DATABASE", "trader")
 
-    # secrets/: one random password per role
+    # secrets/: one random password per role, plus the Grafana admin login
     alphabet = string.ascii_letters + string.digits
-    for role in ("admin", "core", "news", "notifier", "readonly"):
-        write_new(root / "secrets" / f"pg_{role}_password.txt",
+    for name in (*(f"pg_{r}" for r in ("admin", "core", "news", "notifier", "readonly")),
+                 "grafana_admin"):
+        write_new(root / "secrets" / f"{name}_password.txt",
                   "".join(pysecrets.choice(alphabet) for _ in range(28)))
 
     # env files with the database URL filled in

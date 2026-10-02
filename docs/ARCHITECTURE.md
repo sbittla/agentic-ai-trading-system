@@ -51,7 +51,8 @@ flowchart LR
 | 5 | `postgres` | `postgres:16` (pinned) | Always | internal only | Journal, tax lots and the cross-container outbox bus |
 | 6 | `backup` | target `tools` | Always (sleeps; runs nightly) | internal + local backup folder | Nightly `pg_dump` and Parquet copy |
 | — | `replay` | target `core` | On demand (`--profile replay`) | internal only | Backtests and replays use the same code as live, with fake broker and data |
-| — | `grafana` | `grafana/grafana` (pinned) | From milestone M7 (`--profile monitoring`) | internal, port bound to localhost | Dashboards read Postgres directly; no Prometheus needed |
+| — | `grafana` | `grafana/grafana:13.2.3` | Optional (`--profile monitoring`) | internal only (no internet, no port) | Dashboards read Postgres directly as `readonly`; no Prometheus needed ([MONITORING.md](MONITORING.md) §3) |
+| — | `grafana-proxy` | `nginx:1.30.5-alpine` | With `grafana` | internal + monitoring, port bound to `127.0.0.1:3000` | Only forwards the browser to Grafana |
 | — | dev container | target `dev` | Development | — | Same Python toolchain as production in VS Code |
 
 ### Why this split and not more
@@ -125,7 +126,7 @@ agentic-ai-trading-system/
 
 - Only `trader-core` has Alpaca keys; only `brokers/alpaca_adapter.py` uses the trading client.
 - Only `notifier` has Twilio keys; only `news-sentiment` has Finnhub and Reddit keys.
-- `ollama` and `postgres` are on the internal network only; no host ports are published except Grafana on `127.0.0.1`.
+- `ollama` and `postgres` are on the internal network only; no host ports are published except `grafana-proxy` on `127.0.0.1:3000` (Grafana itself stays internal).
 - Each service uses its own Postgres role with access only to the tables it needs (`docker/postgres/init.sql`).
 - `config.yaml` is mounted read-only into every container.
 

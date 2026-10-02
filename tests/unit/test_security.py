@@ -131,7 +131,7 @@ def test_ollama_and_postgres_not_published() -> None:
         assert "ports" not in compose["services"][svc]
         assert compose["services"][svc]["networks"] == ["internal"]
     assert compose["networks"]["internal"]["internal"] is True
-    g = compose["services"]["grafana"]["ports"]
+    g = compose["services"]["grafana-proxy"]["ports"]     # Grafana itself has no port
     assert all(p.startswith("127.0.0.1:") for p in g)
 
 
@@ -211,6 +211,8 @@ def test_init_env_creates_files_without_overwriting(tmp_path) -> None:  # type: 
     assert names["DB_ROLE_PREFIX"] == "srb_" and names["PG_DATABASE"] == "srb_trader"
     pw = (tmp_path / "secrets" / "pg_news_password.txt").read_text()
     assert re.fullmatch(r"[A-Za-z0-9]{28}", pw)
+    assert re.fullmatch(r"[A-Za-z0-9]{28}",
+                        (tmp_path / "secrets" / "grafana_admin_password.txt").read_text())
     url = read_kv(tmp_path / ".env.news")["DATABASE_URL"]
     assert url == f"postgresql+psycopg://srb_news_rw:{pw}@postgres:5432/srb_trader"
     (tmp_path / ".env.core").write_text("ALPACA_PAPER_KEY=mine\n")
@@ -247,3 +249,30 @@ async def test_whatsapp_prime_session_never_replays_old_commands() -> None:
     wa._seen, wa.last_inbound_at, wa.content_sid = set(), None, None
     assert await wa.prime_session() == old.date_sent and wa.session_open()
     assert await wa.poll() == []   # the old FLATTEN is known but never executed
+
+
+def test_grafana_is_offline_and_dashboards_are_current() -> None:
+    """Grafana reads the journal read-only and has no internet; only its proxy is published."""
+    import importlib.util
+    import json
+
+    import yaml
+
+    svc = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())["services"]
+    assert svc["grafana"]["networks"] == ["internal"] and "ports" not in svc["grafana"]
+    assert svc["grafana-proxy"]["ports"] == ["127.0.0.1:3000:3000"]
+    assert svc["grafana"]["environment"]["PG_READONLY_USER"].endswith("readonly")
+    assert svc["grafana"]["environment"]["GF_PLUGINS_PREINSTALL_DISABLED"] == "true"
+
+    spec = importlib.util.spec_from_file_location("dash", ROOT / "tools" /
+                                                  "build_grafana_dashboards.py")
+    dash = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(dash)  # type: ignore[union-attr]
+    for build in (dash.today, dash.pipeline, dash.performance, dash.llm, dash.data_quality):
+        b = build()
+        on_disk = json.loads((dash.OUT / f"{b.uid}.json").read_text(encoding="utf-8"))
+        assert on_disk["panels"] == json.loads(json.dumps(b.panels)), (
+            f"{b.uid}.json is stale: run python tools/build_grafana_dashboards.py")
+        for p in b.panels:
+            sql = p["targets"][0]["rawSql"].upper()
+            assert not re.search(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT)\b", sql)

@@ -1,7 +1,8 @@
 # Agentic AI Trading System runtime (see docs/ARCHITECTURE.md §1)
 #   Start:           docker compose -f docker/docker-compose.yml up -d
 #   Replay a day:    docker compose -f docker/docker-compose.yml --profile replay run --rm replay replay --day 2026-10-15
-#   Dashboards:      docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana
+#   Dashboards:      docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana grafana-proxy
+#                    then http://localhost:3000 (admin / secrets/grafana_admin_password.txt)
 # Pin every image to a version tag or digest before paper trading (SEC-10).
 
 name: agentic-ai-trading-system
@@ -169,19 +170,60 @@ services:
       - ..:/workspace
     networks: [internal, egress]
 
-  grafana:
-    image: grafana/grafana:latest       # pin before use
+  grafana:                              # browser dashboards (docs/MONITORING.md §3)
+    image: grafana/grafana:13.2.3
     profiles: [monitoring]
     restart: unless-stopped
-    ports: ["127.0.0.1:3000:3000"]      # localhost only
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      TZ: America/New_York
+      PG_DATABASE: ${PG_DATABASE:-trader}
+      PG_READONLY_USER: ${DB_ROLE_PREFIX:-}readonly   # SELECT-only role (SEC-17)
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"        # no internet; use the bundled plugins
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/trader-today.json
+    secrets: [pg_readonly_password, grafana_admin_password]
     volumes:
       - grafana-data:/var/lib/grafana
-    networks: [internal]
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [internal]                # no internet; reached through grafana-proxy
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\": *\"ok\"'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana-proxy:                        # publishes Grafana on the host; forwards only
+    image: nginx:1.30.5-alpine
+    profiles: [monitoring]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    ports: ["127.0.0.1:3000:3000"]      # localhost only
+    volumes:
+      - ./grafana/proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks: [internal, monitoring]
+    depends_on:
+      grafana: {condition: service_healthy}
 
 networks:
   internal:
     internal: true                      # no internet access
   egress: {}                            # outbound internet for core, news, notifier
+  monitoring: {}                        # host port for grafana-proxy (an internal network cannot publish)
 
 volumes:
   pg-data: {}
@@ -201,3 +243,5 @@ secrets:                                # git-ignored files, one password per li
     file: ../secrets/pg_notifier_password.txt
   pg_readonly_password:
     file: ../secrets/pg_readonly_password.txt
+  grafana_admin_password:
+    file: ../secrets/grafana_admin_password.txt

@@ -10,6 +10,7 @@ Git-ignored folder (only this README is tracked). Docker reads these files as se
 | `pg_news_password.txt` | role `<prefix>news_rw` (news-sentiment); also in `.env.news` |
 | `pg_notifier_password.txt` | role `<prefix>notifier_rw` (notifier); also in `.env.notifier` |
 | `pg_readonly_password.txt` | role `<prefix>readonly` (backup, Grafana); also in `.env.backup` |
+| `grafana_admin_password.txt` | Grafana login `admin` at http://localhost:3000 (set when the Grafana volume is first created) |
 
 One password per file, letters and digits only, no trailing newline. Passwords are read only
 when the Postgres volume is first created; to change one later see docs/ACCOUNT_SETUP.md §6.
