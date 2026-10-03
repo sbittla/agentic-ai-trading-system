@@ -24,6 +24,8 @@ def server(replies: list[object], seen: list[dict[str, object]]) -> httpx.MockTr
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+        if req.url.path == "/api/show":
+            return httpx.Response(200, json={"details": {"family": "qwen3"}})
         if req.url.path == "/api/generate":
             return httpx.Response(200, json={"done": True})
         body = json.loads(req.content)
@@ -81,6 +83,48 @@ async def test_health_and_preload() -> None:
     assert await c.healthy() and await c.ensure_loaded()
     other = OllamaClient("http://x", "qwen3:14b", transport=server([], []))
     assert not await other.healthy()
+
+
+@pytest.mark.rule("QW-4")
+async def test_health_red_when_model_file_is_broken() -> None:
+    """A truncated model is still listed by /api/tags, but cannot be read or run."""
+    state = {"show": 500, "chat": 500, "load": 500}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+        code = state[{"/api/show": "show", "/api/chat": "chat"}.get(req.url.path, "load")]
+        return httpx.Response(code, json={"error": "offset+size exceeds file size"})
+
+    c = OllamaClient("http://x", "qwen3:8b", transport=httpx.MockTransport(handler))
+    assert not await c.healthy()                       # /api/show fails
+    state["show"] = 200
+    res = await c.structured(agent="a05", prompt_version="v1", system="s", data={},
+                             schema=NewsSummaryOut)
+    assert not res.ok and c.server_error is not None
+    assert not await c.healthy()                       # listed and readable, but cannot load
+    state["load"] = 200
+    assert await c.healthy() and c.server_error is None
+
+
+@pytest.mark.rule("QW-4")
+async def test_failed_preload_turns_health_red() -> None:
+    """The 8:55 preload fails (CUDA out of memory): health goes red and retries the load."""
+    state = {"load": 500}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+        if req.url.path == "/api/show":
+            return httpx.Response(200, json={})
+        return httpx.Response(state["load"], json={"error": "cudaMalloc failed: out of memory"})
+
+    c = OllamaClient("http://x", "qwen3:8b", transport=httpx.MockTransport(handler))
+    assert await c.healthy()                           # nothing has tried to load yet
+    assert not await c.ensure_loaded() and "out of memory" in (c.server_error or "")
+    assert not await c.healthy()                       # still cannot load
+    state["load"] = 200
+    assert await c.healthy() and c.server_error is None
 
 
 @pytest.mark.rule("QW-5")

@@ -41,6 +41,7 @@ class OllamaClient:
         self.now = now or (lambda: datetime.now(UTC))
         self._transport = transport
         self.latencies_ms: list[int] = []
+        self.server_error: str | None = None   # last 5xx from a real call; cleared on success
 
     def _client(self, timeout_s: float) -> httpx.AsyncClient:
         return httpx.AsyncClient(base_url=self.base_url, timeout=timeout_s,
@@ -72,6 +73,7 @@ class OllamaClient:
                 async with self._client(timeout_s) as c:
                     r = await asyncio.wait_for(c.post("/api/chat", json=body), timeout_s)
                 r.raise_for_status()
+                self.server_error = None
                 js = r.json()
                 raw = js.get("message", {}).get("content", "")
                 tin, tout = int(js.get("prompt_eval_count", 0)), int(js.get("eval_count", 0))
@@ -80,6 +82,8 @@ class OllamaClient:
                 err = f"LLMTimeout after {timeout_s}s"
             except httpx.HTTPError as exc:
                 err = f"LLMUnavailable: {exc}"
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500:
+                    self.server_error = err
             except (ValidationError, ValueError) as exc:
                 err = f"LLMInvalidOutput: {str(exc)[:300]}"
             ms = int((time.monotonic() - t0) * 1000)
@@ -96,25 +100,46 @@ class OllamaClient:
         return last
 
     async def healthy(self) -> bool:
-        """QW-4 health check: server up and the pinned model is present."""
+        """QW-4 health check: server up, the pinned model present and readable, and calls work.
+
+        Listing alone is not enough: a truncated model file is still listed by ``/api/tags``
+        while every chat returns 500. ``/api/show`` parses the model file, and after a 5xx on
+        a real call the model must load again (``ensure_loaded``) before health is green."""
         try:
-            async with self._client(5) as c:
+            async with self._client(10) as c:
                 r = await c.get("/api/tags")
                 r.raise_for_status()
                 names = {m.get("name") for m in r.json().get("models", [])}
-                return self.model in names or f"{self.model}:latest" in names
+                if self.model not in names and f"{self.model}:latest" not in names:
+                    return False
+                r = await c.post("/api/show", json={"model": self.model})
+                if r.status_code != 200:
+                    return False
         except httpx.HTTPError:
             return False
+        if self.server_error is not None:
+            if not await self.ensure_loaded():
+                return False
+            self.server_error = None
+        return True
 
     async def ensure_loaded(self) -> bool:
-        """QW-4: load the model by 9:00 and keep it loaded (keep_alive) through 4:30 PM."""
+        """QW-4: load the model by 9:00 and keep it loaded (keep_alive) through 4:30 PM.
+
+        A failed load (e.g. CUDA out of memory) sets ``server_error`` so ``healthy`` turns red
+        and retries the load on every health check, instead of staying green until a real
+        call fails inside the trading window."""
         try:
             async with self._client(120) as c:
                 r = await c.post("/api/generate", json={"model": self.model, "prompt": "",
                                                         "keep_alive": self.keep_alive})
-                return r.status_code == 200
-        except httpx.HTTPError:
-            return False
+            ok = r.status_code == 200
+            err = f"LLMLoadFailed: HTTP {r.status_code} {r.text[:200]}"
+        except httpx.HTTPError as exc:
+            ok, err = False, f"LLMLoadFailed: {exc}"
+        if not ok:
+            self.server_error = err
+        return ok
 
     async def gpu_status(self) -> dict[str, Any]:
         """Loaded models and how much of each is in GPU memory (Ollama ``/api/ps``)."""

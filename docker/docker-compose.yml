@@ -19,6 +19,11 @@ x-app: &app
     TZ: America/New_York
     TRADER_CONFIG: /app/config/config.yaml
     DB_ROLE_PREFIX: ${DB_ROLE_PREFIX:-}   # role names for `trader migrate` grants
+    # numpy/torch default to one thread per CPU (24 here): cap them so the Python services
+    # do not compete with each other and Ollama, and BLAS buffers stay small (no page file)
+    OMP_NUM_THREADS: "4"
+    OPENBLAS_NUM_THREADS: "4"
+    MKL_NUM_THREADS: "4"
   volumes:
     - ../config:/app/config:ro          # config is read-only everywhere (DV-3)
 

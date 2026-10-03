@@ -84,6 +84,8 @@ class StrategyAgent:
                                         timeout_s=self.cfg.llm.timeout_sec)
         off = [(x["ticker"], x.get("reason", "locked")) for x in locks]
         if not res.ok or not isinstance(res.value, GamePlanOut):
+            if (d, window) in self.plans:   # a failed retry: keep the plan already journaled
+                return self.plans[(d, window)]
             plan = GamePlan(day=d, window="morning" if window == "morning" else "afternoon",
                             watch=(), off_limits=tuple(off), source="fallback")
         else:

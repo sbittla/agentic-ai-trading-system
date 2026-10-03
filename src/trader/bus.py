@@ -160,6 +160,14 @@ class SqlOutbox:
         return [OutboxMessage(id=r["id"], channel=r["channel"], source=r["source"],
                               payload=r["payload"], created_at=r["created_at"]) for r in rows]
 
+    def recent(self, channel: str, since: datetime) -> list[OutboxMessage]:
+        """Messages on ``channel`` since ``since``, consumed or not (state rebuild on start)."""
+        rows = self.journal.query(
+            select(s.outbox).where(and_(s.outbox.c.channel == channel,
+                                        s.outbox.c.created_at >= since)).order_by(s.outbox.c.id))
+        return [OutboxMessage(id=r["id"], channel=r["channel"], source=r["source"],
+                              payload=r["payload"], created_at=r["created_at"]) for r in rows]
+
     async def ack(self, outbox_id: int) -> None:
         def _do() -> None:
             with self.journal.engine.begin() as c:

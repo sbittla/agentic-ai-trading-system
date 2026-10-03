@@ -9,7 +9,9 @@
 FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 HOME=/app
 WORKDIR /app
-RUN useradd --create-home --home-dir /app --uid 10001 trader
+# /app/data/bars must exist and belong to trader: a new named volume copies this owner
+RUN useradd --create-home --home-dir /app --uid 10001 trader && \
+    mkdir -p /app/data/bars && chown -R trader:trader /app/data
 # Pinned, hashed dependency sets generated with pip-compile (SEC-10)
 COPY requirements/base.lock requirements/base.lock
 RUN pip install --require-hashes -r requirements/base.lock

@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Literal
 
 import structlog
@@ -66,23 +66,40 @@ def grade_clock_drift_s(v: float | None) -> Level:
 class Job:
     name: str
     at: time
-    fn: Callable[[datetime], Awaitable[None] | None]
+    fn: Callable[[datetime], Awaitable[bool | None] | bool | None]
     when: Literal["trading", "friday", "sunday", "daily", "month_end"] = "trading"
+    until: time | None = None       # latest time a late (missed) run may still start
+    retry_min: int = 0              # > 0: a run that returns False is retried after this delay
     last_fired: date | None = None
+    next_try: datetime | None = None
+
+
+DEFAULT_CATCH_UP = timedelta(minutes=30)
 
 
 class Scheduler:
-    """Deterministic calendar-aware job runner (same in live and replay)."""
+    """Deterministic calendar-aware job runner (same in live and replay).
+
+    A job missed while the service was down runs late only until its ``until`` time (default
+    30 minutes after ``at``); later it is skipped for the day, so a restart in the evening does
+    not replay the morning plan, the no-trade logs and the reports on stale data."""
 
     def __init__(self, calendar: MarketCalendar) -> None:
         self.cal = calendar
         self.jobs: list[Job] = []
 
-    def add(self, name: str, at: time, fn: Callable[[datetime], Awaitable[None] | None],
-            when: Literal["trading", "friday", "sunday", "daily", "month_end"] = "trading"
-            ) -> None:
-        self.jobs.append(Job(name, at, fn, when))
+    def add(self, name: str, at: time,
+            fn: Callable[[datetime], Awaitable[bool | None] | bool | None],
+            when: Literal["trading", "friday", "sunday", "daily", "month_end"] = "trading",
+            until: time | None = None, retry_min: int = 0) -> None:
+        self.jobs.append(Job(name, at, fn, when, until, retry_min))
         self.jobs.sort(key=lambda j: j.at)
+
+    @staticmethod
+    def _deadline(j: Job, d: date) -> datetime:
+        if j.until is not None:
+            return et_datetime(d, j.until)
+        return et_datetime(d, j.at) + DEFAULT_CATCH_UP
 
     def _due_today(self, j: Job, d: date) -> bool:
         if j.when == "daily":
@@ -104,12 +121,22 @@ class Scheduler:
         for j in self.jobs:
             if j.last_fired == d or not self._due_today(j, d):
                 continue
-            if local >= et_datetime(d, j.at):
-                j.last_fired = d
-                res = j.fn(now)
-                if inspect.isawaitable(res):
-                    await res
-                fired.append(j.name)
+            if local < et_datetime(d, j.at) or (j.next_try is not None and now < j.next_try):
+                continue
+            j.last_fired = d
+            if local > self._deadline(j, d):
+                log.info("job_skipped_missed", job=j.name, day=d.isoformat())
+                continue
+            res = j.fn(now)
+            if inspect.isawaitable(res):
+                res = await res
+            fired.append(j.name)
+            if res is False and j.retry_min > 0:
+                j.last_fired = None   # A10: e.g. the LLM was down for the plan; try again
+                j.next_try = now + timedelta(minutes=j.retry_min)
+                log.info("job_retry_scheduled", job=j.name, at=j.next_try.isoformat())
+            else:
+                j.next_try = None
         return fired
 
 

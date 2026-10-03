@@ -565,7 +565,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \"window\", ticker, setup, trigger, stop, target, notes FROM journal.game_plans WHERE date = (now() AT TIME ZONE 'America/New_York')::date ORDER BY \"window\", ticker"
+          "rawSql": "SELECT \"window\", ticker, setup, trigger, stop, target, notes, source FROM journal.game_plans g WHERE date = (now() AT TIME ZONE 'America/New_York')::date AND NOT (source = 'fallback' AND EXISTS (SELECT 1 FROM journal.game_plans x WHERE x.date = g.date AND x.\"window\" = g.\"window\" AND x.source = 'llm')) ORDER BY \"window\", ticker"
         }
       ],
       "fieldConfig": {

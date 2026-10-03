@@ -125,8 +125,11 @@ def today() -> Board:
           f"SELECT ts, ticker, setup, \"window\", result, reason_code, qty, risk_usd, detail "
           f"FROM {J}.decisions WHERE ts >= {TODAY} ORDER BY ts DESC", w=24, h=10)
     b.add("Game plan (today)",
-          f"SELECT \"window\", ticker, setup, trigger, stop, target, notes "
-          f"FROM {J}.game_plans WHERE date = (now() AT TIME ZONE 'America/New_York')::date "
+          f"SELECT \"window\", ticker, setup, trigger, stop, target, notes, source "
+          f"FROM {J}.game_plans g WHERE date = (now() AT TIME ZONE 'America/New_York')::date "
+          # a fallback (LLM down) is replaced by the retried LLM plan for the same window
+          f"AND NOT (source = 'fallback' AND EXISTS (SELECT 1 FROM {J}.game_plans x "
+          f"WHERE x.date = g.date AND x.\"window\" = g.\"window\" AND x.source = 'llm')) "
           f"ORDER BY \"window\", ticker", w=12, h=8)
     b.add("Open incidents",
           f"SELECT ts, type, detail FROM {J}.incidents WHERE resolved_at IS NULL ORDER BY ts DESC",

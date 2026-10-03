@@ -145,6 +145,7 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | A ticker is blocked with `UR-3` | Fewer than 60 trading days of history (SPCX listed 2026-06-12 and passed with 76 days) | Wait until it has 60 days, or remove it from `universe.tickers` |
 | Pre-flight RED: `macro calendar has no CPI date on or after today` | `config/macro_calendar_2026_2027.yaml` has no future CPI date (2027 dates still to add) | Add the BLS dates (RUNBOOK §5 maintenance) |
 | Start refused: `clock drift … > 2s` | The Windows clock is off | Settings → Time & language → **Sync now** |
+| Health `clock` AMBER (`drift -0.8s`, 0.5–2 s) | The Windows Time service (`w32time`) is stopped, so the host drifts; Docker Desktop's WSL2 VM copies the host clock and drifts again after sleep (docker/for-win#4526, microsoft/WSL#10006) | In an **admin** PowerShell: `Set-Service w32time -StartupType Automatic; Start-Service w32time; w32tm /resync /force`, then `docker run --rm --privileged alpine hwclock -s`. Check with `w32tm /stripchart /computer:time.windows.com /samples:3 /dataonly` (should be under ±0.1 s). Health turns green within 30 s, no restart needed |
 
 ---
 

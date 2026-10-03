@@ -13,6 +13,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from datetime import time as dtime
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,7 @@ from trader.models.messages import Command, EventFlags
 from trader.notify.commands import command_source
 from trader.notify.whatsapp import OutboxNotifier
 from trader.services.runtime import require_env, touch_health
-from trader.timeutil import et_date, to_et
+from trader.timeutil import et_date, et_datetime, to_et
 
 log = structlog.get_logger(__name__)
 
@@ -113,6 +114,7 @@ class CoreService:
         self.recorder = DayRecorder(base / "recordings")
         await self._warm_history(history)
         await engine.start()
+        await self._restore_news()
         self.feed = AlpacaIEXFeed(*data_keys, feed=cfg.data.alpaca_feed)
         symbols = list(cfg.universe.tickers) + list(cfg.universe.context_symbols)
         await self.feed.subscribe(symbols)
@@ -162,6 +164,14 @@ class CoreService:
         async for bar in self.feed.bars():
             self.recorder.add_bar(bar)
             await self.engine.on_bar(bar)
+            # A2: journal the live 1-min bar (DATA_SPEC bars_1m; Grafana "Data" dashboard).
+            # After on_bar so a slow or down journal never delays trading.
+            try:
+                await asyncio.to_thread(self.journal.insert, s.bars_1m, {
+                    "ticker": bar.symbol, "ts": bar.ts, "o": bar.o, "h": bar.h, "l": bar.l,
+                    "c": bar.c, "v": bar.v, "vwap": bar.vwap, "source": bar.source})
+            except Exception as exc:   # noqa: BLE001
+                log.warning("bar_journal_failed", symbol=bar.symbol, error=str(exc))
 
     async def _quotes(self) -> None:
         async for q in self.feed.quotes():
@@ -277,6 +287,26 @@ class CoreService:
         if self.cfg.mode.environment == "live":
             return os.environ["ALPACA_LIVE_KEY"], os.environ["ALPACA_LIVE_SECRET"]
         return os.environ["ALPACA_PAPER_KEY"], os.environ["ALPACA_PAPER_SECRET"]
+
+    async def _restore_news(self) -> None:
+        """News state is in memory: after a restart, reload today's latest flags per ticker so
+        a plan run right after the restart still sees the catalysts (A5-1)."""
+        now = datetime.now(UTC)
+        since = et_datetime(et_date(now), dtime(0, 0)).astimezone(UTC)
+        try:
+            msgs = await asyncio.to_thread(self.outbox.recent, "news_flags", since)
+        except Exception as exc:   # noqa: BLE001
+            log.warning("news_restore_failed", error=str(exc))
+            return
+        latest: dict[str, EventFlags] = {}
+        for m in msgs:
+            with contextlib.suppress(Exception):
+                if m.payload.get("type") != "universe_report":
+                    flags = EventFlags.model_validate(m.payload)
+                    latest[flags.ticker] = flags
+        for flags in latest.values():
+            self.engine.on_news(flags)
+        log.info("news_restored", tickers=len(latest))
 
     async def _news_flags(self) -> None:
         async for m in self.outbox.subscribe("news_flags"):

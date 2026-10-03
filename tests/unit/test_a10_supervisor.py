@@ -84,6 +84,50 @@ async def test_weekly_job_moves_to_thursday_on_friday_holiday(cal: MarketCalenda
     assert fired == [good_friday_week_thu]
 
 
+@pytest.mark.rule("A10-1")
+async def test_restart_after_deadline_skips_missed_jobs(cal: MarketCalendar) -> None:
+    """A restart at 22:16 must not replay the morning plan or the no-trade log."""
+    sch = Scheduler(cal)
+    fired: list[str] = []
+    sch.add("plan", et(PLAIN_DAY, "09:00").time(), lambda now: fired.append("plan"),
+            until=et(PLAIN_DAY, "10:15").time())
+    sch.add("no_trade_log", et(PLAIN_DAY, "10:16").time(), lambda now: fired.append("ntl"))
+    await sch.fire_due(et(PLAIN_DAY, "22:16"))
+    assert fired == []
+    await sch.fire_due(et(PLAIN_DAY, "22:17"))           # skipped for the day, not retried
+    assert fired == []
+    late = Scheduler(cal)                                # restart inside the window
+    late.add("plan", et(PLAIN_DAY, "09:00").time(), lambda now: fired.append("plan"),
+             until=et(PLAIN_DAY, "10:15").time())
+    late.add("no_trade_log", et(PLAIN_DAY, "10:16").time(), lambda now: fired.append("ntl"))
+    await late.fire_due(et(PLAIN_DAY, "10:07"))
+    assert fired == ["plan"]
+
+
+@pytest.mark.rule("A10-1")
+async def test_failed_job_is_retried_until_its_deadline(cal: MarketCalendar) -> None:
+    """The 9:00 plan fell back because the LLM was down: retry every 5 min until 10:15."""
+    sch = Scheduler(cal)
+    results = [False, False, True]
+    calls: list[str] = []
+
+    def plan(now):  # type: ignore[no-untyped-def]
+        calls.append(f"{now:%H:%M}")
+        return results.pop(0)
+
+    sch.add("plan", et(PLAIN_DAY, "09:00").time(), plan, until=et(PLAIN_DAY, "10:15").time(),
+            retry_min=5)
+    for hhmm in ("09:00", "09:02", "09:05", "09:10", "09:15", "09:20"):
+        await sch.fire_due(et(PLAIN_DAY, hhmm))
+    assert calls == ["09:00", "09:05", "09:10"]           # succeeded at 09:10; no more runs
+    never = Scheduler(cal)
+    never.add("plan", et(PLAIN_DAY, "09:00").time(), lambda now: False,
+              until=et(PLAIN_DAY, "09:07").time(), retry_min=5)
+    assert await never.fire_due(et(PLAIN_DAY, "09:00")) == ["plan"]
+    assert await never.fire_due(et(PLAIN_DAY, "09:05")) == ["plan"]
+    assert await never.fire_due(et(PLAIN_DAY, "09:10")) == []   # past the deadline
+
+
 @pytest.mark.rule("A10-3")
 @pytest.mark.rule("A10-4")
 def test_modes_and_kill_state(cfg: Config, cal: MarketCalendar, macro: MacroCalendar) -> None:

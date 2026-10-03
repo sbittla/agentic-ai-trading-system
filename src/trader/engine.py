@@ -154,18 +154,24 @@ class TradingEngine:
     # ===================================================================================
     def _setup_jobs(self) -> None:
         sch = self.scheduler
-        sch.add("preflight", time(7, 0), self.job_preflight)
-        sch.add("levels", time(8, 0), self.job_levels)
-        sch.add("morning_plan", time(9, 0), lambda now: self.job_plan(now, "morning"))
-        sch.add("premarket_levels", time(9, 30), lambda now: self.ta.refresh_premarket())
+        # until: how late a job missed during a restart may still run (default 30 min).
+        # Plans and levels are in-memory state the windows need, so they catch up until the
+        # window's last entry; a plan that fell back (LLM down) is retried every 5 minutes.
+        sch.add("preflight", time(7, 0), self.job_preflight, until=time(9, 35))
+        sch.add("levels", time(8, 0), self.job_levels, until=time(15, 50))
+        sch.add("morning_plan", time(9, 0), lambda now: self.job_plan(now, "morning"),
+                until=time(10, 15), retry_min=5)
+        sch.add("premarket_levels", time(9, 30), lambda now: self.ta.refresh_premarket(),
+                until=time(10, 15))
         sch.add("morning_no_trade_log", time(10, 16), lambda now: self.job_window_end(
             now, "morning"))
         sch.add("morning_summary", time(10, 35), lambda now: self.job_report(now, "morning"))
-        sch.add("afternoon_plan", time(14, 45), lambda now: self.job_plan(now, "afternoon"))
+        sch.add("afternoon_plan", time(14, 45), lambda now: self.job_plan(now, "afternoon"),
+                until=time(15, 50), retry_min=5)
         sch.add("year_end_check", time(15, 45), self.job_year_end)
         sch.add("afternoon_no_trade_log", time(15, 51), lambda now: self.job_window_end(
             now, "afternoon"))
-        sch.add("end_of_day", time(16, 0), self.job_end_of_day)
+        sch.add("end_of_day", time(16, 0), self.job_end_of_day, until=time(23, 59))
         sch.add("daily_review", time(16, 30), lambda now: self.job_report(now, "daily"))
         sch.add("weekly_review", time(17, 0), self.job_weekly, when="friday")
         sch.add("monthly_review", time(17, 30), self.job_monthly, when="month_end")
@@ -306,11 +312,13 @@ class TradingEngine:
             else:
                 self.universe.blocked.pop(t, None)
 
-    async def job_plan(self, now: datetime, window: str) -> None:
-        """A5-1 + A12-4: game plan with the locked list."""
+    async def job_plan(self, now: datetime, window: str) -> bool:
+        """A5-1 + A12-4: game plan with the locked list. Returns False when the LLM plan
+        failed and the fallback (no picks) is in place, so the scheduler retries it."""
         d = et_date(now)
         if window == "afternoon" and not self.windows.afternoon_open(d):
-            return
+            return True
+        retry = (d, window) in self.strategy.plans
         locks = [{"ticker": x["ticker"],
                   "reason": f"{x['type']} until {x['until'].astimezone(ET):%Y-%m-%d}"}
                  for x in self.compliance.locked_list(now)]
@@ -333,6 +341,8 @@ class TradingEngine:
             data["market"][c] = {"last": st.last_price, "prior_close": st.prior_close,
                                  "above_vwap": st.above_vwap()}
         plan = await self.strategy.game_plan(d, window, data, locks)
+        if plan.source == "fallback" and retry:
+            return False   # the first fallback was already sent; say again only on success
         self.bus.publish(plan)
         rs = self.risk.state
         budget = rs.day_start_equity * Decimal(str(self.cfg.risk.daily_loss_limit_pct)) / 100
@@ -350,6 +360,7 @@ class TradingEngine:
         left = self.cfg.risk.max_trades_per_day - rs.trades_total_today
         lines.append(f"Trades left today: {left} · Daily loss budget: ${budget:,.0f}")
         await self.say("\n".join(lines), "game_plan")
+        return plan.source != "fallback"
 
     async def job_window_end(self, now: datetime, window: str) -> None:
         """NT-1: no order in the window -> log 'no qualifying setup' with the closest
