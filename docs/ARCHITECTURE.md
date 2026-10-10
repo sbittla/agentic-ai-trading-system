@@ -18,7 +18,7 @@ flowchart LR
         end
         NEWS[news-sentiment<br/>A3 + FinBERT]
         NOTI[notifier<br/>Telegram or WhatsApp out + polled replies]
-        OLL[ollama<br/>Qwen3 14B · GPU]
+        OLL[ollama<br/>Qwen3 8B · GPU]
         PG[(postgres<br/>journal + outbox bus)]
         BK[backup<br/>nightly]
     end

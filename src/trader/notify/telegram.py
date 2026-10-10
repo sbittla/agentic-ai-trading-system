@@ -9,6 +9,7 @@ IDs can issue commands (SEC-1); senders are reported as ``telegram:<chat id>``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -26,6 +27,19 @@ class TelegramError(Exception):
     pass
 
 
+def split_text(text: str, limit: int = MAX_TEXT) -> list[str]:
+    """Split on line breaks where possible so long messages are never cut off."""
+    chunks: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        cut = cut if cut > limit // 2 else limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    if text or not chunks:
+        chunks.append(text)
+    return chunks
+
+
 class TelegramNotifier:
     def __init__(self, token: str, chat_id: str, *, retries: int = 3,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
@@ -33,28 +47,50 @@ class TelegramNotifier:
         self.chat_id = str(chat_id)
         self.retries = retries
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
         self._offset: int | None = None
         self.last_poll_ok: float | None = None
 
     def sender_id(self, chat_id: int | str) -> str:
         return f"telegram:{chat_id}"
 
+    def _http(self) -> httpx.AsyncClient:
+        # one pooled client for the life of the process: no TLS handshake per message/poll
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(base_url=API, transport=self._transport,
+                                             timeout=httpx.Timeout(30, connect=10))
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+
     async def _call(self, method: str, payload: dict[str, Any], timeout_s: float = 20
                     ) -> Any:
-        async with httpx.AsyncClient(base_url=API, timeout=timeout_s + 10,
-                                     transport=self._transport) as c:
-            r = await c.post(f"/bot{self._token}/{method}", json=payload)
+        r = await self._http().post(f"/bot{self._token}/{method}", json=payload,
+                                    timeout=timeout_s + 10)
         data = r.json()
         if not data.get("ok"):
+            retry = (data.get("parameters") or {}).get("retry_after")
             # never include the token (it is part of the URL) in errors or logs (SEC-6)
-            raise TelegramError(f"{method}: {data.get('error_code')} {data.get('description')}")
+            raise TelegramError(f"{method}: {data.get('error_code')} {data.get('description')}"
+                                + (f" retry_after={retry}" if retry else ""))
         return data["result"]
 
     async def get_me(self) -> dict[str, Any]:
         res: dict[str, Any] = await self._call("getMe", {})
         return res
 
-    async def send(self, text: str, *, kind: str) -> None:
+    async def send(self, text: str, *, kind: str, chat_id: str | None = None) -> bool:
+        """Send ``text`` (split at 4000 characters) to ``chat_id`` or the owner chat.
+        Returns False if every retry failed."""
+        target = str(chat_id) if chat_id is not None else self.chat_id
+        for chunk in split_text(text):
+            if not await self._send_one(target, chunk):
+                return False
+        return True
+
+    async def _send_one(self, chat_id: str, text: str) -> bool:
         for attempt in range(self.retries):
             try:
                 payload: dict[str, Any] = {"chat_id": self.chat_id, "text": text[:MAX_TEXT],
@@ -65,7 +101,12 @@ class TelegramNotifier:
                 return
             except (httpx.HTTPError, TelegramError) as exc:
                 log.warning("telegram_send_failed", attempt=attempt, error=str(exc))
-                await asyncio.sleep(2 ** attempt)
+                wait = 2 ** attempt
+                if "retry_after=" in str(exc):   # 429 flood control: wait as told
+                    with contextlib.suppress(ValueError):
+                        wait = max(wait, int(str(exc).rsplit("retry_after=", 1)[1]))
+                await asyncio.sleep(min(wait, 60))
+        return False
 
     async def prime(self) -> int:
         """Skip every update that arrived before start-up: old commands (an old FLATTEN) are

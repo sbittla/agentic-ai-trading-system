@@ -3,6 +3,7 @@
 #   core     -> trader-core and replay (Alpaca, indicators, agents)
 #   news     -> news-sentiment (adds PyTorch + transformers for FinBERT)
 #   notifier -> WhatsApp sender and reply poller
+#   alerts   -> standalone Telegram price alerts (base + websockets; ~40 MB RAM at runtime)
 #   tools    -> backup and admin jobs (adds postgres client)
 #   dev      -> dev container (adds test and lint tools)
 
@@ -38,6 +39,12 @@ FROM base AS notifier
 USER root
 COPY requirements/notifier.lock requirements/notifier.lock
 RUN pip install --require-hashes -r requirements/notifier.lock
+USER trader
+
+FROM base AS alerts
+USER root
+COPY requirements/alerts.lock requirements/alerts.lock
+RUN pip install --require-hashes -r requirements/alerts.lock
 USER trader
 
 FROM base AS tools

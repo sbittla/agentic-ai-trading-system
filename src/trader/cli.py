@@ -1,10 +1,12 @@
 """`trader` command line (ARCHITECTURE §2, RUNBOOK §3).
 
-    trader run --service core|news|notifier
+    trader run --service core|news|notifier|alerts
+    trader alerts [--alerts-config config/alerts.yaml]   (lightweight Telegram price alerts)
     trader replay --day 2026-10-15 | --synthetic 20 --start 2026-10-05 [--llm rules|ollama]
     trader backtest --synthetic 120 [--walk-forward]
     trader status | kill | resume | flatten --confirm | pause day|swing | unpause day|swing
     trader validate-config [--config path]
+    trader select-model [--apply] [--model qwen3:14b]   (Qwen model for this GPU/RAM)
     trader health --service core
     trader migrate | backup --daily-at 18:00 | fetch-history --days 730
     trader eval-prompts [--llm ollama|rules] | gate --record NAME --note TEXT
@@ -81,9 +83,77 @@ def cmd_run(a: argparse.Namespace) -> int:
         from trader.services.core_main import main
     elif a.service == "news":
         from trader.services.news_main import main
+    elif a.service == "alerts":
+        return cmd_alerts(a)
     else:
         from trader.services.notifier_main import main
     main(a.config)
+    return 0
+
+
+def cmd_alerts(a: argparse.Namespace) -> int:
+    """Standalone price-alert bot: Alpaca + Telegram only (no Postgres, Ollama or torch)."""
+    configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+    from trader.alerts.service import main
+
+    main(getattr(a, "alerts_config", None))
+    return 0
+
+
+def cmd_select_model(a: argparse.Namespace) -> int:
+    """Show which Qwen models fit this machine, recommend one, optionally write it (QW-6)."""
+    from trader import hardware as hw_mod
+
+    hw = hw_mod.detect()
+    if a.vram is not None:   # plan for another machine, or override detection
+        hw = hw_mod.Hardware((hw_mod.Gpu("(given)", a.vram, a.vram_used),), a.ram or hw.ram_gb,
+                             hw.cpu_threads)
+    elif a.ram is not None:
+        hw = hw_mod.Hardware(hw.gpus, a.ram, hw.cpu_threads)
+    root = Path(a.root)
+    for g in hw.gpus:
+        print(f"GPU   {g.name}: {g.total_gb:.1f} GB VRAM, {g.used_gb:.1f} GB in use")
+    if not hw.gpus:
+        print("GPU   no NVIDIA GPU found (Intel/AMD integrated GPUs cannot run Ollama in Docker)")
+    print(f"RAM   {hw.ram_gb or '?'} GB · CPU threads {hw.cpu_threads or '?'}")
+    print(f"\n{'model':<15}{'needs':>7}  {'tier':<10}{'on this machine':<13} note")
+    for f in hw_mod.assess(hw, a.ctx):
+        print(f"{f.profile.tag:<15}{f.needed_gb:>5.1f}GB  {f.profile.tier:<10}{f.status:<13} "
+              f"{f.note}")
+    best, why = hw_mod.recommend(hw, a.ctx)
+    print(f"\nrecommended: {best.tag} ({why})")
+    env_model, cfg_model = hw_mod.configured_models(root)
+    print(f"configured:  docker/.env OLLAMA_MODEL={env_model or '(unset)'} · "
+          f"config/config.yaml llm.model={cfg_model or '(unset)'}")
+    if env_model and cfg_model and env_model != cfg_model:
+        print("WARNING: the two differ; trader-core will ask for a model that was not "
+              "downloaded. Run with --apply to align them.")
+    choice = a.model or best.tag
+    if a.model and hw_mod.profile(a.model) is None:
+        print(f"note: {a.model} is not a known profile; it is used as given")
+    fit = next((f for f in hw_mod.assess(hw, a.ctx) if f.profile.tag == choice), None)
+    if fit is not None and fit.status not in ("fits", "tight", "cpu-only"):
+        print(f"WARNING: {choice} does not fit fully in GPU memory here ({fit.note})")
+        if a.apply and not a.force:
+            print("refused: add --force to write it anyway")
+            return 1
+    if not a.apply:
+        print(f"\nto use {choice}: trader select-model --apply"
+              + (f" --model {choice}" if a.model else ""))
+        return 0
+    env_path, cfg_path = root / "docker" / ".env", root / "config" / "config.yaml"
+    missing = [p for p in (env_path, cfg_path) if not p.exists()]
+    if missing:
+        print(f"missing {', '.join(map(str, missing))}: run `trader init-env` first")
+        return 1
+    env_path.write_text(hw_mod.set_env_value(env_path.read_text(encoding="utf-8"),
+                                             "OLLAMA_MODEL", choice), encoding="utf-8")
+    cfg_path.write_text(hw_mod.set_yaml_llm_model(cfg_path.read_text(encoding="utf-8"), choice),
+                        encoding="utf-8")
+    print(f"wrote {choice} to {env_path} and {cfg_path}")
+    print("next: download it (RUNBOOK §1 step 6 or tools/fetch_ollama_model.py "
+          f"{choice}), restart ollama and trader-core, then "
+          "`trader check-connections --service llm` must show 100% on GPU")
     return 0
 
 
@@ -505,7 +575,10 @@ def cmd_init_env(a: argparse.Namespace) -> int:
                   "".join(pysecrets.choice(alphabet) for _ in range(28)))
 
     # env files with the database URL filled in
-    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay"):
+    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay",
+                 ".env.alerts"):
+        if name == ".env.alerts" and not (root / f"{name}.example").exists():
+            continue   # optional: standalone price alerts
         t = (root / f"{name}.example").read_text(encoding="utf-8")
         if name in ENV_ROLES:
             role, user = ENV_ROLES[name]
@@ -518,6 +591,9 @@ def cmd_init_env(a: argparse.Namespace) -> int:
     # config.yaml
     write_new(root / "config" / "config.yaml",
               (root / "config" / "config.example.yaml").read_text(encoding="utf-8"))
+    if (root / "config" / "alerts.example.yaml").exists():
+        write_new(root / "config" / "alerts.yaml",
+                  (root / "config" / "alerts.example.yaml").read_text(encoding="utf-8"))
 
     print("created: " + (", ".join(created) or "nothing"))
     if kept:
@@ -570,11 +646,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("--service", choices=["core", "news", "notifier"], required=True)
+    r.add_argument("--service", choices=["core", "news", "notifier", "alerts"], required=True)
+    r.add_argument("--alerts-config", default=None)
     r.set_defaults(fn=cmd_run)
+    al = sub.add_parser("alerts", help="lightweight Telegram price alerts (no LLM/Postgres)")
+    al.add_argument("--alerts-config", default=None, help="default: $ALERTS_CONFIG or "
+                    "config/alerts.yaml")
+    al.set_defaults(fn=cmd_alerts)
     v = sub.add_parser("validate-config")
     v.add_argument("--config", dest="config")
     v.set_defaults(fn=cmd_validate_config)
+    sm = sub.add_parser("select-model", help="pick the Qwen model for this machine's GPU/RAM")
+    sm.add_argument("--model", default=None, help="choose this tag instead of the recommended")
+    sm.add_argument("--apply", action="store_true",
+                    help="write it to docker/.env and config/config.yaml")
+    sm.add_argument("--force", action="store_true", help="allow a model that does not fit")
+    sm.add_argument("--vram", type=float, default=None, help="GPU memory in GB (skip detection)")
+    sm.add_argument("--vram-used", type=float, default=0.5, help="GB already in use")
+    sm.add_argument("--ram", type=float, default=None, help="system RAM in GB")
+    sm.add_argument("--ctx", type=int, default=8192, help="context tokens (llm.max_context_tokens)")
+    sm.add_argument("--root", default=".")
+    sm.set_defaults(fn=cmd_select_model)
     h = sub.add_parser("health")
     h.add_argument("--service", required=True)
     h.add_argument("--max-age", type=float, default=90)

@@ -1,0 +1,28 @@
+# Telegram price alerts (`trader alerts`, docs/ALERTS.md). Copy to config/alerts.yaml.
+# Every field is optional. The watchlist here is only the starting list: once you use
+# /watch or /unwatch in Telegram, the saved watchlist (SQLite) takes over.
+
+# Top 20 S&P 500 by market cap (October 2026 snapshot) + SPY/QQQ for market context.
+# 22 of the 30 symbols the free IEX feed allows; rankings drift, review quarterly.
+watchlist: [NVDA, AAPL, GOOGL, MSFT, AMZN, META, AVGO, TSLA, MU, LLY,
+            BRK.B, AMD, JPM, WMT, V, XOM, JNJ, INTC, MA, ABBV,
+            SPY, QQQ]
+feed: iex                       # iex (free) | sip (paid Alpaca plan)
+connect_before_open_min: 5      # open the WebSocket at 09:25 ET (pre-open price rules work)
+disconnect_after_close_min: 1
+bad_print_pct: 5.0              # ignore a lone trade this far from the last price
+daily_summary: true             # movers + alert count after the close
+db_path: data/alerts.sqlite     # rules, watchlist, alert log (ALERTS_DB overrides)
+
+signals:                        # automatic scanner alerts on 1-minute bar closes
+  opening_range_min: 15         # opening range = first N minutes
+  orb: true                     # close above/below the opening range (once per day each)
+  vwap_cross: true              # reclaim / loss of session VWAP
+  new_high_low: true            # new high/low of day after the opening range
+  volume_spike: true
+  volume_spike_x: 4.0           # 1-min volume vs the average of the last 20 minutes
+  volume_spike_min_avg: 500     # skip thin symbols (IEX volume is ~2-3% of the tape)
+  gap: true
+  gap_pct: 2.0                  # gap vs prior close at the open
+  move_step_pct: 2.0            # alert at ±2%, ±4%, ... from prior close (0 = off)
+  cooldown_min: 15              # per symbol and signal for VWAP, HOD/LOD and volume

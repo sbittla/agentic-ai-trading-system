@@ -37,7 +37,7 @@ Qwen runs in the `ollama` container on the local NVIDIA GPU (QW-1).
 2. Update WSL: `wsl --update`, then `wsl --shutdown`.
 3. Install **Docker Desktop** with the WSL2 backend. Check GPU passthrough:
    `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` must show your GPU.
-4. Pick the model by GPU memory: under 12 GB use `qwen3:8b` (about 5.2 GB), 12 GB or more `qwen3:14b`. Set it in both `docker/.env` (`OLLAMA_MODEL`) and `config/config.yaml` (`llm.model`).
+4. Pick the model for your GPU (QW-6): run `trader select-model` on the Windows host (it reads `nvidia-smi`). It lists which models fit fully in GPU memory and recommends one; `trader select-model --apply` writes it to both `docker/.env` (`OLLAMA_MODEL`) and `config/config.yaml` (`llm.model`). On the reference machine (RTX 4060 Laptop, 8 GB) that is `qwen3:8b`; 12–16 GB cards get `qwen3:14b`. Details and the full table: [HARDWARE.md](HARDWARE.md).
 5. After the first start (section 8), verify it really runs on the GPU:
    `docker compose -f docker/docker-compose.yml run --rm --no-deps trader-core trader check-connections --service llm`
    must print `PASS llm gpu 100% on GPU`. The Ollama log shows `library=CUDA` with your GPU name.
@@ -202,7 +202,7 @@ Rules for these files:
 In `config/config.yaml` (git-ignored copy of `config/config.example.yaml`):
 
 - `data.sec_user_agent`: your name and email (step 3).
-- `llm.model`: `qwen3:8b` on a GPU with less than 12 GB, otherwise `qwen3:14b` (QW-1). Use the same tag as `OLLAMA_MODEL` in step 8.
+- `llm.model`: set by `trader select-model --apply` together with `OLLAMA_MODEL` (QW-6); `qwen3:8b` on the 8 GB reference GPU, `qwen3:14b` on 12–16 GB.
 - Keep `mode.environment: paper`, `day_trades: approve`, `swing_trades: approve` for the first paper days (TEST_PLAN PT-1).
 - Run `trader validate-config --config config/config.yaml`; it must print `OK`.
 

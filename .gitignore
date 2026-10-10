@@ -10,6 +10,7 @@ secrets/*
 *.p12
 *.pfx
 config/config.yaml
+config/alerts.yaml
 config/*.local.yaml
 .claude/settings.local.json
 

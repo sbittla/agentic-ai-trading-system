@@ -107,7 +107,7 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | `docker cp ... 502 Bad Gateway` during import | Docker crashed mid-copy | §1.1, then rerun the import script (it re-copies and verifies) |
 | `ollama pull` inside the `ollama` container: `dial tcp: lookup registry.ollama.ai ... server misbehaving` | By design the runtime `ollama` is on the internal network with no internet (SEC-9) | Use the `model-pull` setup service or §1.2. Do not attach `ollama` to the internet |
 | `Error: pull model manifest: ssh: no key found` | `/root/.ollama/id_ed25519` was left empty (0 bytes) by a crash during Ollama's first start | `docker exec <ollama> rm -f /root/.ollama/id_ed25519 /root/.ollama/id_ed25519.pub`, then `docker restart <ollama>`; Ollama regenerates them |
-| `check-connections --service llm`: `only NN% of X GB in GPU memory` | Model does not fit in VRAM; part runs on the CPU and calls take minutes | Close other GPU programs; lower `llm.max_context_tokens`; or use a smaller model. With 8 GB use `qwen3:8b`, not 14B |
+| `check-connections --service llm`: `only NN% of X GB in GPU memory` | Model does not fit in VRAM; part runs on the CPU and calls take minutes | Close other GPU programs; lower `llm.max_context_tokens`; or use a smaller model. With 8 GB use `qwen3:8b`, not 14B; `trader select-model` shows what fits |
 | Ollama log lacks `library=CUDA` | GPU not passed through | Check the NVIDIA driver and `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` (§1.1 step 5) |
 | Your other containers (for example `llm_qdrant`, `llm_redis`) are running again after a Docker restart | Their restart policy relaunches them with Docker | `docker stop <name>`, or `docker update --restart=no <name>` |
 
