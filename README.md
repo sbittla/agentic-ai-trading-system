@@ -11,6 +11,10 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 > Personal research project. Not financial or tax advice.
 
+**Just want day-trading price alerts on Telegram?** Run the standalone alerts bot: one ~50 MB
+container, no GPU, LLM or database. See [docs/ALERTS.md](docs/ALERTS.md):
+`docker compose -f docker/docker-compose.yml --profile alerts up -d alerts`
+
 ## Documentation
 
 Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).

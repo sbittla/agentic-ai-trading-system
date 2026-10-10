@@ -33,7 +33,7 @@ jobs:
         run: python tools/check_traceability.py docs/TRACEABILITY.md tests
       - name: Build container images
         run: |
-          for target in core news notifier tools; do
+          for target in core news notifier alerts tools; do
             docker build -f docker/Dockerfile --target $target -t agentic-ai-trading-system-$target:ci .
           done
       - name: Secret scan

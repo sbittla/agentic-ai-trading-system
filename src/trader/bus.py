@@ -175,39 +175,59 @@ class SqlOutbox:
                           .values(consumed_at=datetime.now(UTC)))
         await asyncio.to_thread(_do)
 
+    # while LISTEN is up, NOTIFY wakes the loop at once and polling is only a safety net
+    LISTENING_POLL_S = 15.0
+
     async def subscribe(self, channel: str, poll_s: float = 2.0
                         ) -> AsyncIterator[OutboxMessage]:
         last = 0
         wake = asyncio.Event()
+        listening = asyncio.Event()
         listener: asyncio.Task[None] | None = None
         if not self.journal.is_sqlite:
-            listener = asyncio.create_task(self._listen(channel, wake))
+            listener = asyncio.create_task(self._listen(channel, wake, listening))
         try:
             while True:
                 for m in await asyncio.to_thread(self._pending, channel, last):
                     last = max(last, m.id)
                     yield m
                 wake.clear()
+                timeout = max(poll_s, self.LISTENING_POLL_S) if listening.is_set() else poll_s
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(wake.wait(), timeout=poll_s)
+                    await asyncio.wait_for(wake.wait(), timeout=timeout)
         finally:
             if listener:
                 listener.cancel()
 
-    async def _listen(self, channel: str, wake: asyncio.Event) -> None:
-        """LISTEN on Postgres; any NOTIFY wakes the poll loop early."""
+    async def _listen(self, channel: str, wake: asyncio.Event,
+                      listening: asyncio.Event | None = None) -> None:
+        """LISTEN on Postgres; any NOTIFY wakes the poll loop early. Reconnects with back-off;
+        while disconnected the subscriber falls back to fast polling."""
         try:
             import psycopg
+        except ImportError:
+            return
 
-            url = self.journal.url.replace("postgresql+psycopg://", "postgresql://")
-            async with await psycopg.AsyncConnection.connect(url, autocommit=True) as conn:
-                await conn.execute(f"LISTEN {channel}")
-                async for _ in conn.notifies():
-                    wake.set()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:   # noqa: BLE001 - fall back to polling
-            log.warning("outbox_listen_failed", channel=channel, error=str(exc))
+        url = self.journal.url.replace("postgresql+psycopg://", "postgresql://")
+        backoff = 1.0
+        while True:
+            try:
+                async with await psycopg.AsyncConnection.connect(url, autocommit=True) as conn:
+                    await conn.execute(f"LISTEN {channel}")
+                    if listening is not None:
+                        listening.set()
+                    wake.set()   # catch anything inserted while we were connecting
+                    backoff = 1.0
+                    async for _ in conn.notifies():
+                        wake.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:   # noqa: BLE001 - fall back to polling, then retry
+                log.warning("outbox_listen_failed", channel=channel, error=str(exc))
+            if listening is not None:
+                listening.clear()
+            await asyncio.sleep(backoff)
+            backoff = min(60.0, backoff * 2)
 
 
 PgOutboxBus = SqlOutbox
