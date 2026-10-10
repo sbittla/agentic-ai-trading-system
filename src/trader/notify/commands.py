@@ -21,7 +21,10 @@ from trader.journal.store import SqlJournal
 from trader.models.messages import Command
 
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no 0/O, 1/I/L
-SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP", "PLAN"}
+SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP", "PLAN",
+        "ALERTS",            # AL-4: ALERTS ON|OFF
+        "FILLED", "SOLD",    # CP-2: FILLED NVDA 40 @ 132.55 (owner's own fills)
+        "OPT", "CHAIN", "IV", "OPTS", "OPTIONS"}   # OP-13 (read-only, no orders)
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 APPROVAL = {"YES", "NO"}
 KNOWN = SAFE | DESTRUCTIVE | APPROVAL | {"CONFIRM"}
@@ -45,10 +48,10 @@ def parse(text: str, sender: str, now: datetime, source: str = "whatsapp") -> Co
                    source=command_source(source))
 
 
-def command_source(value: str | None) -> Literal["whatsapp", "telegram", "local"]:
-    if value == "local":
-        return "local"
-    return "telegram" if value == "telegram" else "whatsapp"
+def command_source(value: str | None) -> Literal["whatsapp", "telegram", "local", "console"]:
+    if value in ("local", "console", "telegram"):
+        return value   # type: ignore[return-value]
+    return "whatsapp"
 
 
 def log_command(journal: SqlJournal | None, ts: datetime, sender: str, text: str,

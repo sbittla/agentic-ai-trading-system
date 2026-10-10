@@ -201,6 +201,18 @@ services:
     security_opt: ["no-new-privileges:true"]
     networks: [internal, egress]
 
+  restore-test:                         # OPS-1: newest backup into a throwaway Postgres
+    image: postgres:16
+    profiles: [tools]
+    restart: "no"
+    user: postgres
+    entrypoint: ["sh", "/restore_test.sh"]
+    tmpfs: [/tmp]
+    volumes:
+      - ${BACKUP_PATH:-../backups}:/backups:ro
+      - ./postgres/restore_test.sh:/restore_test.sh:ro
+    network_mode: none                  # never touches production or the internet
+
   toolbox-gpu:                          # same, with the GPU visible for `select-model` (nvidia-smi)
     extends: {service: toolbox}
     profiles: [tools]

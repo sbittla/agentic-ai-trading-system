@@ -16,6 +16,11 @@ GRANT INSERT, SELECT ON journal.outbox TO :"console_role";
 GRANT USAGE ON SEQUENCE journal.outbox_id_seq TO :"console_role";
 ALTER DEFAULT PRIVILEGES FOR ROLE :"core_role" IN SCHEMA journal GRANT SELECT ON TABLES TO :"console_role";
 
+-- Backups (OPS-1 found this): pg_dump runs as the read-only role and must read sequences too.
+\set ro_role :prefix 'readonly'
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA journal TO :"ro_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE :"core_role" IN SCHEMA journal GRANT SELECT ON SEQUENCES TO :"ro_role";
+
 -- Outbox guard: console may publish only owner commands, tagged source=console (SEC-17).
 CREATE OR REPLACE FUNCTION journal.outbox_guard() RETURNS trigger AS $$
 BEGIN

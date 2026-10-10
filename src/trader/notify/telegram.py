@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -111,6 +112,60 @@ class TelegramNotifier:
                 await asyncio.sleep(min(wait, 60))
         return False
 
+    # -- approvals with a chart, buttons and live edits (AP-1..AP-3) ------------------------
+    @staticmethod
+    def approval_buttons(code: str) -> dict[str, Any]:
+        """AP-2: the one-time code rides in the button; only allow-listed chats see it."""
+        return {"inline_keyboard": [[{"text": f"✅ YES {code}", "callback_data": f"YES {code}"},
+                                     {"text": f"❌ NO {code}", "callback_data": f"NO {code}"}]]}
+
+    async def send_approval(self, text: str, code: str, image: bytes | None = None,
+                            chat_id: str | None = None) -> int | None:
+        """Photo + caption + buttons when a chart is attached (AP-1), else text + buttons.
+        Returns the message id for live edits (AP-3), or None if sending failed."""
+        target = str(chat_id) if chat_id is not None else self.chat_id
+        markup = self.approval_buttons(code)
+        for attempt in range(self.retries):
+            try:
+                if image:
+                    r = await self._http().post(
+                        f"/bot{self._token}/sendPhoto",
+                        data={"chat_id": target, "caption": text[:1000],
+                              "reply_markup": json.dumps(markup)},
+                        files={"photo": ("chart.png", image, "image/png")}, timeout=40)
+                    data = r.json()
+                    if not data.get("ok"):
+                        raise TelegramError(f"sendPhoto: {data.get('error_code')} "
+                                            f"{data.get('description')}")
+                    res = data["result"]
+                else:
+                    res = await self._call("sendMessage", {
+                        "chat_id": target, "text": text[:MAX_TEXT], "reply_markup": markup,
+                        "disable_web_page_preview": True})
+                return int(res["message_id"])
+            except (httpx.HTTPError, TelegramError) as exc:
+                log.warning("telegram_approval_failed", attempt=attempt, error=str(exc))
+                await asyncio.sleep(min(2 ** attempt, 10))
+        return None
+
+    async def edit_approval(self, message_id: int, text: str, *, photo: bool,
+                            code: str | None = None, chat_id: str | None = None) -> bool:
+        """AP-3: refresh the caption/text (live price, distance, seconds left)."""
+        target = str(chat_id) if chat_id is not None else self.chat_id
+        payload: dict[str, Any] = {"chat_id": target, "message_id": message_id}
+        if code:
+            payload["reply_markup"] = self.approval_buttons(code)
+        try:
+            if photo:
+                await self._call("editMessageCaption", {**payload, "caption": text[:1000]})
+            else:
+                await self._call("editMessageText", {**payload, "text": text[:MAX_TEXT]})
+            return True
+        except (httpx.HTTPError, TelegramError) as exc:
+            if "not modified" not in str(exc):
+                log.warning("telegram_edit_failed", error=str(exc))
+            return False
+
     async def prime(self) -> int:
         """Skip every update that arrived before start-up: old commands (an old FLATTEN) are
         never executed. Returns how many were skipped."""
@@ -123,7 +178,8 @@ class TelegramNotifier:
     async def poll(self, wait_s: int = 20) -> list[tuple[str, str, datetime]]:
         """New messages since the last poll: (sender, text, sent_at). Long polls up to
         ``wait_s`` seconds, so replies arrive within about a second."""
-        payload: dict[str, Any] = {"timeout": wait_s, "allowed_updates": ["message"]}
+        payload: dict[str, Any] = {"timeout": wait_s,
+                                   "allowed_updates": ["message", "callback_query"]}
         if self._offset is not None:
             payload["offset"] = self._offset
         updates = await self._call("getUpdates", payload, timeout_s=wait_s)
@@ -131,6 +187,16 @@ class TelegramNotifier:
         out = []
         for u in updates:
             self._offset = u["update_id"] + 1
+            cb = u.get("callback_query")
+            if cb:   # AP-2: a button press arrives as the same text a typed reply would be
+                chat = ((cb.get("message") or {}).get("chat") or {})
+                data = cb.get("data")
+                with contextlib.suppress(httpx.HTTPError, TelegramError):
+                    await self._call("answerCallbackQuery", {"callback_query_id": cb["id"],
+                                                             "text": f"{data} sent"})
+                if data and "id" in chat:
+                    out.append((self.sender_id(chat["id"]), str(data), datetime.now(UTC)))
+                continue
             msg = u.get("message") or {}
             text = msg.get("text")
             chat = msg.get("chat") or {}

@@ -10,6 +10,7 @@ history). Every step writes to the journal before the next one acts (SR-4). Orde
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ from typing import Any, Protocol
 
 import structlog
 
+from trader.agents import external_trades as ext
+from trader.agents import ops as ops_mod
 from trader.agents.a01_universe import UniverseAgent
 from trader.agents.a02_market_data import MarketDataAgent
 from trader.agents.a04_technicals import (
@@ -34,6 +37,7 @@ from trader.agents.a06_review import ReviewAgent
 from trader.agents.a07_risk import ClosedTrade, DecisionContext, OpenPositionView, RiskManager
 from trader.agents.a08_execution import ExecutionAgent, marketable_exit_price
 from trader.agents.a09_positions import (
+    MANUAL_ROUTES,
     Action,
     ExitAction,
     ManagedPosition,
@@ -44,6 +48,7 @@ from trader.agents.a09_positions import (
 from trader.agents.a10_supervisor import Scheduler, Supervisor
 from trader.agents.a11_reporter import Reporter
 from trader.agents.a12_compliance import ComplianceGuard
+from trader.agents.alerts_core import CoreAlerts, grading_report, session_open_for
 from trader.agents.execution_quality import SlippageMonitor
 from trader.agents.shadow import ShadowBook, shadow_report
 from trader.agents.speed import LatencyTracker, PreArmCache, PreArmed, expected_setup, rebind
@@ -76,6 +81,7 @@ from trader.models.messages import (
     TradingStatus,
 )
 from trader.models.reasons import Reason
+from trader.notify.chart import approval_chart
 from trader.notify.commands import CommandAuthority
 from trader.timeutil import ET, et_date, et_datetime, to_et
 
@@ -178,6 +184,16 @@ class TradingEngine:
         self._day_cache: dict[str, Any] = {}       # per-day flatten times / TW-6 block starts
         self.account_type: str | None = None                                    # AC-2
         self.settled_cash: Decimal | None = None                                # AC-1
+        self.core_alerts = CoreAlerts(                                          # AL-1..AL-7
+            cfg, self.md, self.ta, self.risk, self.windows, journal,
+            locked=lambda now: {x["ticker"] for x in self.compliance.locked_list(now)},
+            equity=lambda: self.equity)
+        self.copilot_plans: dict[str, tuple[SetupTriggered, Decision, datetime]] = {}  # CP-1
+        self.options: Any = None          # OPTIONS_REQUIREMENTS (set by trader-core)
+        self.fallback: Any = None         # NF-1 local fallback channel (e-mail), optional
+        self.snapshots: Any = None        # UN-1: async (symbols) -> Alpaca snapshots
+        self.sip_history: Any = None      # DQ-6: HistoricalData on the SIP feed
+        self.in_play_today: list[dict[str, Any]] = []
         self._setup_jobs()
 
     # ===================================================================================
@@ -190,6 +206,10 @@ class TradingEngine:
         # window's last entry; a plan that fell back (LLM down) is retried every 5 minutes.
         sch.add("preflight", time(7, 0), self.job_preflight, until=time(9, 35))
         sch.add("levels", time(8, 0), self.job_levels, until=time(15, 50))
+        if not self.sim_mode:
+            sch.add("in_play", time(8, 30), self.job_in_play, until=time(9, 25))     # UN-1
+            sch.add("data_divergence", time(16, 20), self.job_divergence,
+                    until=time(23, 59))                                              # DQ-6
         sch.add("morning_plan", time(9, 0), lambda now: self.job_plan(now, "morning"),
                 until=time(10, 15), retry_min=5)
         sch.add("premarket_levels", time(9, 30), self.job_open_refresh, until=time(10, 15))
@@ -320,6 +340,9 @@ class TradingEngine:
         self.risk.state.kill_switch = self.sup.kill_switch
         self.risk.state.paused_styles = set(self.sup.paused)
         await self.job_levels(self.now())
+        self._apply_external_locks()                                            # WS-9
+        self.core_alerts.start_day(session_open_for(d), {
+            sym: st.prior_close for sym, st in self.md.state.items()})
         acts = self.pm.start_day(d, self.ta.levels)
         await self.execute_actions(acts)
         self.journal.snapshot_config(d, self.now(), _cfg_hash(self.cfg), "")
@@ -327,6 +350,88 @@ class TradingEngine:
     # ===================================================================================
     # scheduled jobs
     # ===================================================================================
+    def _apply_external_locks(self) -> None:
+        try:
+            trades = ext.load(self.journal)
+        except Exception:   # noqa: BLE001 - table missing on an old journal
+            return
+        if trades:
+            n, warnings = ext.apply_locks(self.compliance, trades, self.now(),
+                                          self.cfg.wash_sale.lock_days, self.cfg.canonical)
+            for w in warnings:
+                log.warning("external_trade_in_lock", detail=w)
+            if n:
+                log.info("external_locks_created", count=n)
+
+    async def job_in_play(self, now: datetime) -> None:
+        """UN-1: the 50 largest S&P 500 names ranked by gap and pre-market volume (watch
+        only; they are never traded unless the owner adds them to the list)."""
+        if not self.cfg.in_play.enabled or self.snapshots is None:
+            return
+        try:
+            snaps = await self.snapshots(list(self.cfg.in_play.symbols))
+        except Exception as exc:   # noqa: BLE001
+            log.warning("in_play_failed", error=str(exc))
+            return
+        news = {t for t, nf in self.ta.news.items() if nf.flags or nf.catalyst != "none"}
+        rows = ops_mod.rank_in_play(snaps, news, self.cfg.in_play.top_n,
+                                    set(self.cfg.universe.tickers))
+        self.in_play_today = rows
+        d = et_date(now)
+        with contextlib.suppress(Exception):
+            self.journal.insert_many(s.in_play, [{
+                "date": d, "ticker": r["ticker"], "gap_pct": r["gap_pct"],
+                "pm_volume_ratio": r["pm_volume_ratio"], "news": r["news"],
+                "rank": r["rank"], "on_list": r["on_list"]} for r in rows])
+
+    async def job_divergence(self, now: datetime) -> None:
+        """DQ-6: today's IEX bars against consolidated (SIP) bars, per ticker."""
+        if self.sip_history is None or self.day is None:
+            return
+        d = self.day
+        start = et_datetime(d, time(9, 30))
+        end = et_datetime(d, time(16, 0))
+        setups = self.journal.rows(s.setups)
+        rows = []
+        for t in self.cfg.universe.tickers:
+            st = self.md.state.get(t)
+            if st is None or not st.bars1:
+                continue
+            try:
+                sip = await self.sip_history.minute_bars(t, start, end)
+            except Exception as exc:   # noqa: BLE001
+                log.warning("sip_history_failed", ticker=t, error=str(exc))
+                continue
+            trig = [(r["ts"], float(r["trigger"])) for r in setups
+                    if r.get("ticker") == t and r.get("ts") is not None
+                    and et_date(r["ts"]) == d and r.get("trigger") is not None]
+            rows.append(ops_mod.divergence_row(d, t, st.bars1, sip, trig,
+                                               self.cfg.data.sip_divergence_pct))
+        if rows:
+            self.journal.insert_many(s.data_divergence, rows)
+            worst = max((r for r in rows if r["or_diff_pct"] is not None),
+                        key=lambda r: r["or_diff_pct"], default=None)
+            if worst is not None and worst["or_diff_pct"] > self.cfg.data.sip_divergence_pct:
+                await self.say(f"DQ-6: IEX vs SIP opening range differs by "
+                               f"{worst['or_diff_pct']:.3f}% on {worst['ticker']} today "
+                               f"(tolerance {self.cfg.data.sip_divergence_pct}%)", "alert")
+
+    def _pt4_text(self, d: date) -> str:
+        """PT-4 summary for the daily report (paper environment only)."""
+        if self.cfg.mode.environment != "paper":
+            return ""
+        closed = [r for r in self.journal.closed_positions()
+                  if r.get("closed_at") is not None and et_date(r["closed_at"]) == d
+                  and r.get("route") == "broker"]
+        if not closed:
+            return ""
+        limits: dict[str, Decimal] = {}
+        for o in self.journal.rows(s.orders):
+            if o.get("leg") in ("A", "B") and o.get("limit") is not None:
+                limits.setdefault(o["proposal_id"], Decimal(str(o["limit"])))
+        bars = {t: st.bars1 for t, st in self.md.state.items()}
+        return str(ops_mod.strict_paper(closed, limits, bars)["text"])
+
     async def job_preflight(self, now: datetime) -> None:
         ok, problems = self.sup.preflight(et_date(now))
         want = self.cfg.mode.account_type
@@ -470,6 +575,11 @@ class TradingEngine:
             lines.append("Watch: none (zero picks is normal)")
         if plan.off_limits:
             lines.append("Off-limits: " + ", ".join(f"{t} ({r})" for t, r in plan.off_limits))
+        if window == "morning" and self.in_play_today:                          # UN-1
+            lines.append("In play (watch only, not tradable): " + ", ".join(
+                f"{r['ticker']} {r['gap_pct']:+.1f}%" for r in self.in_play_today
+                if not r["on_list"]) or "-")
+        lines.append(f"Regime: {self.regime}")                                   # RG-1
         left = self.cfg.risk.max_trades_per_day - rs.trades_total_today
         lines.append(f"Trades left today: {left} · Daily loss budget: ${budget:,.0f}")
         await self.say("\n".join(lines), "game_plan")
@@ -623,6 +733,9 @@ class TradingEngine:
             text = rep["text"]
             if kind == "daily":
                 text += "\n" + self.latency.summary() + "\n" + self.slippage.summary()
+                pt4 = self._pt4_text(et_date(now))                               # PT-4
+                if pt4:
+                    text += "\n" + pt4
             await self.say(text, f"report_{kind}")
         except JournalUnavailable as exc:
             log.error("report_failed", error=str(exc))
@@ -640,12 +753,43 @@ class TradingEngine:
                 text += f"\n  FLAG: {f}"
         except Exception as exc:   # noqa: BLE001
             log.warning("shadow_report_failed", error=str(exc))
+        try:   # UN-2: names in play on 3 of the last 5 sessions (only the owner edits the list)
+            d = et_date(now)
+            look, x = [], d
+            for _ in range(self.cfg.in_play.rotation_lookback):
+                look.append(x)
+                x = self.cal.prev_trading_day(x)
+            cands = ops_mod.rotation_candidates(self.journal.rows(s.in_play),
+                                                set(self.cfg.universe.tickers),
+                                                self.cfg.in_play.rotation_days, look)
+            if cands:
+                text += ("\nRotation candidates (UN-2, your decision; edit universe.tickers, "
+                         "applies next Monday): " + ", ".join(cands))
+        except Exception as exc:   # noqa: BLE001
+            log.warning("rotation_report_failed", error=str(exc))
+        try:   # AL-7
+            since = now - timedelta(days=7)
+            arows = [r for r in self.journal.rows(s.alerts_log, order_by="id")
+                     if r.get("ts") is not None and r["ts"] >= since]
+            atext, aflags = grading_report(arows, self.cfg.alerts.min_graded,
+                                           self.cfg.alerts.min_hit_rate)
+            text += "\n" + atext + "".join(f"\n  FLAG: {f}" for f in aflags)
+        except Exception as exc:   # noqa: BLE001
+            log.warning("alert_report_failed", error=str(exc))
         await self.say(text, "report_weekly")
 
     async def job_monthly(self, now: datetime) -> None:
         d = et_date(now)
         rep = await self.reporter.monthly(d.year, d.month)
-        await self.say(rep["text"], "report_monthly")
+        text = rep["text"]
+        try:
+            text += "\n" + ops_mod.tax_set_aside(self.journal.closed_positions(), d.year,
+                                                 self.cfg.tax.set_aside_rate_pct)  # TX-1
+            for line in ops_mod.ops_overdue(self.journal, now):                  # OPS-1/2
+                text += f"\n  DUE: {line}"
+        except Exception as exc:   # noqa: BLE001
+            log.warning("monthly_extras_failed", error=str(exc))
+        await self.say(text, "report_monthly")
 
     async def job_year_end(self, now: datetime) -> None:
         """WS-5: no open position carries a deferred wash-sale loss into the new year."""
@@ -683,6 +827,12 @@ class TradingEngine:
         for text in shock_alerts:
             self.journal.incident(now, "NEWS_SHOCK_PRICE", text)
             await self.say(text, "alert")
+        for text, act in self.pm.manual_checks(bar):                          # CP-2
+            await self.say(text, "copilot")
+            if act is not None:
+                actions.append(act)
+        for text in self.core_alerts.on_bar(bar, now):                        # AL-1..AL-6
+            await self.say(text, "alert_signal")
         if self.shadow is not None and self.day is not None:                  # SH-1
             self.shadow.on_bar(bar, self._cached("flatten", lambda d: {
                 w: self.windows.flatten_time(d, w) for w in ("morning", "afternoon")}))
@@ -761,6 +911,11 @@ class TradingEngine:
         await self._mark(now)
         if self.exec.failures >= 3:
             self.sup.set_health("alpaca", "red", "3 consecutive broker failures", now)
+        digest = self.core_alerts.flush(now)                                  # AL-6
+        if digest:
+            await self.say(digest, "alert_digest")
+        if now.second < 2 or self.sim_mode:
+            self.core_alerts.grade(now)                                       # AL-7
         level, detail = self.latency.health()                                 # LAT-1
         self.sup.set_health("latency", level, detail, now)  # type: ignore[arg-type]
         if self.prearm_enabled:
@@ -1045,12 +1200,93 @@ class TradingEngine:
             self.stats.rejected += 1
             self._missed(s_, pid, dec.reason_code)
             return dec
+        if dec.reason_code == Reason.COPILOT_PLAN:                              # CP-1
+            await self._copilot_plan(s_, dec, prop)
+            return dec
         if dec.result == "NEEDS_APPROVAL":
             self._pending_approval.add(pid)
             self._spawn(self._approval_flow(s_, prop, dec, review.verdict, planned))
             return dec
         await self._submit(dec, s_, planned)
         return dec
+
+    async def _copilot_plan(self, s_: SetupTriggered, dec: Decision, prop: TradeProposal
+                            ) -> None:
+        """CP-1: send the full plan at the trigger; the owner executes, no order here."""
+        now = self.now()
+        self.copilot_plans[self.cfg.canonical(s_.ticker)] = (s_, dec, now)
+        st = self.md.state.get(s_.ticker)
+        rr = ""
+        if s_.resistance is not None and dec.entry > dec.stop:
+            room = (Decimal(str(s_.resistance)) - dec.entry) / (dec.entry - dec.stop)
+            rr = f" · R:R to resistance {room:.1f}"
+        await self.say(
+            f"COPILOT PLAN {s_.ticker} {s_.setup} ({s_.window}): buy {dec.qty} @ "
+            f"<={dec.entry} "
+            f"· stop {dec.stop} · T1 {dec.t1} (sell {dec.qty // 2}) · T2 {dec.t2} · risk "
+            f"${dec.risk_usd:.0f} ({dec.risk_pct}%){rr} · RVOL "
+            f"{(st.rvol() or 0) if st else 0:.1f}\nThesis: {prop.thesis}\nNo order placed. "
+            f"After you buy: FILLED {s_.ticker} <qty> @ <price> (Alpaca fills are picked up "
+            "automatically).", "copilot")
+        t = self._timing.pop(dec.proposal_id, {})
+        self.latency.order(s_, dec.proposal_id, now, "copilot", t.get("model_s"), None,
+                           t.get("prearmed", False))
+        self._add_shadow(s_, dec.proposal_id, True, "COPILOT")
+
+    async def manual_fill(self, ticker: str, qty: int, price: Decimal, ts: datetime,
+                          route: str) -> str:
+        """CP-2: the owner bought (Alpaca fill or FILLED command): track it and send the
+        exits as alerts. Counts toward every limit and statistic (tagged manual, DR-8)."""
+        t = self.cfg.canonical(ticker)
+        if any(p.ticker == t and p.route in MANUAL_ROUTES for p in self.pm.open_positions()):
+            return f"{t}: a manual position is already tracked"
+        plan = self.copilot_plans.get(t)
+        st = self.md.state.get(t)
+        atr_v = (st.atr5.value if st and st.atr5.value else 0) or float(price) * 0.003
+        atr5 = Decimal(str(atr_v))
+        if plan is not None:
+            s_, dec, _ = plan
+            stop, t1, t2, setup, window = dec.stop, dec.t1, dec.t2, s_.setup, s_.window
+            trigger = s_.trigger
+        else:   # no plan: 1 ATR(5m) stop, 1R/2R targets
+            stop = (price - atr5).quantize(Decimal("0.01"))
+            r = price - stop
+            t1, t2 = price + r, price + 2 * r
+            setup, window = "MANUAL", self.windows.window_at(ts) or "morning"
+            trigger = price
+        pid = f"manual-{t}-{ts:%Y%m%d%H%M%S}"
+        p = self.pm.open_manual(pid, t, route, qty, price, ts, setup=setup, window=window,
+                                stop=stop, t1=t1, t2=t2, atr5=atr5, trigger=trigger)
+        self.journal.insert(s.positions, {
+            "position_id": pid, "ticker": t, "style": "day", "window": window, "setup": setup,
+            "planned": plan is not None, "opened_at": ts, "qty": qty, "avg_entry": price,
+            "initial_stop": stop, "risk_usd": (price - stop) * qty, "route": route,
+            "override": True, "state_json": self._pos_state(p)})
+        st_risk = self.risk.state
+        st_risk.trades_today[window] = st_risk.trades_today.get(window, 0) + 1
+        st_risk.window_entries.add((window, t))
+        self.compliance.on_buy_fill(pid, t, qty, price, ts, "broker")
+        return (f"COPILOT tracking {t} {qty} @ {price}: stop {stop} · T1 {t1} · T2 {t2}. "
+                "Exit instructions follow as alerts.")
+
+    async def manual_exit(self, ticker: str, qty: int, price: Decimal, ts: datetime) -> str:
+        """CP-2: the owner sold part or all of a tracked manual position."""
+        t = self.cfg.canonical(ticker)
+        p = next((x for x in self.pm.open_positions() if x.ticker == t and x.route in
+                  MANUAL_ROUTES), None)
+        if p is None:
+            return f"{t}: no tracked manual position"
+        q = min(qty, p.qty_open)
+        p.exit_qty += q
+        p.exit_value += price * q
+        self.compliance.on_sell_fill(p.position_id, t, q, price, ts,
+                                     p.r_multiple() if p.closed else 0.0)
+        if p.closed:
+            p.exit_reason = p.exit_reason or p.pending_exit or Reason.EXIT_FLATTEN_CMD
+            await self._finalize(p, ts)
+            return f"COPILOT {t} closed"
+        self._persist(p)
+        return f"COPILOT {t}: {q} sold, {p.qty_open} still open"
 
     def _llm_data(self, s_: SetupTriggered, ctx: DecisionContext, planned: bool
                   ) -> dict[str, Any]:
@@ -1102,8 +1338,17 @@ class TradingEngine:
                     f"Reply YES {code} or NO {code} within {timeout}s. No reply = no trade.")
             fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
             self._approval_waiters[pid] = fut
-            resp = await self.notifier.request_approval(pid, self.sup.mode_tag() + " " + text,
-                                                        code, timeout)
+            attach = getattr(self.notifier, "attach_chart", None)
+            if callable(attach) and self.cfg.notifications.approval_chart:      # AP-1
+                png = self._approval_png(s_, dec)
+                if png:
+                    attach(pid, base64.b64encode(png).decode())
+            updater = asyncio.ensure_future(self._approval_updates(s_, pid, fut, expires))
+            try:
+                resp = await self.notifier.request_approval(
+                    pid, self.sup.mode_tag() + " " + text, code, timeout)
+            finally:
+                updater.cancel()
             answer: str = resp.answer
             if answer == "timeout" and fut.done():
                 answer = fut.result()
@@ -1137,6 +1382,44 @@ class TradingEngine:
         finally:
             self._pending_approval.discard(pid)
             self._approval_waiters.pop(pid, None)
+
+    def _approval_png(self, s_: SetupTriggered, dec: Decision) -> bytes | None:
+        st = self.md.state.get(s_.ticker)
+        if st is None or not st.bars5:
+            return None
+        try:
+            return approval_chart(st.bars5, st.vwap_at_5m, entry=float(dec.entry),
+                                  stop=float(dec.stop), t1=float(dec.t1),
+                                  or_high=st.or5[0] if st.or5 else None,
+                                  or_low=st.or5[1] if st.or5 else None)
+        except Exception as exc:   # noqa: BLE001 - a chart never blocks an approval
+            log.warning("approval_chart_failed", error=str(exc))
+            return None
+
+    def approval_status(self, s_: SetupTriggered, expires: datetime, now: datetime) -> str:
+        """AP-3: live price, distance from the trigger in ATR(5m), seconds left, chase."""
+        st = self.md.state.get(s_.ticker)
+        last = st.last_price if st else None
+        left = max(0, int((expires - now).total_seconds()))
+        if last is None or s_.atr5 <= 0:
+            return f"⏱ {left}s left"
+        dist = (last - float(s_.trigger)) / s_.atr5
+        chase = self._chase_at_send(s_, now)
+        return (f"⏱ {left}s left · live {last:.2f} · {dist:+.2f} ATR from trigger "
+                f"{s_.trigger}" + (" · WOULD NOW BE A CHASE: will be refused" if chase else ""))
+
+    async def _approval_updates(self, s_: SetupTriggered, pid: str, fut: asyncio.Future[str],
+                                expires: datetime) -> None:
+        upd = getattr(self.notifier, "update_approval", None)
+        if not callable(upd):
+            return
+        every = self.cfg.notifications.approval_live_update_s
+        with contextlib.suppress(asyncio.CancelledError):
+            while not fut.done() and self.now() < expires:
+                await asyncio.sleep(every)
+                if fut.done():
+                    break
+                await upd(pid, self.approval_status(s_, expires, self.now()))
 
     async def _submit(self, dec: Decision, s_: SetupTriggered, planned: bool) -> None:
         now = self.now()
@@ -1199,6 +1482,20 @@ class TradingEngine:
         if o.leg in ("take_profit", "stop_loss") and o.parent_id:
             if o.id not in self.pm.by_order:
                 self.pm.register_child(o.parent_id, o.id, o.leg)
+        if (u.event in ("fill", "partial_fill") and u.fill_qty > 0 and u.fill_price is not None
+                and o.id not in self.exec.order_index and o.id not in self.pm.by_order
+                and o.id not in self._exit_orders and o.parent_id is None):
+            # CP-2: an order the owner placed in the Alpaca app (not ours)
+            if o.side == "buy" and self.cfg.style_mode("day") == "copilot":
+                await self.say(await self.manual_fill(o.symbol, u.fill_qty, u.fill_price, u.ts,
+                                                      "manual"), "copilot")
+                return
+            if o.side == "sell" and any(p.ticker == self.cfg.canonical(o.symbol)
+                                        and p.route in MANUAL_ROUTES
+                                        for p in self.pm.open_positions()):
+                await self.say(await self.manual_exit(o.symbol, u.fill_qty, u.fill_price,
+                                                      u.ts), "copilot")
+                return
         if u.event in ("fill", "partial_fill") and u.fill_qty > 0 and u.fill_price is not None:
             self.journal.insert(s.fills, {"broker_id": o.id, "client_order_id": o.client_order_id,
                                           "ticker": o.symbol, "side": o.side, "ts": u.ts,
@@ -1289,7 +1586,7 @@ class TradingEngine:
         for lk in self.compliance.on_position_closed(p.ticker, pnl, r, ts):
             self.bus.publish(lk)
         hits: list[LimitHit] = []
-        if p.route == "broker":
+        if p.route == "broker" or p.route in MANUAL_ROUTES:   # CP-2: manual counts too
             hits = self.risk.on_trade_closed(ClosedTrade(
                 position_id=p.position_id, ticker=p.ticker, setup=p.setup, style=p.style,
                 window=p.window, closed_at=ts, pnl=pnl, r_multiple=r, exit_reason=reason,
@@ -1299,7 +1596,7 @@ class TradingEngine:
                 position_id=p.position_id, ticker=p.ticker, setup=p.setup, style=p.style,
                 window=p.window, closed_at=ts, pnl=pnl, r_multiple=r, exit_reason=reason,
                 route=p.route))
-        if p.route in ("broker", "paper"):                                      # EXQ-1
+        if p.route in ("broker", "paper") and p.setup != "MANUAL":               # EXQ-1
             self._apply_slippage_mode(p.setup, self.slippage.record(
                 p.setup, SlippageMonitor.slip_r(p.avg_entry, p.trigger, p.r_per_share)))
         self.pm.remove_closed()
@@ -1344,6 +1641,11 @@ class TradingEngine:
         except StopWidenError as exc:   # DR-2
             self.journal.incident(self.now(), "RULE_BREACH_BLOCKED", str(exc))
             return
+        if p.route in MANUAL_ROUTES:                                            # CP-2
+            await self.say(f"COPILOT {p.ticker}: move your stop {old} -> {mv.new_stop} "
+                           f"({mv.reason})", "copilot")
+            self._persist(p)
+            return
         broker = self.exec.broker_for(p.route)
         for lg in p.legs.values():
             if lg.sl_id and lg.open_qty > 0:
@@ -1365,6 +1667,10 @@ class TradingEngine:
         if p is None or p.qty_open <= 0:
             return
         now = self.now()
+        if p.route in MANUAL_ROUTES:                                            # CP-2
+            await self.say(f"COPILOT EXIT {p.ticker}: sell {p.qty_open} now ({a.reason}). "
+                           f"Then: SOLD {p.ticker} {p.qty_open} @ <price>", "copilot")
+            return
         st = self.md.state.get(p.ticker)
         last = st.last_price if st and st.last_price else float(p.avg_entry)
         if Decimal(str(last)) < p.avg_entry:   # A12-2 look-forward before a loss exit
@@ -1476,6 +1782,14 @@ class TradingEngine:
             self.risk.state.paused_styles.discard(style)
         elif action == "STATUS":
             reply = self.status_text()
+        elif action == "ALERTS":                                                # AL-4
+            self.core_alerts.muted = arg.strip() == "OFF"
+            reply = f"Signal alerts {'off' if self.core_alerts.muted else 'on'}"
+        elif action in ("FILLED", "SOLD"):                                      # CP-2
+            reply = await self._owner_fill_command(action, arg)
+        elif action in ("OPT", "CHAIN", "IV", "OPTS", "OPTIONS"):                # OP-13
+            reply = (await self.options.command(action, arg) if self.options is not None
+                     else "options module is not running (options.mode off)")
         elif action == "PLAN":
             if self.next_session_day(self.now()) is None:
                 reply = "PLAN runs outside market hours; the 9:00/2:45 plans cover the session"
@@ -1487,6 +1801,30 @@ class TradingEngine:
         if cmd.source != "local" or action in ("NEED_CONFIRM", "STATUS", "PLAN"):
             await self.say(reply, "command_reply")
         return reply
+
+    async def _owner_fill_command(self, action: str, arg: str) -> str:
+        """FILLED NVDA 40 @ 132.55 / SOLD NVDA 40 @ 133.10 (co-pilot, another broker)."""
+        import re
+
+        m = re.match(r"^\s*([A-Z.]{1,6})\s+(\d+)\s*@\s*\$?(\d+(?:\.\d+)?)\s*$", arg)
+        if not m:
+            return f"usage: {action} NVDA 40 @ 132.55"
+        t, q, px = m.group(1), int(m.group(2)), Decimal(m.group(3))
+        if action == "FILLED":
+            return await self.manual_fill(t, q, px, self.now(), "manual_ext")
+        return await self.manual_exit(t, q, px, self.now())
+
+    async def notifier_down(self, detail: str) -> None:
+        """NF-1: approve and co-pilot entries stop (the risk manager blocks them while the
+        notifier is red); tell the owner through the local fallback channel."""
+        now = self.now()
+        self.journal.incident(now, "NOTIFIER_DOWN", detail)
+        if self.fallback is not None:
+            with contextlib.suppress(Exception):
+                await self.fallback.send(
+                    "Trading notifier is down",
+                    f"{to_et(now):%H:%M ET}: {detail}. Approve and co-pilot entries are paused "
+                    "until the notifier is back (NF-1). Check `./run.sh status`.")
 
     def status_text(self) -> str:
         rs = self.risk.state
@@ -1515,7 +1853,7 @@ class TradingEngine:
     async def reconcile(self) -> list[str]:
         expected: dict[str, int] = {}
         for p in self.pm.open_positions():
-            if p.route == "broker":
+            if p.route in ("broker", "manual"):   # CP-2: the owner's Alpaca buys are expected
                 expected[p.ticker] = expected.get(p.ticker, 0) + p.qty_open
         problems = await self.exec.reconcile(expected, set(self.pm.by_order) | set(
             self._exit_orders))

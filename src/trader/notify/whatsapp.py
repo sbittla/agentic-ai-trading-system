@@ -47,9 +47,19 @@ class OutboxNotifier:
         self.outbox = outbox
         self.now = now
         self._waiters: dict[str, asyncio.Future[str]] = {}
+        self._charts: dict[str, str] = {}
 
     async def send(self, text: str, *, kind: str) -> None:
         await self.outbox.publish("outbound_msg", {"kind": kind, "text": text})
+
+    def attach_chart(self, proposal_id: str, png_b64: str) -> None:
+        """AP-1: the chart image goes with the next approval for this proposal."""
+        self._charts[proposal_id] = png_b64
+
+    async def update_approval(self, proposal_id: str, text: str, final: bool = False) -> None:
+        """AP-3: live status edits of the approval message (Telegram)."""
+        await self.outbox.publish("outbound_msg", {"kind": "approval_update", "text": text,
+                                                   "proposal_id": proposal_id, "final": final})
 
     async def request_approval(self, proposal_id: str, text: str, code: str,
                                timeout_s: int) -> ApprovalResponse:
@@ -57,7 +67,9 @@ class OutboxNotifier:
         self._waiters[proposal_id] = fut
         await self.outbox.publish("outbound_msg", {"kind": "approval", "text": text,
                                                    "proposal_id": proposal_id,
-                                                   "timeout_s": timeout_s})
+                                                   "timeout_s": timeout_s, "code": code,
+                                                   "image_b64": self._charts.pop(
+                                                       proposal_id, None)})
         try:
             ans = await asyncio.wait_for(fut, timeout_s)
         except TimeoutError:

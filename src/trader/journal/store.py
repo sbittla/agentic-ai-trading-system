@@ -91,6 +91,8 @@ class SqlJournal:
         news, notifier, ro = f'"{p}news_rw"', f'"{p}notifier_rw"', f'"{p}readonly"'
         console = f'"{p}console_rw"'
         stmts = [f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO {ro}",
+                 # pg_dump (nightly backup, read-only role) also reads every sequence
+                 f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA {s.SCHEMA} TO {ro}",
                  f"GRANT SELECT ON {s.SCHEMA}.config_snapshots TO {news}, {notifier}",
                  # UI-C2: the console reads everything and writes only its own notes
                  f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO {console}"]

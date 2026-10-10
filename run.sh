@@ -274,8 +274,12 @@ case "$cmd" in
            [ $# -ge 1 ] || die "usage: ./run.sh import-trades FILE [--broker robinhood|webull|fidelity|schwab|generic]"
            "${COMPOSE[@]}" up -d --wait postgres >/dev/null
            toolbox import-trades --env-file .env.core "$@" ;;
-  restore-test) check_docker
-           "${COMPOSE[@]}" run --rm backup trader restore-test ;;
+  restore-test) check_docker; build_toolbox
+           "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+           report=$("${COMPOSE[@]}" --profile tools run --rm restore-test) \
+             || die "restore failed: $report"
+           printf '%s\n' "$report" | "${COMPOSE[@]}" --profile tools run --rm -T toolbox \
+             restore-test --env-file .env.core --report - ;;
   drill)   check_docker; build_toolbox
            "${COMPOSE[@]}" up -d --wait postgres >/dev/null
            toolbox drill --env-file .env.core "$@" ;;

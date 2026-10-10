@@ -9,6 +9,7 @@ allow-listed, parseable commands to ``inbound_cmd``. No inbound port, no webhook
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import os
 import time
@@ -73,12 +74,34 @@ class NotifierService:
         poll_cfg = cfg.services.notifier_poll_sec
         log.info("notifier_channel", channel=channel)
 
+        approval_msgs: dict[str, tuple[int, bool, str]] = {}   # proposal -> (msg id, photo, code)
+
         async def outbound() -> None:
             async for m in outbox.subscribe("outbound_msg", poll_s=1.0):
                 p = m.payload
-                if p.get("kind") == "approval":
+                kind = str(p.get("kind", "info"))
+                text = str(p.get("text", ""))
+                pid = str(p.get("proposal_id", ""))
+                if kind == "approval":
                     self.approval_open_until = time.monotonic() + float(p.get("timeout_s", 90))
-                await client.send(str(p.get("text", "")), kind=str(p.get("kind", "info")))
+                if channel == "telegram" and kind == "approval" and p.get("code"):
+                    # AP-1/AP-2: chart + caption + YES/NO buttons carrying the one-time code
+                    image = base64.b64decode(p["image_b64"]) if p.get("image_b64") else None
+                    mid = await client.send_approval(text, str(p["code"]), image)
+                    if mid is None:
+                        await client.send(text, kind=kind)
+                    else:
+                        approval_msgs[pid] = (mid, image is not None, str(p["code"]))
+                elif kind == "approval_update":
+                    # AP-3: live status; WhatsApp has no edits, so updates are Telegram-only
+                    ref = approval_msgs.get(pid)
+                    if channel == "telegram" and ref is not None:
+                        await client.edit_approval(ref[0], text, photo=ref[1],
+                                                   code=None if p.get("final") else ref[2])
+                    if p.get("final"):
+                        approval_msgs.pop(pid, None)
+                else:
+                    await client.send(text, kind=kind)
                 await outbox.ack(m.id)
 
         async def handle(sender: str, body: str) -> None:

@@ -23,6 +23,7 @@ from trader.timeutil import cents_down, et_date, to_et
 
 log = structlog.get_logger(__name__)
 D0 = Decimal(0)
+MANUAL_ROUTES = ("manual", "manual_ext")   # CP-2: owner-executed (Alpaca / another broker)
 
 
 class StopWidenError(Exception):
@@ -311,6 +312,47 @@ class PositionMonitor:
     def flatten_all(self, reason: str, style: str | None = None) -> list[Action]:
         return [self._exit(p, reason) for p in self.open_positions()
                 if not p.pending_exit and (style is None or p.style == style)]
+
+    def open_manual(self, position_id: str, ticker: str, route: str, qty: int, price: Decimal,
+                    ts: datetime, *, setup: str, window: str, stop: Decimal, t1: Decimal,
+                    t2: Decimal, atr5: Decimal, trigger: Decimal | None = None
+                    ) -> ManagedPosition:
+        """CP-2: a position the owner executed; exits are sent as alerts, never orders."""
+        p = ManagedPosition(
+            position_id=position_id, ticker=ticker, style="day", window=window, setup=setup,
+            planned=True, route=route, override=True, trigger=trigger or price,
+            breakout_level=float(trigger or price), atr5=atr5, initial_stop=stop, stop=stop,
+            t1=t1, t2=t2, opened_at=ts, opened_day=et_date(ts), qty_filled=qty,
+            cost=price * qty, max_high=float(price))
+        self.positions[position_id] = p
+        return p
+
+    def manual_checks(self, bar: Bar) -> list[tuple[str, Action | None]]:
+        """CP-2: owner positions have no broker brackets, so stop, T1 and T2 are watched on
+        bars and sent as instructions; each fires once."""
+        out: list[tuple[str, Action | None]] = []
+        for p in self._open_for(bar.symbol):
+            if p.route not in MANUAL_ROUTES or p.pending_exit:
+                continue
+            lo, hi = Decimal(str(bar.l)), Decimal(str(bar.h))
+            if lo <= p.stop:
+                p.pending_exit = Reason.EXIT_STOP if p.stop_kind == "initial" else \
+                    Reason.EXIT_BREAKEVEN
+                out.append((f"COPILOT {p.ticker}: stop {p.stop} touched -> sell "
+                            f"{p.qty_open} now", None))
+            elif not p.t1_hit and hi >= p.t1:
+                p.t1_hit = True
+                half = p.qty_open // 2
+                be = cents_down(p.avg_entry)
+                move: Action | None = StopMove(p.position_id, be, "XR-2 break-even after T1") \
+                    if be > p.stop else None
+                out.append((f"COPILOT {p.ticker}: T1 {p.t1} reached -> sell {half}, move the "
+                            f"stop on the rest to break-even {be}", move))
+            elif p.t1_hit and hi >= p.t2:
+                p.pending_exit = Reason.EXIT_T2
+                out.append((f"COPILOT {p.ticker}: T2 {p.t2} reached -> sell the remaining "
+                            f"{p.qty_open}", None))
+        return out
 
     def macro_breakeven(self, last: dict[str, float], min_r: float) -> list[Action]:
         """TW-6: before a 10:00 release or a Fed speech, open day trades at +``min_r``R or

@@ -472,8 +472,9 @@ class RiskManager:
                                                 exposure, ctx.planned)
         if ok and qty < 1:
             ok, why = False, f"{Reason.SIZE_TOO_SMALL}: qty {qty} ({binding})"
-        if ok and mode == "approve" and route == "broker" and not ctx.approvals_available:
-            ok, why = False, f"{Reason.NT_HEALTH}: notifier down, approve mode blocked"
+        if ok and mode in ("approve", "copilot") and route == "broker" \
+                and not ctx.approvals_available:   # NF-1: no silent auto-reject
+            ok, why = False, f"{Reason.NT_NOTIFIER_DOWN}: notifier down, {mode} mode blocked"
         items.append(ChecklistItem(id="CK-10", passed=ok,
                                    detail=why or f"qty {qty}, risk ${risk_usd:.2f} ({pct}%), "
                                    f"binding {binding}"))
@@ -483,6 +484,8 @@ class RiskManager:
         reason = Reason.NEEDS_APPROVAL if needs else Reason.APPROVED
         if self.state.reduced_since is not None:
             reason = Reason.NEEDS_APPROVAL if needs else Reason.SIZE_REDUCED
+        if mode == "copilot" and route == "broker":   # CP-1: plan only, the owner executes
+            needs, reason = False, Reason.COPILOT_PLAN
         return Decision(proposal_id=proposal_id,
                         result="NEEDS_APPROVAL" if needs else "APPROVE",
                         reason_code=reason, qty=qty, risk_usd=risk_usd, risk_pct=pct,

@@ -107,6 +107,14 @@ class CoreService:
                                broker=broker, journal=journal, llm=llm, notifier=notifier,
                                history=history, paper_broker=paper_broker,
                                require_quotes=True, reports_dir=base / "reports")
+        # REQUIREMENTS 1.3 wiring: in-play snapshots (UN-1), SIP comparison (DQ-6), NF-1
+        from trader.alerts.feed import AlpacaRest
+        from trader.notify.fallback import EmailFallback
+
+        rest = AlpacaRest(*data_keys, feed=cfg.data.alpaca_feed)
+        engine.snapshots = rest.snapshots
+        engine.sip_history = AlpacaHistory(*data_keys, feed="sip")
+        engine.fallback = EmailFallback.from_env()
         self.engine, self.journal, self.llm, self.broker = engine, journal, llm, broker
         self.outbox, self.notifier = outbox, notifier
         self.cfg = cfg
@@ -246,6 +254,8 @@ class CoreService:
                 if ch is not None and ch.level != "green":
                     await eng.say(f"HEALTH {ch.component} {ch.level.upper()}: {ch.detail}",
                                   "alert")
+                if ch is not None and ch.component == "notifier" and ch.level == "red":
+                    await eng.notifier_down(ch.detail)                           # NF-1
             await asyncio.sleep(self.cfg.services.heartbeat_sec)
 
     def _heartbeat_age_min(self, source: str) -> float | None:

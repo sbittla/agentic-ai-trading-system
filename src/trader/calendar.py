@@ -35,6 +35,8 @@ class MarketCalendar:
 
     def __init__(self, extra_closed: set[date] | None = None) -> None:
         self._extra_closed = extra_closed or set()
+        self._td_cache: dict[date, bool] = {}
+        self._session_cache: dict[date, Session] = {}
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -44,14 +46,23 @@ class MarketCalendar:
         return xcals.get_calendar("XNYS", start="2015-01-01")
 
     def is_trading_day(self, d: date) -> bool:
+        hit = self._td_cache.get(d)
+        if hit is not None:
+            return hit
         if d in self._extra_closed or d.weekday() >= 5:
-            return False
-        try:
-            return bool(self._xnys().is_session(d.isoformat()))
-        except Exception:   # noqa: BLE001 - outside calendar range: weekdays only
-            return True
+            ok = False
+        else:
+            try:
+                ok = bool(self._xnys().is_session(d.isoformat()))
+            except Exception:   # noqa: BLE001 - outside calendar range: weekdays only
+                ok = True
+        self._td_cache[d] = ok
+        return ok
 
     def session(self, d: date) -> Session:
+        cached = self._session_cache.get(d)
+        if cached is not None:
+            return cached
         if not self.is_trading_day(d):
             raise ValueError(f"{d} is not a trading day")
         try:
@@ -60,7 +71,9 @@ class MarketCalendar:
             c = cal.session_close(d.isoformat()).to_pydatetime().astimezone(ET)
         except Exception:   # noqa: BLE001 - outside calendar range
             o, c = et_datetime(d, time(9, 30)), et_datetime(d, time(16, 0))
-        return Session(day=d, open=o, close=c, early_close=c.time() < time(16, 0))
+        sess = Session(day=d, open=o, close=c, early_close=c.time() < time(16, 0))
+        self._session_cache[d] = sess
+        return sess
 
     def next_trading_day(self, d: date) -> date:
         n = d + timedelta(days=1)
