@@ -109,6 +109,7 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | `Error: pull model manifest: ssh: no key found` | `/root/.ollama/id_ed25519` was left empty (0 bytes) by a crash during Ollama's first start | `docker exec <ollama> rm -f /root/.ollama/id_ed25519 /root/.ollama/id_ed25519.pub`, then `docker restart <ollama>`; Ollama regenerates them |
 | `check-connections --service llm`: `only NN% of X GB in GPU memory` | Model does not fit in VRAM; part runs on the CPU and calls take minutes | Close other GPU programs; lower `llm.max_context_tokens`; or use a smaller model. With 8 GB use `qwen3:8b`, not 14B; `trader select-model` shows what fits |
 | Ollama log lacks `library=CUDA` | GPU not passed through | Check the NVIDIA driver and `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` (§1.1 step 5) |
+| http://localhost:3000 does not load; `./run.sh status` lists no `grafana` / `grafana-proxy` | Grafana is in the `monitoring` profile: a plain `./run.sh` / `docker compose up -d` does not start it | `./run.sh monitoring` (or `./run.sh start --monitoring`). If it still fails, the command prints Grafana's log; log in as `admin` with `secrets/grafana_admin_password.txt` |
 | Your other containers (for example `llm_qdrant`, `llm_redis`) are running again after a Docker restart | Their restart policy relaunches them with Docker | `docker stop <name>`, or `docker update --restart=no <name>` |
 
 ### Host and Python
