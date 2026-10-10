@@ -90,11 +90,15 @@ class SimBroker:
         self._streaming = False     # True once a live-style consumer iterates order_updates()
         self.submissions = 0
         self.fail_next = 0          # chaos: number of upcoming calls that raise
+        self.multiplier = 2         # AC-2: 1 = cash account
 
     # -- Broker interface -------------------------------------------------------------------
     async def account(self) -> Account:
         eq = self.equity()
-        return Account(equity=eq, cash=self.cash, buying_power=max(Decimal(0), self.cash))
+        # a margin-type account like Alpaca paper (AC-2); settlement rules (AC-1) are tested
+        # with a cash account explicitly
+        return Account(equity=eq, cash=self.cash, buying_power=max(Decimal(0), self.cash),
+                       multiplier=self.multiplier)
 
     def equity(self) -> Decimal:
         mv = sum((self.last.get(s, Decimal(0)) * q for s, q in self.holdings.items()),

@@ -39,6 +39,7 @@ class SymbolState:
     hod_time: datetime | None = None
     rvol_at_hod: float | None = None
     hod_before_1500: float | None = None
+    hod_time_before_1500: datetime | None = None
     cum_vol: float = 0.0
     or5: tuple[float, float] | None = None
     or15: tuple[float, float] | None = None
@@ -93,12 +94,16 @@ class SymbolState:
         v = self.vwap_value
         return None if v is None or self.last_price is None else self.last_price > v
 
-    def trend_day(self) -> bool:
-        """At least 70% of closed 5-min bars since 9:30 closed above VWAP."""
+    def trend_day(self, vwap_pct: float = 80.0, high_after: time = time(13, 0)) -> bool:
+        """RG-3: at least ``vwap_pct``% of closed 5-min bars since 9:30 closed above VWAP and
+        the day's high (as of 3:00 PM) was made after ``high_after`` ET."""
         if not self.bars5:
             return False
         above = sum(1 for b, v in zip(self.bars5, self.vwap_at_5m, strict=True) if b.c > v)
-        return above / len(self.bars5) >= 0.70
+        if above / len(self.bars5) * 100 < vwap_pct:
+            return False
+        made = self.hod_time_before_1500 or self.hod_time
+        return made is not None and to_et(made).time() > high_after
 
 
 class MarketDataAgent:
@@ -126,7 +131,7 @@ class MarketDataAgent:
             st.vwap = SessionVwap()
             st.bars1, st.bars5, st.vwap_at_5m, st.ema9_at_5m = [], [], [], []
             st.open_price = st.hod = st.lod = st.hod_before_1500 = None
-            st.hod_time = None
+            st.hod_time = st.hod_time_before_1500 = None
             st.rvol_at_hod = None
             st.cum_vol = 0.0
             st.or5 = st.or15 = None
@@ -244,6 +249,7 @@ class MarketDataAgent:
         st.lod = bar.l if st.lod is None else min(st.lod, bar.l)
         if to_et(bar.end).time() <= time(15, 0):
             st.hod_before_1500 = st.hod
+            st.hod_time_before_1500 = st.hod_time
         if m < 5:
             st.or5 = (max(st.or5[0], bar.h), min(st.or5[1], bar.l)) if st.or5 else (bar.h, bar.l)
         if m < 15:

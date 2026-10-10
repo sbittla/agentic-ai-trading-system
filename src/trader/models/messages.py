@@ -188,6 +188,7 @@ class Levels(Msg):
     low5d: float | None = None
     pullback_to_ema: bool = False         # a low within 0.5% of EMA20d/EMA50d, last 5 sessions
     history_days: int = 0
+    avg_gap20d: float | None = None       # RG-2: mean absolute opening gap %, 20 sessions
 
 
 class EventFlags(Msg):

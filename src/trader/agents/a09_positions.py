@@ -1,4 +1,4 @@
-"""A9 Position monitor (A9-1..A9-4, XR-1..XR-6, DR-1, DR-2, DR-6).
+"""A9 Position monitor (A9-1..A9-5, XR-1..XR-6, DR-1, DR-2, DR-6, EX-5, NW-2, TW-6).
 
 Tracks every open position leg by leg, applies the exit rules on closed bars and at the
 flatten times, and returns actions (exits, stop moves) for A8 to execute. Stops only ever move
@@ -211,7 +211,15 @@ class PositionMonitor:
         out: list[Action] = []
         for p in self._open_for(bar.symbol):
             p.max_high = max(p.max_high, bar.h)
-            if p.style != "day" or p.pending_exit:
+            if p.pending_exit:
+                continue
+            if p.style == "swing":
+                # EX-5: a swing position that opens below its stop is closed in the first
+                # 5 minutes with a marketable limit (the gap loss is reported as slippage)
+                local = to_et(bar.ts)
+                if (p.opened_day < local.date() and time(9, 30) <= local.time() < time(9, 35)
+                        and Decimal(str(bar.o)) < p.stop):
+                    out.append(self._exit(p, Reason.EXIT_GAP_BELOW_STOP))
                 continue
             dc = self.cfg.exits.day
             # XR-5: not at +0.5R within 15 minutes
@@ -303,6 +311,44 @@ class PositionMonitor:
     def flatten_all(self, reason: str, style: str | None = None) -> list[Action]:
         return [self._exit(p, reason) for p in self.open_positions()
                 if not p.pending_exit and (style is None or p.style == style)]
+
+    def macro_breakeven(self, last: dict[str, float], min_r: float) -> list[Action]:
+        """TW-6: before a 10:00 release or a Fed speech, open day trades at +``min_r``R or
+        better move their stop to break-even (never down, DR-2)."""
+        out: list[Action] = []
+        for p in self.open_positions():
+            px = last.get(p.ticker)
+            if p.style != "day" or p.pending_exit or px is None or p.r_per_share <= 0:
+                continue
+            if Decimal(str(px)) >= p.avg_entry + Decimal(str(min_r)) * p.r_per_share:
+                be = cents_down(p.avg_entry)
+                if be > p.stop:
+                    out.append(StopMove(p.position_id, be,
+                                        f"{Reason.STOP_MACRO_BREAKEVEN} break-even before a "
+                                        "TW-6 release"))
+        return out
+
+    def shock(self, bar: Bar, atr5: float | None, atr_x: float = 1.5
+              ) -> tuple[list[Action], list[str]]:
+        """NW-2: a move of more than ``atr_x`` ATR(5m) against an open position within one
+        minute -> alert, and the stop moves up to the bar's low (only ever up, DR-2)."""
+        actions: list[Action] = []
+        alerts: list[str] = []
+        if not atr5 or atr5 <= 0:
+            return actions, alerts
+        drop = max(bar.o, bar.h) - bar.l
+        if drop <= atr_x * atr5:
+            return actions, alerts
+        for p in self._open_for(bar.symbol):
+            if p.pending_exit:
+                continue
+            new = cents_down(bar.l)
+            alerts.append(f"SHOCK {p.ticker}: -{drop:.2f} ({drop / atr5:.1f}x ATR5) in one "
+                          f"minute, low {bar.l:.2f}; stop {p.stop}"
+                          + (f" -> {new}" if new > p.stop else " (kept: never moved down)"))
+            if new > p.stop and new < Decimal(str(bar.c)):
+                actions.append(StopMove(p.position_id, new, f"{Reason.STOP_SHOCK} NW-2 shock"))
+        return actions, alerts
 
     # -- stop moves ---------------------------------------------------------------------------
     def apply_stop_move(self, mv: StopMove) -> ManagedPosition:
