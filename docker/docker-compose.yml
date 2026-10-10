@@ -58,7 +58,7 @@ services:
       - ollama-models:/root/.ollama
     networks: [internal]                # SEC-9: no host port
     gpus: all                           # NVIDIA GPU via Docker Desktop + WSL2 (RUNBOOK §1 step 1)
-    environment:                        # sized for an 8 GB GPU (RTX 4060 Laptop) with qwen3:8b
+    environment:                        # sized for an 8 GB GPU (RTX 4060 Laptop) with qwen3:8b; docs/HARDWARE.md
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       OLLAMA_KEEP_ALIVE: 8h             # QW-4: stay loaded through the trading day

@@ -440,11 +440,12 @@ flowchart TD
 
 ### 10.2 Qwen model serving
 
-- **QW-1:** Run Qwen with the official Ollama Docker image, model version pinned in config (Qwen3 14B by default; 8B if the GPU has under 12 GB).
+- **QW-1:** Run Qwen with the official Ollama Docker image, model version pinned in config (Qwen3 8B by default, sized for the 8 GB reference GPU; larger models only when they fit fully in GPU memory, QW-6).
 - **QW-2:** Request JSON output by passing the Pydantic schema in Ollama's `format` field, repeat the schema in the prompt, temperature 0, then validate with Pydantic.
 - **QW-3:** 60-second timeout per call; one retry; then skip the trade (never trade without a review).
 - **QW-4:** Load the model by 9:00 AM and keep it loaded through 4:30 PM; expose a health check.
 - **QW-5:** Log every prompt, response, latency and token count to the journal.
+- **QW-6:** The owner chooses the model from the machine's capacity: `trader select-model` detects the NVIDIA GPU memory and system RAM, lists which supported Qwen3 models fit fully in GPU memory, recommends the largest that does, refuses (without `--force`) a model that would spill onto the CPU, and writes the choice to both `docker/.env` (`OLLAMA_MODEL`) and `config/config.yaml` (`llm.model`) so they cannot drift apart. Supported models and the reference machine: [HARDWARE.md](HARDWARE.md).
 
 ### 10.3 Data sources
 
@@ -492,7 +493,7 @@ The system is ready for live money only when it passes every test below in paper
 - [ ] Morning trades: hard exit at 10:30, or allow holding a winner to 11:00?
 - [ ] Wash-sale policy: strict (default), balanced or year-end only? Confirm with a tax advisor
 - [ ] Approve every trade on WhatsApp at first, or auto mode for swing trades only?
-- [ ] Machine GPU and memory, to pick Qwen 8B or 14B
+- [x] Machine GPU and memory, to pick the model: RTX 4060 Laptop 8 GB, 32 GB RAM → Qwen3 8B ([HARDWARE.md](HARDWARE.md))
 
 ## 13. Sources
 

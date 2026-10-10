@@ -122,11 +122,12 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `A12-2` | Before every loss exit, run the look-forward check (WS-3) and record the expected… | A12 | unit/test_a12_*.py | — |
 | `A12-3` | Maintain tax lots and adjusted basis (WS-7); produce the monthly wash-sale report and the… | A12 | unit/test_a12_*.py | — |
 | `A12-4` | Publish the list of locked tickers and unlock dates every morning in the game plan. | A12 | unit/test_a12_*.py | — |
-| `QW-1` | Run Qwen with the official Ollama Docker image, model version pinned in config (Qwen3 14B… | llm client | Manual: compose file review | — |
+| `QW-1` | Run Qwen with the official Ollama Docker image, model version pinned in config (Qwen3 8B… | llm client | Manual: compose file review | — |
 | `QW-2` | Request JSON output by passing the Pydantic schema in Ollama's `format` field, repeat the… | llm client | contract/test_llm_client.py | — |
 | `QW-3` | 60-second timeout per call; one retry; then skip the trade (never trade without a review). | llm client | contract/test_llm_client.py | — |
 | `QW-4` | Load the model by 9:00 AM and keep it loaded through 4:30 PM; expose a health check. | llm client | contract/test_llm_client.py | — |
 | `QW-5` | Log every prompt, response, latency and token count to the journal. | llm client | contract/test_llm_client.py | — |
+| `QW-6` | The owner chooses the model from the machine's capacity: `trader select-model` detects… | hardware, cli | unit/test_hardware.py | — |
 | `SR-1` | Alpaca retired the pattern day trader rule on June 4, 2026; margin accounts with $2,000+… | A7, A8, A10 | unit/test_safety.py | — |
 | `SR-2` | Never use margin beyond 1x equity. | A7, A8, A10 | unit/test_safety.py | — |
 | `SR-3` | Separate API keys for paper and live, stored outside the code and never sent to Qwen. | A7, A8, A10 | unit/test_safety.py | — |

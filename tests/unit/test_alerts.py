@@ -392,3 +392,9 @@ async def test_run_session_streams_then_sends_summary(tmp_path: Any) -> None:
     assert any("NVDA gapped" in t for t in texts)
     assert texts[-1].startswith("🏁 Close") and "NVDA" in texts[-1]
     assert not svc.in_session
+
+
+def test_default_watchlist_is_sp500_top20_plus_etfs() -> None:
+    syms = AlertsConfig().symbols()
+    assert len(syms) == 22 and syms[-2:] == ["SPY", "QQQ"]
+    assert {"NVDA", "AAPL", "MSFT", "BRK.B", "JPM"} <= set(syms)

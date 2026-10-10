@@ -10,6 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MAX_IEX_SYMBOLS = 30   # Alpaca free plan: 30 symbols on the IEX stream
 
+# 20 largest S&P 500 companies by market cap (snapshot October 2026; one share class each).
+# Rankings drift: review every quarter or edit the list with /watch and /unwatch.
+SP500_TOP20 = (
+    "NVDA", "AAPL", "GOOGL", "MSFT", "AMZN", "META", "AVGO", "TSLA", "MU", "LLY",
+    "BRK.B", "AMD", "JPM", "WMT", "V", "XOM", "JNJ", "INTC", "MA", "ABBV")
+MARKET_ETFS = ("SPY", "QQQ")   # market context for day trading
+
 
 class SignalSettings(BaseModel):
     """Automatic scanner signals on every watched symbol (evaluated on 1-minute bar closes)."""
@@ -32,8 +39,7 @@ class SignalSettings(BaseModel):
 class AlertsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    watchlist: list[str] = Field(default_factory=lambda: [
-        "NVDA", "AAPL", "GOOGL", "MSFT", "AMZN", "TSM", "META", "AVGO", "TSLA", "SPY", "QQQ"])
+    watchlist: list[str] = Field(default_factory=lambda: list(SP500_TOP20 + MARKET_ETFS))
     feed: str = "iex"                           # iex (free) | sip (paid plan)
     connect_before_open_min: int = Field(default=5, ge=0, le=120)
     disconnect_after_close_min: int = Field(default=1, ge=0, le=120)
