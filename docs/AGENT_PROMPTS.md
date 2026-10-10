@@ -148,6 +148,25 @@ Reports are templates filled by code from journal queries. Qwen writes only the 
 
 ---
 
+## 7a. A14 Options rationale (after the close only)
+
+**When:** only for the 4:15 PM next-day options ideas (OP-8). During market hours the rationale is a code template, so options add no GPU load.
+
+**Prompt:** `prompts/a14/v1.md` (version in `llm.prompt_versions.a14`). **Input (DATA):** ticker, direction, setup, style, the structure the code already chose, IV rank, and whether T1 is inside or beyond the expected move. No prices or sizes are sent.
+
+**Schema:** `rationale` (≤ 400 chars, one or two sentences on why the structure fits the setup). **Validation:** any digit in the answer rejects it (every number in the message comes from code, A11-3) and the code template is used instead.
+
+## 7b. Owner Console Ask (UI-7, UI-8)
+
+Two calls per question, logged to `llm_calls` with `agent = "console"`; neither can send a command.
+
+1. **Router.** Input: the question, the universe and today's date. **Schema `ToolChoice`:** `tool` (one of `decisions`, `trades`, `metrics`, `ideas`, `locks`, `quote`, `checklist`, `news`, `incidents`, `iv`, `chain`, `suggestions`, `options_metrics`), optional `symbol` (≤ 6), `date`, `days` (1–365), `group_by`, `setup`. Code validates the arguments again (symbol pattern, ranges, row limits) and runs the tool.
+2. **Writer.** Input: the question and up to 50 tool rows. **Schema `AnswerOut`:** `answer` (≤ 1200 chars, at most four sentences). **Validation:** every number in the answer must appear in the rows or the question (UI-C6); otherwise the rows are shown with a plain table answer. Questions about the future get the system's state plus "Not advice.", never a prediction.
+
+**Priority (UI-8b):** no model call during entry windows (09:35–10:30, 15:00–15:55 ET) or while another question runs; a keyword router picks the tool and the table answers. With `CONSOLE_ASK_MODEL=0` the console never calls the model.
+
+---
+
 ## 8. Evaluation set
 
 Before a prompt version is used, it must pass an offline evaluation:
