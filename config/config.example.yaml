@@ -102,7 +102,9 @@ data:
 llm:
   provider: ollama
   base_url: http://ollama:11434
-  model: qwen3:14b              # pin an exact tag in production
+  model: qwen3:8b               # fits an 8 GB GPU (reference: RTX 4060 Laptop, docs/HARDWARE.md)
+                                # `trader select-model` recommends one for your GPU and, with
+                                # --apply, sets this and OLLAMA_MODEL in docker/.env together
   temperature: 0
   timeout_sec: 60
   retries: 1

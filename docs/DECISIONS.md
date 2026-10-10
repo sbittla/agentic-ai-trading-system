@@ -32,7 +32,7 @@ Short records of the main design decisions, so later changes can see why things 
 ### ADR-002 Model: Qwen in Docker
 
 **Context:** Cost and privacy; the owner already runs models locally.
-**Decision:** Qwen3 (14B default, 8B fallback) served by the Ollama Docker image, JSON-constrained output at temperature 0.
+**Decision:** Qwen3 (8B default for the 8 GB reference GPU; 14B/32B when they fit fully in GPU memory, chosen with `trader select-model`) served by the Ollama Docker image, JSON-constrained output at temperature 0.
 **Consequences:** No per-call cost. Reasoning is weaker than large commercial models, so the rules, checklist and code validation carry the decisions; Qwen filters and explains. GPU memory and uptime become operational concerns.
 
 ### ADR-003 Free data only
