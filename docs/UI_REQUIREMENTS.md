@@ -159,6 +159,13 @@ Grafana stays: it is the right tool for time-series analytics. The console links
 
 - **UI-28** Options tab, payoff view, suggestions list and options Q&A tools: OP-16 to OP-19 in [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) §8.
 
+### 3.6b Trader workflow (REQUIREMENTS 1.3)
+
+- **UI-29 Owner journal:** for each trade (system, co-pilot or shadow), the owner can add notes, tags (FOMO, hesitated, early exit, followed the plan) and a screenshot. The weekly review shows tag statistics beside the A/B/C grades.
+- **UI-30 Live scanner:** the watchlist and in-play names (UN-1), ranked by % change, RVOL, relative strength against QQQ and distance from VWAP, with each alert's qualified/raw label (AL-2). Click through to the stock page.
+- **UI-31 Latency and missed trades:** a panel with today's trigger-to-order times (LAT-1), the missed triggers by reason (LAT-4), and the shadow result of each (SH-1).
+- **UI-32 Co-pilot ticket:** in co-pilot mode (CP-1), the plan is shown as a ticket. "I filled" records the fill (CP-2), and exit alerts follow.
+
 ### 3.7 System and settings (read-mostly)
 
 - **UI-18** Config viewer: the effective config for today (from `config_snapshots`) and any edits waiting for tomorrow (SR-5), as a diff. Config is still edited in `config/config.yaml`; the console does not write it (DV-3).

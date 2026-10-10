@@ -226,6 +226,7 @@ The stock side stays long-only. These signals exist **only to feed bearish optio
 - **OP-17 Payoff view:** for any suggestion, the profit/loss at expiry and at the planned exit time over a range of stock prices, with markers for the current price, T1, the invalidation level and the expected-move band.
 - **OP-18 Suggestions list:** open and closed suggestions with live P/L, follow-up alerts, and their grade.
 - **OP-19 Ask (UI-7)** gains read-only options tools: `iv(symbol)`, `chain(symbol, expiry)`, `suggestions(range)`, `options_metrics(group_by)`. Example: "How did put debit spreads do on high-IV days?"
+- **OP-20 Prefetch (REQUIREMENTS LAT-2):** when a setup is pre-armed, A13 fetches the chain snapshot near the expected strikes, so the options suggestion goes out with the stock alert, not after it.
 
 ## 9. Phases and modes
 

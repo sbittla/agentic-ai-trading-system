@@ -29,6 +29,19 @@ One YAML file controls every tunable value. It is loaded once at start, snapshot
 | `storage` | Env var holding the Postgres URL, bar path, backup time | Env var present; Postgres reachable |
 | `services` | Heartbeat interval, staleness limits for news and notifier, notifier polling intervals | Approval polling ≤ 5 s |
 
+### Planned fields (REQUIREMENTS 1.3, not built yet)
+
+| Section | New fields | Validation at start |
+| --- | --- | --- |
+| `mode` | `day_trades` / `swing_trades` also accept `copilot` (CP-1); `account_type` (`cash`/`margin`, AC-1) | `account_type` must match Alpaca's, or the day is blocked (AC-2) |
+| `latency` | `budget_s` (10), `prearm_atr` (0.3), `prearm_tolerance_atr` (0.1) (LAT-1, LAT-2) | `budget_s` ≤ 30 |
+| `windows` | `macro_release_block` (`09:57`–`10:05`), `speech_block_min` (3 before / 5 after) (TW-6) | inside the morning window |
+| `regime` | `high_vol_atr_ratio` (1.5), `trend_day_vwap_pct` (80) (RG-1..RG-3) | ratio ≥ 1.0 |
+| `data` | `quote_max_age_s` (2, DQ-8), `news_poll_open_s` (60, NW-1), `sip_divergence_pct` (0.05, DQ-7) | `news_poll_open_s` ≥ 30 (Finnhub limit) |
+| `alerts` | `schedule` (`windows`/`all_day`), `per_symbol_cap` (3), `per_window_cap` (12), `digest_min` (10) (AL-4..AL-6) | caps ≥ 1 |
+| `execution` | `slippage_switch_r` (0.1, EXQ-1); stops always stop-market (EX-5, not configurable) | `slippage_switch_r` > 0 |
+| `tax` | `set_aside_rate_pct` (TX-1) | 0–60 |
+
 ## Environment variables (secrets)
 
 Each container reads only its own env file (SECURITY.md SEC-18). Templates are the `.env.<name>.example` files in the repo root (`trader init-env` creates the real files); how to obtain every value is in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md). Reddit values may be left empty (the news service runs without them).

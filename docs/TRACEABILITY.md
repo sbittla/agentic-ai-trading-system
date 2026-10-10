@@ -1,10 +1,10 @@
 # Traceability Matrix
 
-**Version:** 1.0 (September 30, 2026) · Generated from [REQUIREMENTS.md](REQUIREMENTS.md) v1.2 and [SECURITY.md](SECURITY.md)
+**Version:** 1.0 (September 30, 2026) · Generated from [REQUIREMENTS.md](REQUIREMENTS.md) v1.3 and [SECURITY.md](SECURITY.md)
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 144 requirement IDs.
+**Totals:** 188 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -153,6 +153,58 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `SEC-18` | Each container reads only its own env file; live keys in a separate file. | compose | Manual: env file review at go-live | — |
 | `SEC-19` | No inbound ports or tunnels; notifier polls Twilio; containers read-only with no-new-privileges. | compose, notifier | chaos/test_containers.py | — |
 | `SEC-16` | Monthly security check: dependency alerts, key ages, config hash history, rejected commands. | Owner | Manual: monthly security check | — |
+
+
+### Added in REQUIREMENTS 1.3 (day-trader review)
+
+Rows marked **Planned** are specified but not built yet; CI counts them but does not enforce a test until the row names one.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `UN-1` | In-play scan (watch only): from 8:30 to 9:25 AM, scan the 50 largest S&P 500 names for ga… | A4 | Planned: unit/test_universe.py | — |
+| `UN-2` | Governed rotation: A1's weekly report may propose swapping a list ticker for a name that… | A1 | Manual: weekly report review | NT_UNIVERSE |
+| `TW-6` | 10:00 AM releases and Fed speakers: The macro calendar also lists the 10:00 AM releas… | A7, A10 | Planned: unit/test_windows.py | NT_MACRO_RELEASE |
+| `MF-6` | Reliable quote: the spread check (MF-4) uses only a two-sided quote less than 2 seconds o… | A4, A7 | Planned: unit/test_checklist.py | NT_NO_RELIABLE_QUOTE |
+| `RG-1` | Daily regime: at 8:30 AM, classify the day as `normal` or `high-vol` from SPY's ATR(14-da… | A4 | Planned: unit/test_regime.py | — |
+| `RG-2` | High-vol rules: risk per trade halves (like RC-1, not stacked below 0.25%); no gap-and-go… | A7 | Planned: unit/test_regime.py | NT_REGIME |
+| `RG-3` | Trend day, defined: by 3:00 PM, at least 80% of 5-minute closes since 9:30 are above VWAP… | A4 | Planned: unit/test_regime.py | NT_NOT_TREND_DAY |
+| `EX-5` | Stop order type: Broker-side stops are stop-market orders, so a fast move or a halt c… | A8, A9 | Planned: unit/test_execution.py | EXIT_GAP_BELOW_STOP |
+| `LAT-1` | Latency budget: from the trigger candle's close to the order sent, p95 ≤ 10 s in auto… | A10, engine | Planned: unit/test_latency.py | — |
+| `LAT-2` | Pre-arming: When price is within 0.3 ATR(5-min) of a game-plan trigger, A5 writes the… | A4, A5, A6 | Planned: unit/test_latency.py | — |
+| `LAT-3` | No-chase at send time: CK-6 is checked again the moment the order is sent (after approval… | A7, A8 | Planned: unit/test_latency.py | NT_CHASE_AT_SEND |
+| `LAT-4` | Aligned expiries: A day-trade proposal expires 2 minutes after the trigger, or 30 s a… | A5, A7 | Planned: unit/test_latency.py | NT_EXPIRED |
+| `SH-1` | Shadow trades: Every setup whose trigger fires is followed with a simulated bracket o… | engine | Planned: unit/test_shadow.py | — |
+| `SH-2` | Shadow report: the weekly review compares the expectancy of taken and not-taken setups, b… | A11 | Planned: unit/test_shadow.py | — |
+| `AC-1` | Cash account: Size every entry from settled cash only. Track unsettled proceeds per t… | A7 | Planned: unit/test_loss_limits.py | NT_UNSETTLED_FUNDS |
+| `AC-2` | Margin account: buying power is used only up to 1× equity (SR-2, LL-11). The account type… | A7, A10 | Planned: unit/test_safety.py | NT_ACCOUNT_MISMATCH |
+| `EXQ-1` | Slippage feedback: Expectancy per setup is always computed after actual slippage (ent… | A7, A11 | Planned: unit/test_execution.py | — |
+| `WS-9` | Other-account import: The owner can import trades from other brokers (CSV exports fro… | A12 | Planned: unit/test_wash_sale.py | NT_WASH_LOCK |
+| `DQ-6` | IEX vs consolidated: after each session, compare the day's IEX 1-minute bars with consoli… | A2, A11 | Planned: unit/test_a2_market_data.py | — |
+| `DQ-7` | Go-live data gate: live trading needs either 20 paper days in which the opening-range and… | A10 | Manual: go-live data gate review | — |
+| `DQ-8` | Unreliable quote: when the latest quote is one-sided, crossed or more than 2 seconds old,… | A2, A7 | Planned: unit/test_checklist.py | NT_NO_RELIABLE_QUOTE |
+| `NW-1` | News in positions: during the windows, poll news and new 8-Ks every 60 seconds for ticker… | A3 | Planned: unit/test_a3_news.py | — |
+| `NW-2` | Shock rule: A move of more than 1.5 ATR(5-min) against an open position within one mi… | A3, A9 | Planned: unit/test_exits.py | NT_NEWS_SHOCK |
+| `A5-5` | Pre-armed proposals (LAT-2) use the same schema and prompt; the journal records whether a… | A5 | Planned: unit/test_strategy_review.py | — |
+| `A9-5` | In co-pilot mode (CP-2), apply the same exit rules as alerts instead of orders. | A9 | Planned: unit/test_exits.py | — |
+| `NF-1` | Notifier down: if the notifier channel is unreachable for 2 minutes during a window, appr… | A10, notifier | Planned: unit/test_a10_supervisor.py | NT_NOTIFIER_DOWN |
+| `TX-1` | Tax set-aside: the monthly report shows realized short-term gains year to date and an est… | A11 | Planned: unit/test_a11_reporter.py | — |
+| `AL-1` | One source while trading: When trader-core runs, it produces the price and signal ale… | engine, notifier | Planned: unit/test_alerts.py | — |
+| `AL-2` | Labels: every signal alert is labelled raw signal or qualified setup, with the checklist… | A4, A7 | Planned: unit/test_alerts.py | — |
+| `AL-3` | Actionable: every directional alert carries the plan, computed by the same A4/A7 code as… | A4, A7 | Planned: unit/test_alerts.py | — |
+| `AL-4` | Schedule: `windows` (default: pre-market, 9:30–10:30, 3:00–4:00) or `all_day`. | notifier | Planned: unit/test_alerts.py | — |
+| `AL-5` | Caps: at most 3 alerts per symbol per window, and at most 12 per window overall. | notifier | Planned: unit/test_alerts.py | — |
+| `AL-6` | Ranking: alerts are ranked by a quality score (RVOL, alignment with QQQ, distance to resi… | notifier | Planned: unit/test_alerts.py | — |
+| `AL-7` | Grading: every alert type is graded: the share that reached +1R before −1R within 30 minu… | A11 | Planned: unit/test_alerts.py | — |
+| `AP-1` | Chart in the approval: the approval message includes a small chart image rendered by code… | notifier | Planned: unit/test_telegram.py | — |
+| `AP-2` | Buttons: Inline `YES <code>` / `NO <code>` buttons carry the one-time code. Callback… | notifier, commands | Planned: unit/test_telegram.py | CMD_REJECTED |
+| `AP-3` | Live status: the message is edited every 5 seconds with | notifier | Planned: unit/test_telegram.py | — |
+| `CP-1` | Plan only: in `copilot` mode the system sends the full plan (AL-3) at the trigger and pla… | A10 | Planned: unit/test_copilot.py | — |
+| `CP-2` | Owner fills tracked: The owner's fills are taken from the Alpaca account (positions a… | A9, A12 | Planned: unit/test_copilot.py | — |
+| `CP-3` | Options: the same applies to options advisories (OPTIONS_REQUIREMENTS.md, A16). | A16 | Planned: unit/test_copilot.py | — |
+| `OPS-1` | Restore test: monthly, restore the latest backup into a throwaway database and check the… | Owner, backup | Manual: monthly restore test | — |
+| `OPS-2` | Emergency drill: monthly, on the paper account, with one position open | Owner | Manual: monthly emergency drill | — |
+| `BT-6` | Real-history backtest of the playbook on 2 years of minute bars before paper trading (TEST_PLAN.md). | backtest | Planned: replay/test_backtest_history.py | — |
+| `PT-4` | Paper fills re-checked against the replay fill model; paper statistics use the stricter result (TEST_PLAN.md). | backtest, A11 | Planned: replay/test_paper_fills.py | — |
 
 ## How to use
 

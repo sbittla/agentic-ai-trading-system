@@ -1,6 +1,6 @@
 # Requirements Review: Do They Help a Day Trader?
 
-**Date:** October 10, 2026 · **Scope:** REQUIREMENTS.md, STRATEGY_SPEC.md, ALERTS.md, UI_REQUIREMENTS.md, OPTIONS_REQUIREMENTS.md, MONITORING.md · **Status:** findings for owner review; no requirement is changed yet
+**Date:** October 10, 2026 · **Scope:** REQUIREMENTS.md, STRATEGY_SPEC.md, ALERTS.md, UI_REQUIREMENTS.md, OPTIONS_REQUIREMENTS.md, MONITORING.md · **Status:** folded into [REQUIREMENTS.md](REQUIREMENTS.md) v1.3 (October 10, 2026); IDs below map to the requirement text there
 
 ## Verdict
 
@@ -167,10 +167,10 @@ The gaps are in **speed, data quality, the information the trader gets at the mo
 | G15 | No owner journal | **UI-29** Notes, tags (FOMO, hesitated, early exit) and a screenshot per trade in the console, reported weekly beside the A/B/C grades. Self-review is the habit that improves a discretionary trader |
 | G16 | Wash sales in other accounts only produce a warning (WS-6) | **WS-9** Import trades from other brokers (CSV: Robinhood, Webull, Fidelity) so their losses also lock tickers here; warn before an IRA purchase of a locked ticker |
 | G17 | No "what's moving now" view | **UI-30** A live scanner panel in the console: watchlist ranked by % change, RVOL, relative strength vs QQQ and distance from VWAP; click through to the stock page |
-| G18 | One notification channel | **NT-3** If Telegram is unreachable for 2 minutes during a window, approve mode pauses new entries (no silent auto-reject), and a fallback e-mail or desktop toast tells the owner. Today it depends only on the notifier heartbeat |
+| G18 | One notification channel | **NF-1** If Telegram is unreachable for 2 minutes during a window, approve mode pauses new entries (no silent auto-reject), and a fallback e-mail or desktop toast tells the owner. Today it depends only on the notifier heartbeat |
 | G19 | Options advice ignores trigger latency | **OP-20** Prefetch the option chain when a setup is pre-armed (LAT-2), so the suggestion arrives with the stock alert, not after it |
 | G20 | Tax awareness | **TX-1** Monthly report: realized short-term gains and an estimated tax set-aside at a rate the owner configures (day-trading gains are taxed as ordinary income) |
-| G21 | Real-history backtests of the playbook | **BT-x** Run the playbook on 2 years of real minute bars (`trader fetch-history`) alongside synthetic days. Report results by setup before paper trading starts, so the paper phase confirms them rather than discovering them |
+| G21 | Real-history backtests of the playbook | **BT-6** Run the playbook on 2 years of real minute bars (`trader fetch-history`) alongside synthetic days. Report results by setup before paper trading starts, so the paper phase confirms them rather than discovering them |
 
 ---
 
@@ -183,6 +183,18 @@ The gaps are in **speed, data quality, the information the trader gets at the mo
 - Journal-first design: every decision is reproducible; reports take numbers from the journal, not the model.
 - Staged gates: replay → backtest → paper → live, with setups returning to paper on negative expectancy.
 - Next-day ideas graded against the next session.
+
+## Additional gaps found after the review (also in v1.3)
+
+| Gap | Requirement |
+| --- | --- |
+| Cash-account settlement (good-faith violations) not handled | AC-1, AC-2 |
+| Stop order type not specified (stop-market vs stop-limit) | EX-5 |
+| Alpaca paper fills are optimistic | PT-4 (TEST_PLAN.md) |
+| Backups never test-restored | OPS-1 |
+| No emergency drills (kill, flatten, network loss) | OPS-2 |
+
+Renamed when folded in: the notifier fallback is **NF-1** (NT- is already used by the no-trade rules); the real-history backtest is **BT-6** (BT-1..BT-5 exist in TEST_PLAN.md).
 
 ## Suggested order
 

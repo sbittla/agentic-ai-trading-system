@@ -49,6 +49,7 @@ Record full market days (1-min bars, quotes, news) and replay them through the w
 - **BT-3 Costs:** slippage of 0.02% per side plus regulatory fees on sells; fills only if price trades through the limit.
 - **BT-4 Data caveat:** IEX-only history understates volume; results are checked against a sample of consolidated data before trusting RVOL thresholds.
 - **BT-5 LLM in the loop:** run with Qwen for a 3-month sample to measure how often A5/A6 skip rules-valid setups and whether that improves expectancy.
+- **BT-6 Real history before paper:** run the playbook on 2 years of real minute bars (`trader fetch-history`), walk-forward as in BT-1. Report expectancy by setup, window and regime (RG-1) **before** paper trading starts, so paper trading confirms the edge instead of discovering it.
 - **Pass bar:** out-of-sample expectancy > 0.1R per trade after costs, profit factor ≥ 1.3, max drawdown ≤ 6%, at least 100 trades.
 
 ## 4. Paper trading (stage 4)
@@ -56,6 +57,7 @@ Record full market days (1-min bars, quotes, news) and replay them through the w
 - **PT-1:** At least 20 consecutive trading days and 100 trades on the Alpaca paper account, in approve mode for the first 5 days, then auto.
 - **PT-2:** Compare paper fills with the replay of the same days; slippage difference recorded.
 - **PT-3:** All acceptance tests in REQUIREMENTS.md section 11 pass.
+- **PT-4 Stricter paper fills:** Alpaca paper fills are optimistic. Every paper fill is re-checked against the replay fill model: an entry counts only if price traded through the limit, and stops fill at the worse of the stop and the next print. Paper statistics use the stricter result; the gap between the two is reported.
 
 ## 5. Small live (stage 5) and auto mode
 
