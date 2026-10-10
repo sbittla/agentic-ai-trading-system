@@ -7,6 +7,7 @@
 #   ./run.sh check           pre-flight only (Docker, GPU, env files, secrets not in git)
 #   ./run.sh status | logs [service] | stop | restart
 #   ./run.sh model           show which Qwen model fits this GPU (docs/HARDWARE.md)
+#   ./run.sh monitoring      start/repair Grafana dashboards on http://localhost:3000
 #   ./run.sh alerts          only the lightweight Telegram price-alert bot (docs/ALERTS.md)
 #   ./run.sh replay [days]   offline trial on synthetic days (no broker keys, no GPU)
 #
@@ -203,6 +204,20 @@ cmd_setup() {
   echo "Next: fill in the keys listed above (docs/ACCOUNT_SETUP.md), then ./run.sh"
 }
 
+cmd_monitoring() {
+  check_docker
+  [ -f secrets/grafana_admin_password.txt ] || die "secrets/grafana_admin_password.txt missing: ./run.sh setup"
+  step "Grafana dashboards (docs/MONITORING.md)"
+  if ! "${COMPOSE[@]}" --profile monitoring up -d --wait --wait-timeout 300 grafana grafana-proxy; then
+    "${COMPOSE[@]}" --profile monitoring ps grafana grafana-proxy
+    echo "--- last grafana log lines:"
+    "${COMPOSE[@]}" --profile monitoring logs --tail 40 grafana || true
+    die "Grafana did not become healthy (log above; docs/TROUBLESHOOTING.md)"
+  fi
+  ok "dashboards: http://localhost:3000  user admin, password in secrets/grafana_admin_password.txt"
+  echo "  (Windows browser works too: Docker Desktop forwards localhost from WSL)"
+}
+
 cmd_alerts() {
   check_docker; check_secrets_not_in_git
   [ -f .env.alerts ] || die ".env.alerts missing: cp .env.alerts.example .env.alerts and fill it in (docs/ALERTS.md)"
@@ -218,13 +233,18 @@ case "$cmd" in
   stop)    "${COMPOSE[@]}" --profile monitoring --profile alerts stop ;;
   restart) "${COMPOSE[@]}" --profile monitoring --profile alerts stop; cmd_start "$@" ;;
   status)  "${COMPOSE[@]}" --profile monitoring --profile alerts ps
+           if ! "${COMPOSE[@]}" --profile monitoring ps --status running --services 2>/dev/null \
+                | grep -qx grafana-proxy; then
+             warn "Grafana is not running (http://localhost:3000): ./run.sh monitoring"
+           fi
            "${COMPOSE[@]}" exec -T trader-core trader status 2>/dev/null | head -40 || true ;;
   logs)    "${COMPOSE[@]}" --profile monitoring --profile alerts logs -f --tail 200 "$@" ;;
   model)   trader select-model "$@" ;;
+  monitoring) cmd_monitoring ;;
   alerts)  cmd_alerts ;;
   replay)  check_docker
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay replay --synthetic "${1:-10}" --start 2026-10-05 ;;
-  help|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac
