@@ -95,12 +95,30 @@ gantt
 - [ ] A11 reports per REPORT_TEMPLATES.md; monitoring per MONITORING.md
 - **Done when:** a full replayed week produces every report, and all chaos tests in TEST_PLAN.md §6 pass.
 
-### M8 — Backtest and paper trading (6 weeks)
+### M7a — Day-trader gaps, part 1 (2 weeks, before M8 results are judged)
+
+From REQUIREMENTS 1.3 ([REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md) P1):
+
+- [ ] Latency budget, pre-arming, no-chase at send, aligned expiries (LAT-1..LAT-4, A5-5)
+- [ ] Reliable-quote rule and IEX-vs-SIP divergence report (MF-6, DQ-6, DQ-8)
+- [ ] 10:00 AM release and Fed-speech block (TW-6); 60-second news and shock rule in positions (NW-1, NW-2)
+- [ ] Core-produced, labelled, actionable alerts (AL-1..AL-3); stop order type (EX-5); account settlement (AC-1, AC-2)
+- [ ] Shadow trades (SH-1) from the first paper day, so M8 has the comparison data
+- **Done when:** a replay day shows trigger-to-order p95 ≤ 10 s with pre-arming, and every missed trigger has a reason code and a shadow result.
+
 
 - [ ] Walk-forward backtest (TEST_PLAN.md stage 3) and its pass bar
 - [ ] 20+ trading days and 100+ trades on the Alpaca paper account (stage 4)
 - [ ] Weekly reviews; tune only through config versions (CF-1..3)
 - **Done when:** all acceptance tests in REQUIREMENTS.md §11 pass and the gate is recorded.
+
+### M8a — Day-trader gaps, part 2 (during paper trading)
+
+- [ ] Shadow report (SH-2); slippage feedback (EXQ-1); stricter paper fills (PT-4); real-history backtest (BT-6)
+- [ ] Chart, button and live-status approvals (AP-1..AP-3); co-pilot mode (CP-1..CP-3); notifier fallback (NF-1)
+- [ ] Regime and trend day (RG-1..RG-3); in-play scan (UN-1); alert caps, ranking and grading (AL-4..AL-7)
+- [ ] Monthly restore test and emergency drill (OPS-1, OPS-2); other-broker import (WS-9); tax set-aside (TX-1)
+- **Done when:** the new acceptance tests in REQUIREMENTS.md §11 pass alongside the existing ones.
 
 ### M9 — Small live, approve mode (4 weeks)
 

@@ -128,7 +128,56 @@ class NewsAgent:
         self.state: dict[str, TickerNews] = {t: TickerNews() for t in cfg.universe.tickers}
         self.earnings: dict[str, date] = {}
         self.last_fetch: datetime | None = None
+        self.last_hot_fetch: datetime | None = None   # NW-1
+        self.last_flags: dict[str, EventFlags] = {}         # NW-1: keep full-cycle summary
         self.source_errors: dict[str, str] = {}
+
+    async def hot_cycle(self, tickers: Sequence[str]) -> list[EventFlags]:
+        """NW-1: a fast poll for tickers with an open position or a game-plan setup. News and
+        8-K sources only (no Reddit), FinBERT tone only (no Qwen call, so no GPU load); the
+        last full cycle's summary and catalyst are kept."""
+        hot = [self.cfg.canonical(t) for t in tickers if self.cfg.canonical(t) in self.state]
+        if not hot:
+            return []
+        now = self.now()
+        since = self.last_hot_fetch or self.last_fetch or (
+            now - timedelta(hours=1))
+        before = {t: set(self.state[t].items) for t in hot}
+        items: list[NewsItem] = []
+        for src in self.sources:
+            if src.name == "reddit":
+                continue
+            try:
+                items += await src.fetch(hot, since)
+            except Exception as exc:   # noqa: BLE001
+                self.source_errors[src.name] = str(exc)
+                log.warning("news_hot_source_failed", source=src.name, error=str(exc))
+        self.last_hot_fetch = now
+        self.ingest(items, now)
+        out: list[EventFlags] = []
+        last = self.last_flags
+        for t in hot:
+            new_ids = set(self.state[t].items) - before[t]
+            if not new_ids:
+                continue
+            new_scores = [self.state[t].items[i][2] for i in new_ids]
+            avg_new = sum(new_scores) / len(new_scores)
+            prev = last.get(t)
+            tone = "negative" if avg_new <= -0.3 else "positive" if avg_new >= 0.3 else (
+                prev.tone if prev else "neutral")
+            recent = [sc for it, _, sc, _ in self.state[t].items.values()
+                      if now - it.published_at <= timedelta(hours=24)]
+            newest = max((self.state[t].items[i][0] for i in new_ids),
+                         key=lambda it: it.published_at)
+            out.append(EventFlags(
+                ticker=t, updated_at=now, flags=tuple(self.flags_for(t, now)),
+                earnings_date=self.earnings.get(t),
+                summary=(prev.summary if prev else "") or clean_text(newest.headline)[0][:300],
+                catalyst=prev.catalyst if prev else "none", tone=tone,
+                sentiment=round(sum(recent) / len(recent), 3) if recent else 0.0,
+                risk_events=prev.risk_events if prev else (),
+                suspicious_items=sum(1 for *_, sus in self.state[t].items.values() if sus)))
+        return out
 
     async def cycle(self) -> list[EventFlags]:
         """One polling cycle (7:15 then every 15 minutes, A3-1)."""
@@ -241,6 +290,7 @@ class NewsAgent:
                             risk_events=tuple(summ.risk_events) if summ else (),
                             suspicious_items=susp)
             out.append(ef)
+            self.last_flags[t] = ef
             if self.journal is not None and flags:
                 self.journal.insert_many(s.event_flags, [
                     {"date": d, "ticker": t, "flag": f, "detail": ef.catalyst[:200]}

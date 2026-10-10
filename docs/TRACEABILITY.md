@@ -1,10 +1,10 @@
 # Traceability Matrix
 
-**Version:** 1.0 (September 30, 2026) · Generated from [REQUIREMENTS.md](REQUIREMENTS.md) v1.2 and [SECURITY.md](SECURITY.md)
+**Version:** 1.0 (September 30, 2026) · Generated from [REQUIREMENTS.md](REQUIREMENTS.md) v1.3 and [SECURITY.md](SECURITY.md)
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 144 requirement IDs.
+**Totals:** 188 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -153,6 +153,150 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `SEC-18` | Each container reads only its own env file; live keys in a separate file. | compose | Manual: env file review at go-live | — |
 | `SEC-19` | No inbound ports or tunnels; notifier polls Twilio; containers read-only with no-new-privileges. | compose, notifier | chaos/test_containers.py | — |
 | `SEC-16` | Monthly security check: dependency alerts, key ages, config hash history, rejected commands. | Owner | Manual: monthly security check | — |
+
+
+### Added in REQUIREMENTS 1.3 (day-trader review)
+
+Rows marked **Planned** are specified but not built yet; CI counts them but does not enforce a test until the row names one.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `UN-1` | In-play scan (watch only): from 8:30 to 9:25 AM, scan the 50 largest S&P 500 names for ga… | A4 | unit/test_req13_workflow.py | — |
+| `UN-2` | Governed rotation: A1's weekly report may propose swapping a list ticker for a name that… | A1 | Manual: weekly report review | NT_UNIVERSE |
+| `TW-6` | 10:00 AM releases and Fed speakers: The macro calendar also lists the 10:00 AM releas… | A7, A10 | unit/test_req13_core.py | NT_MACRO_RELEASE |
+| `MF-6` | Reliable quote: the spread check (MF-4) uses only a two-sided quote less than 2 seconds o… | A4, A7 | unit/test_req13_core.py | NT_NO_RELIABLE_QUOTE |
+| `RG-1` | Daily regime: at 8:30 AM, classify the day as `normal` or `high-vol` from SPY's ATR(14-da… | A4 | unit/test_req13_core.py | — |
+| `RG-2` | High-vol rules: risk per trade halves (like RC-1, not stacked below 0.25%); no gap-and-go… | A7 | unit/test_req13_core.py | NT_REGIME |
+| `RG-3` | Trend day, defined: by 3:00 PM, at least 80% of 5-minute closes since 9:30 are above VWAP… | A4 | unit/test_req13_core.py | NT_NOT_TREND_DAY |
+| `EX-5` | Stop order type: Broker-side stops are stop-market orders, so a fast move or a halt c… | A8, A9 | unit/test_req13_core.py | EXIT_GAP_BELOW_STOP |
+| `LAT-1` | Latency budget: from the trigger candle's close to the order sent, p95 ≤ 10 s in auto… | A10, engine | unit/test_req13_core.py | — |
+| `LAT-2` | Pre-arming: When price is within 0.3 ATR(5-min) of a game-plan trigger, A5 writes the… | A4, A5, A6 | unit/test_req13_core.py | — |
+| `LAT-3` | No-chase at send time: CK-6 is checked again the moment the order is sent (after approval… | A7, A8 | unit/test_req13_core.py | NT_CHASE_AT_SEND |
+| `LAT-4` | Aligned expiries: A day-trade proposal expires 2 minutes after the trigger, or 30 s a… | A5, A7 | unit/test_req13_core.py | NT_EXPIRED |
+| `SH-1` | Shadow trades: Every setup whose trigger fires is followed with a simulated bracket o… | engine | unit/test_req13_core.py | — |
+| `SH-2` | Shadow report: the weekly review compares the expectancy of taken and not-taken setups, b… | A11 | unit/test_req13_core.py | — |
+| `AC-1` | Cash account: Size every entry from settled cash only. Track unsettled proceeds per t… | A7 | unit/test_req13_core.py | NT_UNSETTLED_FUNDS |
+| `AC-2` | Margin account: buying power is used only up to 1× equity (SR-2, LL-11). The account type… | A7, A10 | unit/test_req13_core.py | NT_ACCOUNT_MISMATCH |
+| `EXQ-1` | Slippage feedback: Expectancy per setup is always computed after actual slippage (ent… | A7, A11 | unit/test_req13_core.py | — |
+| `WS-9` | Other-account import: The owner can import trades from other brokers (CSV exports fro… | A12 | unit/test_req13_workflow.py | NT_WASH_LOCK |
+| `DQ-6` | IEX vs consolidated: after each session, compare the day's IEX 1-minute bars with consoli… | A2, A11 | unit/test_req13_workflow.py | — |
+| `DQ-7` | Go-live data gate: live trading needs either 20 paper days in which the opening-range and… | A10 | Manual: go-live data gate review | — |
+| `DQ-8` | Unreliable quote: when the latest quote is one-sided, crossed or more than 2 seconds old,… | A2, A7 | unit/test_req13_core.py | NT_NO_RELIABLE_QUOTE |
+| `NW-1` | News in positions: during the windows, poll news and new 8-Ks every 60 seconds for ticker… | A3 | unit/test_req13_core.py | — |
+| `NW-2` | Shock rule: A move of more than 1.5 ATR(5-min) against an open position within one mi… | A3, A9 | unit/test_req13_core.py | NT_NEWS_SHOCK |
+| `A5-5` | Pre-armed proposals (LAT-2) use the same schema and prompt; the journal records whether a… | A5 | unit/test_req13_core.py | — |
+| `A9-5` | In co-pilot mode (CP-2), apply the same exit rules as alerts instead of orders. | A9 | unit/test_req13_workflow.py | — |
+| `NF-1` | Notifier down: if the notifier channel is unreachable for 2 minutes during a window, appr… | A10, notifier | unit/test_req13_workflow.py | NT_NOTIFIER_DOWN |
+| `TX-1` | Tax set-aside: the monthly report shows realized short-term gains year to date and an est… | A11 | unit/test_req13_workflow.py | — |
+| `AL-1` | One source while trading: When trader-core runs, it produces the price and signal ale… | engine, notifier | unit/test_req13_workflow.py | — |
+| `AL-2` | Labels: every signal alert is labelled raw signal or qualified setup, with the checklist… | A4, A7 | unit/test_req13_workflow.py | — |
+| `AL-3` | Actionable: every directional alert carries the plan, computed by the same A4/A7 code as… | A4, A7 | unit/test_req13_workflow.py | — |
+| `AL-4` | Schedule: `windows` (default: pre-market, 9:30–10:30, 3:00–4:00) or `all_day`. | notifier | unit/test_req13_workflow.py | — |
+| `AL-5` | Caps: at most 3 alerts per symbol per window, and at most 12 per window overall. | notifier | unit/test_req13_workflow.py | — |
+| `AL-6` | Ranking: alerts are ranked by a quality score (RVOL, alignment with QQQ, distance to resi… | notifier | unit/test_req13_workflow.py | — |
+| `AL-7` | Grading: every alert type is graded: the share that reached +1R before −1R within 30 minu… | A11 | unit/test_req13_workflow.py | — |
+| `AP-1` | Chart in the approval: the approval message includes a small chart image rendered by code… | notifier | unit/test_req13_workflow.py | — |
+| `AP-2` | Buttons: Inline `YES <code>` / `NO <code>` buttons carry the one-time code. Callback… | notifier, commands | unit/test_req13_workflow.py | CMD_REJECTED |
+| `AP-3` | Live status: the message is edited every 5 seconds with | notifier | unit/test_req13_workflow.py | — |
+| `CP-1` | Plan only: in `copilot` mode the system sends the full plan (AL-3) at the trigger and pla… | A10 | unit/test_req13_workflow.py | — |
+| `CP-2` | Owner fills tracked: The owner's fills are taken from the Alpaca account (positions a… | A9, A12 | unit/test_req13_workflow.py | — |
+| `CP-3` | Options: the same applies to options advisories (OPTIONS_REQUIREMENTS.md, A16). | A16 | unit/test_req13_workflow.py | — |
+| `OPS-1` | Restore test: monthly, restore the latest backup into a throwaway database and check the… | Owner, backup | Manual: monthly restore test | — |
+| `OPS-2` | Emergency drill: monthly, on the paper account, with one position open | Owner | Manual: monthly emergency drill | — |
+| `BT-6` | Real-history backtest of the playbook on 2 years of minute bars before paper trading (TEST_PLAN.md). | backtest | unit/test_req13_workflow.py | — |
+| `PT-4` | Paper fills re-checked against the replay fill model; paper statistics use the stricter result (TEST_PLAN.md). | backtest, A11 | unit/test_req13_workflow.py | — |
+
+### Options (OPTIONS_REQUIREMENTS.md)
+
+Advisory mode is built: suggestions, follow-ups and grading, no option orders. `options.mode: paper|live` still needs its gate (config validation) and, until order placement is built, behaves as advisory.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `BR-1` | Mirrored bearish setups (ORB breakdown, VWAP rejection, gap-down-and-go, failed breakout, close near low) | A4 (a04_bearish) | unit/test_options.py | — |
+| `BR-2` | Mirrored market filter: QQQ below VWAP or relative weakness; RVOL ≥ 1.5; not in the first 5 minutes or after a halt | A4 | unit/test_options.py | — |
+| `BR-3` | Next-day ideas rank bearish candidates in a "Bearish (options only)" section | A5, options desk | unit/test_options.py | — |
+| `BR-4` | Bearish signals journaled with direction = bear, route = options_only; A7 rejects any stock order from them | A4, A7 | unit/test_options.py | NT_OPTIONS_ONLY |
+| `A13-1` | Chains 0–60 DTE, strikes ±20%, with open interest; 8:30 and on demand | A13 | unit/test_options.py | — |
+| `A13-2` | Snapshots only when needed, cached 15 s; never streamed | A13 | unit/test_options.py | — |
+| `A13-3` | ATM IV 30d, IV rank/percentile (short-history label), expected move, term, skew | A13 | unit/test_options.py | — |
+| `A13-4` | Events (earnings, ex-dividend, FOMC/CPI) attached to each expiry | A13 | unit/test_options.py | — |
+| `A13-5` | Quote age; > 60 s or zero bid unusable; "prices indicative" on the free feed | A13 | unit/test_options.py | — |
+| `A13-6` | options_iv_daily history; suggestion quotes stored with the suggestion | A13 | unit/test_options.py | — |
+| `OP-1` | Defined-risk structures by direction and IV rank only | A14 | unit/test_options.py | — |
+| `OP-2` | Expiry by style (day 5–14 DTE, swing 21–45), no earnings inside unless asked | A14 | unit/test_options.py | — |
+| `OP-3` | Strikes tied to the stock's levels (delta bands, short leg at T1, credit beyond invalidation) | A14 | unit/test_options.py | — |
+| `OP-4` | Per-leg liquidity filter and fill estimate (mid ± 25% of the width) | A14 | unit/test_options.py | — |
+| `OP-5` | Size from the stock risk rules; premium and contract caps | A14 | unit/test_options.py | — |
+| `OP-6` | Exits planned up front (invalidation, T1/70%, time, credit 50%, expiry day) | A14, A16 | unit/test_options.py | — |
+| `OP-7` | All numbers computed by code (Black-Scholes repricing, breakeven, P(profit) estimate) | A14 | unit/test_options.py | — |
+| `OP-8` | Qwen explains after the close only; no digits allowed; template in market hours | A14 | unit/test_options.py | — |
+| `OP-9` | Gate before sending (checklist, R/R at T1, expected move, liquidity, staleness, A15) | A14, A15 | unit/test_options.py | — |
+| `OP-10` | Triggers: A4 setups, bearish setups, alert signals (optional), next-day ideas, OPT | engine, options desk | unit/test_options.py | — |
+| `OP-11` | Telegram format | options desk | unit/test_options.py | — |
+| `OP-12` | Follow-up alerts on open suggestions, each once | A16 | unit/test_options.py | — |
+| `OP-13` | OPT / CHAIN / IV / OPTS / OPTIONS ON|OFF (read-only) | options desk, commands | unit/test_options.py | — |
+| `OP-14` | Alerts bot options line (optional, rate-limited, fixed $ risk, same A14 code) | alerts bot | unit/test_options.py | — |
+| `OP-15` | One per ticker/direction/window; per-window cap; follow-ups grouped per minute | A15, options desk | unit/test_options.py | — |
+| `OP-16` | Options tab on the console stock page | console | unit/test_console.py | — |
+| `OP-17` | Payoff view | console | unit/test_console.py | — |
+| `OP-18` | Suggestions list on the console | console | unit/test_console.py | — |
+| `OP-19` | Ask gains read-only options tools | console | unit/test_console.py | — |
+| `OP-20` | Prefetch the chain snapshot when a setup is pre-armed | A13, engine | unit/test_options.py | — |
+| `A15-1` | Wash sales both ways (options locked with the stock; option loss locks the stock) | A15, A12 | unit/test_options.py | NT_WASH_LOCK |
+| `A15-2` | Shared limits; one trade per suggestion; no stock entry and option idea on the same view | A15, A7 | unit/test_options.py | — |
+| `A15-3` | Event rules (earnings, ex-dividend short call, last 15 minutes, FOMC after 13:30) | A15 | unit/test_options.py | — |
+| `A15-4` | Account options level decides the structures | A14, A15 | unit/test_options.py | — |
+| `A15-5` | Correlated groups include options | A15 | unit/test_options.py | — |
+| `A16-1` | Every suggestion paper-tracked at the estimated fill; marks each minute; plan exits; survives restart | A16 | unit/test_options.py | — |
+| `A16-2` | Result: $ and R, exit reason, view right vs option made money | A16 | unit/test_options.py | — |
+| `A16-3` | Report sections by structure, direction, IV regime and DTE | A16, A11 | unit/test_options.py | — |
+| `A16-4` | Promotion gate: ≥ 40 graded, ≥ +0.15R, PF ≥ 1.3, ≥ 20 sessions | A16 | unit/test_options.py | — |
+
+### Owner Console (UI_REQUIREMENTS.md)
+
+The console container reads with the `console_rw` role and trader-core's internal read-only API (port 8081, internal network only); every action is an `inbound_cmd` outbox message with source `console`.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `UI-1` | Cockpit: mode banner, kill/halt/pause, equity, day P&L vs limit, trades used, health, window | console | unit/test_console.py | — |
+| `UI-2` | Open positions with $ and R and a link to the trade story | console, core API | unit/test_console.py | — |
+| `UI-3` | Today's game plan and next-day ideas | console | unit/test_console.py | — |
+| `UI-4` | Stock lookup for any US symbol: quote, charts with levels and markers, indicators, news, system status | console, core API | unit/test_console.py | — |
+| `UI-4a` | Service and model panel (heartbeats, Ollama model/VRAM/p95) | console | unit/test_console.py | — |
+| `UI-4b` | Open incidents with ACK | console | unit/test_console.py | — |
+| `UI-5` | Checklist dry-run now with measured values and thresholds | core API | unit/test_console.py | — |
+| `UI-6` | Buttons: price alert, ask, Grafana (plus options suggest) | console | unit/test_console.py | — |
+| `UI-6a` | Data limits stated on the page | console | unit/test_console.py | — |
+| `UI-7` | Ask: plain-language questions over the journal and market data | console (ask) | unit/test_console.py | — |
+| `UI-8` | Answers from read-only tools; numbers only from tool rows; never a prediction | console (ask) | unit/test_console.py | — |
+| `UI-8a` | Suggested commands open Controls; the model never sends them | console (ask) | unit/test_console.py | — |
+| `UI-8b` | Low priority: no model calls during entry windows or while busy | console (ask) | unit/test_console.py | — |
+| `UI-8c` | Validated tool arguments; calls logged to llm_calls | console (ask) | unit/test_console.py | — |
+| `UI-8d` | Per-day history, searchable, clearable | console (ask) | unit/test_console.py | — |
+| `UI-9` | Trade story per proposal from the journal, reason codes in words | console | unit/test_console.py | — |
+| `UI-10` | Approvals inbox: type the one-time code; code never shown | console, CommandAuthority | unit/test_console.py | — |
+| `UI-11` | Today's approvals with outcomes | console | unit/test_console.py | — |
+| `UI-12` | Controls; destructive ones preview and need the phone's confirmation code | console, CommandAuthority | unit/test_console.py | — |
+| `UI-13` | Commands journaled with source = console; audit list | console, commands | unit/test_console.py | — |
+| `UI-14` | Alerts: core alert log, ALERTS ON/OFF, bot rules (read-only) | console | unit/test_console.py | — |
+| `UI-15` | Next-day ideas page with track record | console | unit/test_console.py | — |
+| `UI-16` | Reports archive, readable and downloadable | console | unit/test_console.py | — |
+| `UI-17` | Compliance view: locks, tax lots, wash sales | console | unit/test_console.py | — |
+| `UI-18` | Config viewer (effective today vs file) | console | unit/test_console.py | — |
+| `UI-19` | Model and hardware page | console | unit/test_console.py | — |
+| `UI-20` | Replay/backtest runs list and compare | console | unit/test_console.py | — |
+| `UI-21` | Localhost, password secret, HttpOnly SameSite=Strict session, CSRF, idle timeout, CSP, rate-limited login | console | unit/test_console.py | — |
+| `UI-22` | Live home via SSE (≤ 5 s); quotes refresh every 5 s while visible | console | unit/test_console.py | — |
+| `UI-23` | One small container ≤ 200 MB; console_rw role publishes only inbound_cmd | console, Postgres guard | unit/test_console.py | — |
+| `UI-24` | Phone browser on the LAN later; v1 desktop localhost | — | Manual: v1 is desktop only | — |
+| `UI-25` | Colour never the only signal; keyboard shortcuts; light and dark themes | console | unit/test_console.py | — |
+| `UI-26` | Every page renders against a journal with no broker or GPU | tests | unit/test_console.py | — |
+| `UI-27` | Loads and shows what is missing when trader-core, Ollama or data are down | console | unit/test_console.py | — |
+| `UI-28` | Options tab, payoff view, suggestions list, options Q&A (OP-16..19) | console | unit/test_console.py | — |
+| `UI-29` | Owner journal: notes, tags, screenshot; tag statistics | console | unit/test_console.py | — |
+| `UI-30` | Live scanner with alert labels and in-play names | console, core API | unit/test_console.py | — |
+| `UI-31` | Latency and missed trades with shadow results | console | unit/test_console.py | — |
+| `UI-32` | Co-pilot ticket with I filled | console | unit/test_console.py | — |
 
 ## How to use
 

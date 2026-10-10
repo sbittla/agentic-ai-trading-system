@@ -109,6 +109,7 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | `Error: pull model manifest: ssh: no key found` | `/root/.ollama/id_ed25519` was left empty (0 bytes) by a crash during Ollama's first start | `docker exec <ollama> rm -f /root/.ollama/id_ed25519 /root/.ollama/id_ed25519.pub`, then `docker restart <ollama>`; Ollama regenerates them |
 | `check-connections --service llm`: `only NN% of X GB in GPU memory` | Model does not fit in VRAM; part runs on the CPU and calls take minutes | Close other GPU programs; lower `llm.max_context_tokens`; or use a smaller model. With 8 GB use `qwen3:8b`, not 14B; `trader select-model` shows what fits |
 | Ollama log lacks `library=CUDA` | GPU not passed through | Check the NVIDIA driver and `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` (§1.1 step 5) |
+| http://localhost:3000 does not load; `./run.sh status` lists no `grafana` / `grafana-proxy` | Grafana is in the `monitoring` profile: a plain `./run.sh` / `docker compose up -d` does not start it | `./run.sh monitoring` (or `./run.sh start --monitoring`). If it still fails, the command prints Grafana's log; log in as `admin` with `secrets/grafana_admin_password.txt` |
 | Your other containers (for example `llm_qdrant`, `llm_redis`) are running again after a Docker restart | Their restart policy relaunches them with Docker | `docker stop <name>`, or `docker update --restart=no <name>` |
 
 ### Host and Python
@@ -120,6 +121,21 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | Edit scripts corrupt `§`, `—` or other non-ASCII text in source files | Windows Python defaults to the cp1252 encoding | Always read and write files with `encoding="utf-8"` (or set `PYTHONUTF8=1`) |
 | `init.sh` fails inside Postgres with `\r` errors | Windows line endings | `.gitattributes` forces LF for `*.sh` and `docker/postgres/*.sql`; re-checkout if needed |
 
+### Owner Console (http://localhost:8080)
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Browser cannot connect | Console not running, or skipped with `--no-console` | `./run.sh console` (shows the last log lines if it fails); `./run.sh status` |
+| `console password file … missing` or `at least 12 characters` in its log | `secrets/console_password.txt` absent or too short | `./run.sh setup` creates it (never overwrites); or write 12+ characters into it, then `./run.sh console` |
+| `port is already allocated` for 8080 | Another program uses port 8080 | Stop it, or change the left side of `127.0.0.1:8080:8080` in `docker/docker-compose.yml` (keep `127.0.0.1`) |
+| "too many attempts: wait 5 minutes" | Five wrong passwords in 5 minutes (UI-21) | Wait 5 minutes; the password is in `secrets/console_password.txt` |
+| Logged out while working | 30 minutes without a request (`CONSOLE_IDLE_MIN`) | Log in again; raise `CONSOLE_IDLE_MIN` in `.env.console` if needed |
+| Home says "trader-core API unavailable: showing the last snapshot" | trader-core is down or restarting (its API on port 8081 is internal only) | `./run.sh logs trader-core`; the console keeps working read-only from the journal (UI-27) |
+| `permission denied` for the console in `./run.sh logs console` | Console role or grants missing (an old database) | `./run.sh` reruns `upgrade.sql` and `trader migrate`, both idempotent |
+| A console command says "sent; trader-core has not answered yet" | trader-core is not consuming `inbound_cmd` (down or busy) | Check `./run.sh status`; the command is kept in the outbox and runs when trader-core is back, so do not resend destructive ones |
+| Ask always answers "table answer" | Entry window (by design, UI-8b), model unloaded, or `CONSOLE_ASK_MODEL=0` | Wait for the window to end; the Model page shows whether Qwen is loaded |
+| Options tab: "options module is not running" | `options.mode: off`, or no options data on the account | Set `options.mode: advisory` (restart applies next session, SR-5) |
+
 ### Database
 
 | Symptom | Cause | Fix |
@@ -127,6 +143,8 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | `trader migrate`: `permission denied for database` on `CREATE SCHEMA` | The least-privilege role has no database-level CREATE (fixed: the migration now checks for the schema first) | Use the current code; the schema is created by `init.sql` |
 | Changing `docker/.env` names or `secrets/` passwords has no effect | Postgres reads them only when its volume is first created | Change passwords with `ALTER ROLE <role> PASSWORD '...'` as the admin user and update the env file; to start over: `docker compose -f docker/docker-compose.yml down` then `docker volume rm agentic-ai-trading-system_pg-data` (**deletes the journal**) |
 | `trader migrate` prints `FAILED grants` | `DB_ROLE_PREFIX` does not match the roles that exist | Make `DB_ROLE_PREFIX` in `docker/.env` match the roles (`srb_` for `srb_core_rw` …) |
+| `BACKUP FAILED` in `./run.sh logs backup`, or `permission denied for sequence` | The read-only backup role could not read sequences (databases created before October 10, 2026) | `./run.sh` (reruns `upgrade.sql` and `trader migrate`, which grant it); then `./run.sh restore-test` to prove the backup restores |
+| `./run.sh restore-test`: `no backup found` | No nightly dump yet in `BACKUP_PATH` | Wait for 18:00 or run `docker compose -f docker/docker-compose.yml exec backup trader backup --once` |
 
 ### Owner messages
 
@@ -134,9 +152,9 @@ If step 1.2 still crashes Docker after 1.1, copy the model in small pieces (spli
 | --- | --- | --- |
 | Twilio: `21654 ContentSid Required` even inside the 24-hour window | Twilio **trial** WhatsApp numbers ("join twilio-trial") send templates only, and the console's sample `HX…` template is a fixed appointment reminder that ignores our text | Use Telegram (default, ADR-014), or upgrade Twilio and create a template with one `{{1}}` variable |
 | Twilio replies with "Standard auto-reply…" | Your message reached Twilio's trial number (inbound works) | Nothing to fix; see the row above for sending |
-| `trader telegram-chats`: `no messages yet` | You have not messaged the bot yet | Open the bot, press **Start**, send `STATUS`, rerun |
+| `./run.sh chats`: `no messages yet` | You have not messaged the bot yet | Open the bot, press **Start**, send `STATUS`, rerun |
 | Telegram bot stops receiving messages | A webhook was set for the bot, which disables `getUpdates` | Never set a webhook; to clear one: `https://api.telegram.org/bot<token>/deleteWebhook` |
-| Approvals never arrive in approve mode | Notifier unhealthy or chat id missing; approve mode then blocks entries (by design) | `trader check-connections --service notifier --env-file .env.notifier`; local commands (`trader kill`, `trader status`) still work |
+| Approvals never arrive in approve mode | Notifier unhealthy or chat id missing; approve mode then blocks entries (by design, NF-1: incident `NOTIFIER_DOWN`, e-mail if SMTP is set) | `./run.sh connections`; the Owner Console still shows approvals (type the code from Telegram when it is back) and its Controls page sends KILL; `docker compose -f docker/docker-compose.yml exec trader-core trader kill` also works |
 
 ### Market data and broker
 

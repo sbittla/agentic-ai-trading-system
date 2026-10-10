@@ -20,6 +20,7 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-012 | 2026-09-30 | Postgres as journal and cross-container bus (outbox + LISTEN/NOTIFY) | Accepted |
 | ADR-013 | 2026-09-30 | Outbound-only notifications: poll Twilio for replies, no inbound endpoint | Accepted |
 | ADR-014 | 2026-10-01 | Telegram bot as the default notifier channel; WhatsApp kept as an option | Accepted |
+| ADR-015 | 2026-10-10 | Options: advisory first, defined risk only, bearish views via puts (no stock shorting) | Proposed |
 
 ---
 
@@ -97,3 +98,11 @@ Short records of the main design decisions, so later changes can see why things 
 **Context:** During setup (October 1, 2026) the owner's Twilio trial WhatsApp number rejected every free-form message with "ContentSid Required", even inside the 24-hour window, and the only available template was Twilio's fixed sample. A permanent WhatsApp sender needs a paid account, Meta business verification and approved templates.
 **Decision:** The notifier supports two channels behind the same interface. Telegram (Bot API) is the default when `TELEGRAM_BOT_TOKEN` is set (`NOTIFIER_CHANNEL` overrides). It stays outbound-only, as ADR-013 requires: `sendMessage` to send, `getUpdates` long polling to receive, no webhook. Only allow-listed chat IDs can issue commands (SEC-1); approval codes and two-step confirmations are unchanged (SEC-2, SEC-3). At start-up the notifier skips messages that arrived while it was down, so an old command is never executed.
 **Consequences:** Free, no templates and no 24-hour window; replies arrive within about a second. New network destination `api.telegram.org` for the `notifier` container only (SECURITY.md). Requirement text that says "WhatsApp" applies to whichever channel is active.
+
+### ADR-015 Options: advisory first, defined risk only (proposed)
+
+**Context:** The system has bullish and bearish views (A4 setups, next-day ideas, alerts-engine signals) but trades only long stock (ADR-008). The owner wants options suggestions and alerts for both directions.
+**Decision:** Add an options layer (agents A13–A16, [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md)) that starts in `advisory` mode: suggestions, follow-up alerts and paper grading, no orders. Only defined-risk structures (long calls/puts, debit and credit verticals). Bearish views are expressed with puts, put spreads or call credit spreads, never by shorting stock, so ADR-008 stands. Options share the stock risk budget and wash-sale locks in both directions. Order placement needs a per-structure promotion gate (A16-4), then paper, then live gates.
+**Consequences:** Useful bearish ideas without borrow or margin rules; no undefined-loss positions; no extra GPU load in market hours (code templates, Qwen only after the close). Costs: an options data dependency (indicative free feed; OPRA paid), more config and tests, and tax-lot handling for exercise and assignment once orders are enabled.
+**Implementation (October 10, 2026):** the advisory mode is built (`src/trader/options/`, `agents/a04_bearish.py`, Grafana **7. Options**, console Options page) and tested (`tests/unit/test_options.py`). The status stays *proposed* until the owner accepts it; `options.mode: off` disables the layer.
+

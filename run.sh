@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
-# One script to check, set up and run the trading platform from WSL (repo root).
+# One script to check, set up and run the whole trading platform from WSL (repo root).
+# Everything runs in Docker containers; nothing in this repo runs on the host.
 #
-#   ./run.sh                 start everything (same as ./run.sh start)
-#   ./run.sh start [--monitoring] [--alerts]   + Grafana dashboards / Telegram price-alert bot
-#   ./run.sh setup           first time: create env files + passwords, pick the model
+#   ./run.sh                 start every component (same as ./run.sh start)
+#   ./run.sh start [--no-monitoring] [--no-console] [--alerts]
+#   ./run.sh setup           first time: env files + passwords, pick the model (in a container)
 #   ./run.sh check           pre-flight only (Docker, GPU, env files, secrets not in git)
+#   ./run.sh connections     read-only credential checks (Alpaca, Finnhub, Telegram, DB, Qwen)
 #   ./run.sh status | logs [service] | stop | restart
-#   ./run.sh model           show which Qwen model fits this GPU (docs/HARDWARE.md)
-#   ./run.sh alerts          only the lightweight Telegram price-alert bot (docs/ALERTS.md)
+#   ./run.sh model [--apply] which Qwen model fits this GPU (docs/HARDWARE.md)
+#   ./run.sh chats           Telegram chat ids that messaged your bot
+#   ./run.sh import-trades FILE [--broker NAME]   other-broker trades for wash sales (WS-9)
+#   ./run.sh restore-test    restore the latest backup into a scratch database (OPS-1)
+#   ./run.sh drill           record the monthly emergency drill (OPS-2)
+#   ./run.sh monitoring      start/repair Grafana on http://localhost:3000
+#   ./run.sh console         start/repair the Owner Console on http://localhost:8080
+#   ./run.sh alerts          only the standalone Telegram price-alert bot (docs/ALERTS.md)
 #   ./run.sh replay [days]   offline trial on synthetic days (no broker keys, no GPU)
+#   ./run.sh backtest [days] playbook on real minute bars from the journal store (BT-6)
+#   ./run.sh test            lint, type check, tests and traceability in the dev container
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -16,9 +26,12 @@ set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 COMPOSE=(docker compose -f docker/docker-compose.yml)
-ENV_FILES=(.env.core .env.news .env.notifier .env.backup .env.replay)
-SECRET_FILES=(pg_admin pg_core pg_news pg_notifier pg_readonly grafana_admin)
+ALL_PROFILES=(--profile monitoring --profile alerts)
+ENV_FILES=(.env.core .env.news .env.notifier .env.backup .env.replay .env.console)
+SECRET_FILES=(pg_admin pg_core pg_news pg_notifier pg_readonly pg_console grafana_admin console)
 WAIT_S=${WAIT_S:-900}     # first start builds images and loads the model
+export HOST_UID HOST_GID
+HOST_UID=$(id -u); HOST_GID=$(id -g)   # files written by the toolbox belong to you
 
 if [ -t 1 ]; then R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[1m'; N=$'\e[0m'
 else R=; G=; Y=; B=; N=; fi
@@ -38,28 +51,23 @@ config_model() {   # llm.model from config/config.yaml
     config/config.yaml | tr -d '\r'
 }
 
-# --- host Python (only for `setup` and `model`; the services run in Docker) ---------------
-host_py() {
-  if [ -x .venv/bin/python ]; then echo .venv/bin/python; return; fi       # Linux venv
-  if [ -x .venv-wsl/bin/python ]; then echo .venv-wsl/bin/python; return; fi
-  # The repo's .venv was made on Windows (.venv\Scripts): WSL needs its own Linux venv.
-  echo "creating .venv-wsl (Linux venv for the host-side helper commands)..." >&2
-  if command -v uv >/dev/null; then
-    uv venv -q -p 3.12 .venv-wsl >&2
-    VIRTUAL_ENV=.venv-wsl uv pip install -q --no-deps -e . >&2
-    VIRTUAL_ENV=.venv-wsl uv pip install -q pydantic pyyaml structlog >&2
-  elif command -v python3.12 >/dev/null; then
-    python3.12 -m venv .venv-wsl >&2
-    .venv-wsl/bin/pip install -q --no-deps -e . >&2
-    .venv-wsl/bin/pip install -q pydantic pyyaml structlog >&2
-  elif [ -x .venv/Scripts/python.exe ]; then
-    echo .venv/Scripts/python.exe; return                                  # Windows venv via interop
-  else
-    die "need Python 3.12 in WSL: 'sudo apt install python3.12-venv' or install uv (https://docs.astral.sh/uv/)"
-  fi
-  echo .venv-wsl/bin/python
+# --- the toolbox container runs every helper command (no host Python) --------------------
+toolbox() {   # toolbox ARGS... -> `trader ARGS...` inside the toolbox image, repo at /work
+  "${COMPOSE[@]}" --profile tools run --rm toolbox "$@"
 }
-trader() { "$(host_py)" -m trader.cli "$@"; }
+toolbox_gpu() {   # same with the NVIDIA GPU visible (select-model); falls back without a GPU
+  if ! "${COMPOSE[@]}" --profile tools run --rm toolbox-gpu "$@" 2>/tmp/run-sh-gpu.err; then
+    if grep -qiE "gpu|nvidia|device driver" /tmp/run-sh-gpu.err; then
+      warn "no GPU passthrough for containers: detecting without the GPU"
+      toolbox "$@"
+    else
+      cat /tmp/run-sh-gpu.err >&2; return 1
+    fi
+  fi
+}
+build_toolbox() {
+  "${COMPOSE[@]}" --profile tools build -q toolbox >/dev/null || die "toolbox image build failed"
+}
 
 # --- checks -------------------------------------------------------------------------------
 check_docker() {
@@ -86,7 +94,7 @@ check_files() {
   local missing=() f
   for f in docker/.env config/config.yaml "${ENV_FILES[@]}"; do [ -f "$f" ] || missing+=("$f"); done
   for f in "${SECRET_FILES[@]}"; do [ -f "secrets/${f}_password.txt" ] || missing+=("secrets/${f}_password.txt"); done
-  [ ${#missing[@]} -eq 0 ] || die "missing: ${missing[*]} -> run './run.sh setup' (docs/ACCOUNT_SETUP.md)"
+  [ ${#missing[@]} -eq 0 ] || die "missing: ${missing[*]} -> run './run.sh setup' (creates only what is missing)"
   local empty=() pair
   for pair in .env.core:ALPACA_PAPER_KEY .env.core:ALPACA_PAPER_SECRET .env.news:FINNHUB_TOKEN \
               .env.news:SEC_USER_AGENT .env.notifier:TELEGRAM_BOT_TOKEN .env.notifier:TELEGRAM_CHAT_ID; do
@@ -96,7 +104,7 @@ check_files() {
   if [ "$(env_value .env.notifier NOTIFIER_CHANNEL)" = "whatsapp" ]; then
     empty=("${empty[@]/.env.notifier:TELEGRAM_*/}")
   fi
-  for f in .env.core .env.news .env.notifier .env.backup; do
+  for f in .env.core .env.news .env.notifier .env.backup .env.console; do
     if [[ "$(env_value "$f" DATABASE_URL)" == *"<"* ]]; then empty+=("$f:DATABASE_URL"); fi
   done
   local real=(); for f in "${empty[@]}"; do [ -n "$f" ] && real+=("$f"); done
@@ -105,13 +113,13 @@ check_files() {
     warn "Windows line endings (CRLF) in: $(grep -l $'\r' docker/.env config/config.yaml "${ENV_FILES[@]}" | tr '\n' ' ')"
     warn "  fix: sed -i 's/\\r\$//' <file>   (values would otherwise end in a hidden \\r)"
   fi
-  ok "env files, config and database passwords present"
+  ok "env files, config and passwords present"
 }
 
 check_model_match() {
   local env_m cfg_m
   env_m=$(env_value docker/.env OLLAMA_MODEL); cfg_m=$(config_model)
-  [ -n "$env_m" ] || die "OLLAMA_MODEL is not set in docker/.env (./run.sh model)"
+  [ -n "$env_m" ] || die "OLLAMA_MODEL is not set in docker/.env (./run.sh model --apply)"
   [ "$env_m" = "$cfg_m" ] || die "model mismatch: docker/.env OLLAMA_MODEL=$env_m but config.yaml llm.model=$cfg_m -> './run.sh model --apply'"
   ok "model $env_m (docker/.env and config.yaml agree)"
 }
@@ -159,55 +167,92 @@ check_gpu() {
   fi
 }
 
+db_upgrade() {   # idempotent roles + outbox guard for REQUIREMENTS 1.3 (console role)
+  "${COMPOSE[@]}" exec -T postgres sh /init/upgrade.sh \
+    || die "database upgrade failed (docker/postgres/upgrade.sql); see ./run.sh logs postgres"
+  ok "database roles and outbox guard up to date"
+}
+
+alerts_wanted() {   # the standalone bot needs its own Alpaca account (one WebSocket per account)
+  [ -f .env.alerts ] || return 1
+  local ak ck lk
+  ak=$(env_value .env.alerts ALPACA_KEY); ck=$(env_value .env.core ALPACA_PAPER_KEY)
+  lk=$(env_value .env.live ALPACA_LIVE_KEY)
+  [ -n "$ak" ] && [ "$ak" != "$ck" ] && [ "$ak" != "$lk" ]
+}
+
 cmd_start() {
-  local profiles=()
+  local profiles=(--profile monitoring) console=1 alerts=auto
   for arg in "$@"; do
     case "$arg" in
-      --monitoring) profiles+=(--profile monitoring) ;;
-      --alerts) [ -f .env.alerts ] || die ".env.alerts missing (cp .env.alerts.example .env.alerts; docs/ALERTS.md)"
-                profiles+=(--profile alerts) ;;
-      *) die "unknown option $arg" ;;
+      --monitoring) ;;                      # default now; kept for old habits
+      --no-monitoring) profiles=() ;;
+      --no-console) console=0 ;;
+      --alerts) alerts=yes ;;
+      --no-alerts) alerts=no ;;
+      *) die "unknown option $arg (./run.sh help)" ;;
     esac
   done
   preflight
   step "Database and model server"
-  "${COMPOSE[@]}" up -d --wait --wait-timeout "$WAIT_S" postgres ollama
+  "${COMPOSE[@]}" up -d --build --wait --wait-timeout "$WAIT_S" postgres ollama
+  db_upgrade
   check_gpu
   ensure_model
-  step "Journal tables (idempotent)"
+  step "Journal tables and grants (idempotent)"
   "${COMPOSE[@]}" run --rm trader-core trader migrate
-  step "All services (agents A1-A12: trader-core + news-sentiment; notifier; backup)"
-  "${COMPOSE[@]}" "${profiles[@]}" up -d --build --wait --wait-timeout "$WAIT_S" \
-    || { "${COMPOSE[@]}" ps; die "a service did not become healthy: ./run.sh logs <service>"; }
+  if [ "$alerts" = yes ] || { [ "$alerts" = auto ] && alerts_wanted; }; then
+    alerts_wanted || die "--alerts needs .env.alerts with an Alpaca key different from trader-core's (one WebSocket per account; docs/ALERTS.md)"
+    profiles+=(--profile alerts)
+  elif [ -f .env.alerts ] && [ "$alerts" = auto ]; then
+    warn "standalone alerts bot not started: it shares trader-core's Alpaca key; trader-core sends the alerts itself (AL-1)"
+  fi
+  local skip=()
+  [ "$console" = 0 ] && skip=(--scale console=0)
+  step "All services"
+  "${COMPOSE[@]}" "${profiles[@]}" up -d --build --wait --wait-timeout "$WAIT_S" "${skip[@]}" \
+    || { "${COMPOSE[@]}" "${ALL_PROFILES[@]}" ps; die "a service did not become healthy: ./run.sh logs <service>"; }
   "${COMPOSE[@]}" "${profiles[@]}" ps
   step "Model check (must say 100% on GPU)"
   "${COMPOSE[@]}" exec -T trader-core trader check-connections --service llm \
     || warn "LLM check failed: docs/TROUBLESHOOTING.md (model, GPU memory)"
   step "Running"
   echo "  Telegram: send STATUS to your bot · daily routine: docs/RUNBOOK.md §2"
+  [ "$console" = 1 ] && echo "  console:    http://localhost:8080 (password in secrets/console_password.txt)"
+  [ ${#profiles[@]} -gt 0 ] && echo "  dashboards: http://localhost:3000 (admin / secrets/grafana_admin_password.txt)"
   echo "  logs: ./run.sh logs trader-core · stop: ./run.sh stop"
-  [[ " ${profiles[*]} " == *" monitoring "* ]] && echo "  dashboards: http://localhost:3000 (admin / secrets/grafana_admin_password.txt)"
   return 0
 }
 
 cmd_setup() {
+  check_docker
+  build_toolbox
   step "Create missing local files (never overwrites; all git-ignored)"
-  if [ -f docker/.env ]; then trader init-env
+  if [ -f docker/.env ]; then toolbox init-env
   else
     read -r -p "Database role prefix (e.g. your initials, blank for none): " prefix
-    trader init-env ${prefix:+--prefix "$prefix"}
+    toolbox init-env ${prefix:+--prefix "$prefix"}
   fi
   step "Model for this machine's GPU"
-  trader select-model --apply || warn "model selection failed: set OLLAMA_MODEL and llm.model by hand"
+  toolbox_gpu select-model --apply || warn "model selection failed: set OLLAMA_MODEL and llm.model by hand"
   echo
-  echo "Next: fill in the keys listed above (docs/ACCOUNT_SETUP.md), then ./run.sh"
+  echo "Next: fill in the keys listed above (docs/ACCOUNT_SETUP.md), then ./run.sh connections and ./run.sh"
 }
 
-cmd_alerts() {
-  check_docker; check_secrets_not_in_git
-  [ -f .env.alerts ] || die ".env.alerts missing: cp .env.alerts.example .env.alerts and fill it in (docs/ALERTS.md)"
-  "${COMPOSE[@]}" --profile alerts up -d --build --wait --wait-timeout "$WAIT_S" alerts
-  ok "alerts bot running: send /help to your Telegram bot · logs: ./run.sh logs alerts"
+cmd_connections() {
+  check_docker; build_toolbox
+  "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+  toolbox check-connections --service core --service news --service notifier --service db \
+    --env-file .env.core --env-file .env.news --env-file .env.notifier "$@"
+}
+
+cmd_ui() {   # cmd_ui SERVICE... : start one UI service and print where it is
+  check_docker
+  if ! "${COMPOSE[@]}" --profile monitoring up -d --build --wait --wait-timeout 300 "$@"; then
+    "${COMPOSE[@]}" --profile monitoring ps "$@"
+    "${COMPOSE[@]}" --profile monitoring logs --tail 40 "$@" || true
+    die "$* did not become healthy (log above; docs/TROUBLESHOOTING.md)"
+  fi
 }
 
 cmd="${1:-start}"; [ $# -gt 0 ] && shift
@@ -215,16 +260,53 @@ case "$cmd" in
   start)   cmd_start "$@" ;;
   setup)   cmd_setup ;;
   check)   preflight; ok "pre-flight passed" ;;
-  stop)    "${COMPOSE[@]}" --profile monitoring --profile alerts stop ;;
-  restart) "${COMPOSE[@]}" --profile monitoring --profile alerts stop; cmd_start "$@" ;;
-  status)  "${COMPOSE[@]}" --profile monitoring --profile alerts ps
+  connections) cmd_connections "$@" ;;
+  stop)    "${COMPOSE[@]}" "${ALL_PROFILES[@]}" stop ;;
+  restart) "${COMPOSE[@]}" "${ALL_PROFILES[@]}" stop; cmd_start "$@" ;;
+  status)  "${COMPOSE[@]}" "${ALL_PROFILES[@]}" ps
+           running=$("${COMPOSE[@]}" "${ALL_PROFILES[@]}" ps --status running --services 2>/dev/null || true)
+           grep -qx grafana-proxy <<< "$running" || warn "Grafana is not running (http://localhost:3000): ./run.sh monitoring"
+           grep -qx console <<< "$running" || warn "Owner Console is not running (http://localhost:8080): ./run.sh console"
            "${COMPOSE[@]}" exec -T trader-core trader status 2>/dev/null | head -40 || true ;;
-  logs)    "${COMPOSE[@]}" --profile monitoring --profile alerts logs -f --tail 200 "$@" ;;
-  model)   trader select-model "$@" ;;
-  alerts)  cmd_alerts ;;
+  logs)    "${COMPOSE[@]}" "${ALL_PROFILES[@]}" logs -f --tail 200 "$@" ;;
+  model)   check_docker; build_toolbox; toolbox_gpu select-model "$@" ;;
+  chats)   check_docker; build_toolbox; toolbox telegram-chats --env-file .env.notifier ;;
+  import-trades) check_docker; build_toolbox
+           [ $# -ge 1 ] || die "usage: ./run.sh import-trades FILE [--broker robinhood|webull|fidelity|schwab|generic]"
+           "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+           toolbox import-trades --env-file .env.core "$@" ;;
+  restore-test) check_docker; build_toolbox
+           "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+           report=$("${COMPOSE[@]}" --profile tools run --rm restore-test) \
+             || die "restore failed: $report"
+           printf '%s\n' "$report" | "${COMPOSE[@]}" --profile tools run --rm -T toolbox \
+             restore-test --env-file .env.core --report - ;;
+  drill)   check_docker; build_toolbox
+           "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+           toolbox drill --env-file .env.core "$@" ;;
+  monitoring) [ -f secrets/grafana_admin_password.txt ] || die "secrets/grafana_admin_password.txt missing: ./run.sh setup"
+           cmd_ui grafana grafana-proxy
+           ok "dashboards: http://localhost:3000  user admin, password in secrets/grafana_admin_password.txt" ;;
+  console) [ -f secrets/console_password.txt ] || die "secrets/console_password.txt missing: ./run.sh setup"
+           cmd_ui console
+           ok "Owner Console: http://localhost:8080  (password in secrets/console_password.txt)" ;;
+  alerts)  check_docker; check_secrets_not_in_git
+           [ -f .env.alerts ] || die ".env.alerts missing: cp .env.alerts.example .env.alerts and fill it in (docs/ALERTS.md)"
+           "${COMPOSE[@]}" --profile alerts up -d --build --wait --wait-timeout "$WAIT_S" alerts
+           ok "alerts bot running: send /help to your Telegram bot · logs: ./run.sh logs alerts" ;;
   replay)  check_docker
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay replay --synthetic "${1:-10}" --start 2026-10-05 ;;
-  help|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  backtest) check_docker
+           [ -f .env.replay ] || cp .env.replay.example .env.replay
+           "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
+  test)    check_docker   # developers too: nothing runs from a host venv
+           "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
+           "${COMPOSE[@]}" --profile dev run --rm -T --user "$HOST_UID:$HOST_GID" \
+             -e HOME=/tmp -e PYTHONPATH=/workspace/src -w /workspace dev sh -c \
+             'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
+              pytest -q -p no:cacheprovider "$@" &&
+              python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
+  help|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac

@@ -6,14 +6,16 @@ How to create every external account, key and password the system needs before p
 
 ## Quick path
 
-```powershell
-trader init-env --prefix srb          # creates every missing local file from the *.example templates
+From WSL at the repo root (every step runs in a container; nothing is installed on the host):
+
+```bash
+./run.sh setup         # every missing local file from the *.example templates + the model for your GPU
 # fill in the keys it lists (sections 1-5), then:
-trader check-connections --service core --service news --service notifier `
-  --env-file .env.core --env-file .env.news --env-file .env.notifier
+./run.sh connections   # read-only checks: Alpaca, Finnhub, Telegram, database roles, Qwen
+./run.sh               # start everything (section 8)
 ```
 
-`init-env` never overwrites an existing file. It creates `docker/.env` (database and role names), five random passwords in `secrets/`, the five `.env.*` files with their `DATABASE_URL` already filled in, and `config/config.yaml`; then it lists the values still empty.
+`setup` never overwrites an existing file. It creates `docker/.env` (database and role names), random passwords in `secrets/` (one per database role, `console_password.txt` for the Owner Console login, `grafana_admin_password.txt`), the `.env.*` files with their `DATABASE_URL` already filled in, and `config/config.yaml`; then it lists the values still empty.
 
 ## Template files (tracked in git, no values)
 
@@ -24,6 +26,8 @@ trader check-connections --service core --service news --service notifier `
 | [`.env.notifier.example`](../.env.notifier.example) | `.env.notifier` | notifier |
 | [`.env.backup.example`](../.env.backup.example) | `.env.backup` | backup |
 | [`.env.replay.example`](../.env.replay.example) | `.env.replay` | replay, dev |
+| [`.env.console.example`](../.env.console.example) | `.env.console` | console (Owner Console) |
+| [`.env.alerts.example`](../.env.alerts.example) | `.env.alerts` | alerts (optional standalone bot, own Alpaca account) |
 | [`.env.live.example`](../.env.live.example) | `.env.live` | trader-core, go-live only |
 | [`docker/.env.example`](../docker/.env.example) | `docker/.env` | Compose (names, model) |
 | [`config/config.example.yaml`](../config/config.example.yaml) | `config/config.yaml` | every container (read-only) |
@@ -37,7 +41,7 @@ Qwen runs in the `ollama` container on the local NVIDIA GPU (QW-1).
 2. Update WSL: `wsl --update`, then `wsl --shutdown`.
 3. Install **Docker Desktop** with the WSL2 backend. Check GPU passthrough:
    `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` must show your GPU.
-4. Pick the model for your GPU (QW-6): run `trader select-model` on the Windows host (it reads `nvidia-smi`). It lists which models fit fully in GPU memory and recommends one; `trader select-model --apply` writes it to both `docker/.env` (`OLLAMA_MODEL`) and `config/config.yaml` (`llm.model`). On the reference machine (RTX 4060 Laptop, 8 GB) that is `qwen3:8b`; 12–16 GB cards get `qwen3:14b`. Details and the full table: [HARDWARE.md](HARDWARE.md).
+4. Pick the model for your GPU (QW-6): `./run.sh model` (in a container with the GPU visible; it reads `nvidia-smi`). It lists which models fit fully in GPU memory and recommends one; `./run.sh model --apply` writes it to both `docker/.env` (`OLLAMA_MODEL`) and `config/config.yaml` (`llm.model`). On the reference machine (RTX 4060 Laptop, 8 GB) that is `qwen3:8b`; 12–16 GB cards get `qwen3:14b`. Details and the full table: [HARDWARE.md](HARDWARE.md).
 5. After the first start (section 8), verify it really runs on the GPU:
    `docker compose -f docker/docker-compose.yml run --rm --no-deps trader-core trader check-connections --service llm`
    must print `PASS llm gpu 100% on GPU`. The Ollama log shows `library=CUDA` with your GPU name.
@@ -46,9 +50,10 @@ Compose already passes the GPU through (`gpus: all`) and sizes Ollama for an 8 G
 
 **Docker Desktop stability (seen on this machine; full recovery sequence in [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §1):** large downloads inside Docker crashed Docker Desktop's WSL engine several times (`wsl-bootstrap` exit status 0xc00000fd), even with the `model-pull` service limited to 2 download streams. The reliable path is to download the model on Windows and copy it into the volume (resumable, sha256-verified, and the runtime `ollama` still never touches the internet):
 
-```powershell
-.venv\Scripts\python tools/fetch_ollama_model.py qwen3:8b data/ollama_models   # rerun to resume
-powershell -File tools/import_ollama_model.ps1                                  # copy into the volume, restart ollama
+```bash
+docker compose -f docker/docker-compose.yml --profile tools run --rm --entrypoint python toolbox \
+  tools/fetch_ollama_model.py qwen3:8b data/ollama_models                        # rerun to resume
+powershell.exe -File tools/import_ollama_model.ps1                               # copy into the volume, restart ollama
 ```
 
 `data/` is git-ignored; delete `data/ollama_models` after the import to free 5 GB. Keeping Docker Desktop and WSL updated helps; a PATH entry for a missing drive (`Failed to translate 'E:\...'`) also appears in those logs and is worth removing.
@@ -110,8 +115,8 @@ Telegram is the default channel (ADR-014): free, no templates and no 24-hour win
 1. In Telegram, open **@BotFather**, send `/newbot`, and choose a display name and a username ending in `bot`.
 2. Copy the **bot token** (looks like `123456789:AA…`) into `TELEGRAM_BOT_TOKEN` in `.env.notifier`, and set `NOTIFIER_CHANNEL=telegram`.
 3. Open your new bot in Telegram, press **Start**, and send `STATUS`.
-4. Find your chat id: `trader telegram-chats --env-file .env.notifier`. Put it in `TELEGRAM_CHAT_ID` (and, if more than one person may send commands, a comma-separated list in `TELEGRAM_ALLOWED_CHAT_IDS`; otherwise only `TELEGRAM_CHAT_ID` can).
-5. Check: `trader check-connections --service notifier --env-file .env.notifier` must print `PASS`.
+4. Find your chat id: `./run.sh chats`. Put it in `TELEGRAM_CHAT_ID` (and, if more than one person may send commands, a comma-separated list in `TELEGRAM_ALLOWED_CHAT_IDS`; otherwise only `TELEGRAM_CHAT_ID` can).
+5. Check: `./run.sh connections` must print `PASS` for the notifier lines.
 
 Never add the bot to a group, and never set a webhook for it: the notifier long-polls `getUpdates`, which stops working while a webhook is set. If the token leaks, send `/revoke` to @BotFather and update the env file.
 
@@ -181,7 +186,7 @@ foreach ($r in "admin","core","news","notifier","readonly") {
 
 ### Create the env files
 
-Run `trader init-env` (or copy each `.env.<name>.example` to `.env.<name>` in the repo root) and fill in the keys. Each container reads only its own file (SEC-18). The user and database in each `DATABASE_URL` must match `docker/.env` and the password must match the secret file:
+Run `./run.sh setup` (or copy each `.env.<name>.example` to `.env.<name>` in the repo root) and fill in the keys. Each container reads only its own file (SEC-18). The user and database in each `DATABASE_URL` must match `docker/.env` and the password must match the secret file:
 
 | File | Contents |
 | --- | --- |
@@ -190,6 +195,11 @@ Run `trader init-env` (or copy each `.env.<name>.example` to `.env.<name>` in th
 | `.env.notifier` | the Twilio/WhatsApp values from step 5, `DATABASE_URL` with `srb_notifier_rw` |
 | `.env.backup` | `DATABASE_URL` with `srb_readonly` |
 | `.env.replay` | `REPLAY=1` (no keys) |
+| `.env.console` | `DATABASE_URL` with `srb_console_rw`, `CORE_API_URL`, `OLLAMA_URL`, `CONSOLE_IDLE_MIN` (no broker keys) |
+
+### Optional: e-mail fallback when Telegram is down (NF-1)
+
+If the notifier is unreachable for 2 minutes in a window, approvals are blocked and an incident is journaled. To also get an e-mail, add to `.env.core`: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD` (for Gmail, an app password) and `FALLBACK_EMAIL_TO`. Without them the incident still shows on the console and in Grafana.
 
 Rules for these files:
 
@@ -202,35 +212,32 @@ Rules for these files:
 In `config/config.yaml` (git-ignored copy of `config/config.example.yaml`):
 
 - `data.sec_user_agent`: your name and email (step 3).
-- `llm.model`: set by `trader select-model --apply` together with `OLLAMA_MODEL` (QW-6); `qwen3:8b` on the 8 GB reference GPU, `qwen3:14b` on 12–16 GB.
+- `llm.model`: set by `./run.sh model --apply` together with `OLLAMA_MODEL` (QW-6); `qwen3:8b` on the 8 GB reference GPU, `qwen3:14b` on 12–16 GB.
 - Keep `mode.environment: paper`, `day_trades: approve`, `swing_trades: approve` for the first paper days (TEST_PLAN PT-1).
-- Run `trader validate-config --config config/config.yaml`; it must print `OK`.
+- `./run.sh check` validates the config with the rest of the pre-flight; `./run.sh` refuses to start on an invalid value.
+- Options ideas (advisory) are on by default (`options.mode: advisory`); set `options.account_level` to your Alpaca options level (2 = long options, 3 = spreads) or `options.mode: off`.
 
 ## 8. First start
 
 Check the credentials first (read-only: no orders, no messages):
 
-```powershell
-trader --config config/config.yaml check-connections --service core --service news --service notifier `
-  --env-file .env.core --env-file .env.news --env-file .env.notifier
+```bash
+./run.sh connections
 ```
 
 Every line must say `PASS`. Then:
 
-```powershell
-docker compose -f docker/docker-compose.yml up -d postgres ollama
-docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull   # model from docker/.env
-docker compose -f docker/docker-compose.yml run --rm --no-deps trader-core trader migrate
-docker compose -f docker/docker-compose.yml run --rm --no-deps trader-core trader check-connections --service core --service db --service llm
-trader fetch-history                                                              # optional: 2 years of bars into data/bars (host)
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml ps                                    # every service healthy
+```bash
+./run.sh            # Postgres + Ollama, role upgrade, model download, migrate, every service healthy
+./run.sh status     # every container and its health
 ```
+
+The Owner Console is at http://localhost:8080 (password in `secrets/console_password.txt`) and Grafana at http://localhost:3000.
 
 Then:
 
 1. Send `STATUS` to your bot (or on WhatsApp); a status message must come back (inbound polling works).
-2. Optionally check the model against the evaluation set: `trader eval-prompts --llm ollama` (AGENT_PROMPTS §8).
+2. Optionally check the model against the evaluation set: `docker compose -f docker/docker-compose.yml exec trader-core trader eval-prompts --llm ollama` (AGENT_PROMPTS §8).
 3. The next trading day, the 7:00 pre-flight message must arrive (RUNBOOK §1 step 9).
 
 ## 9. Key hygiene

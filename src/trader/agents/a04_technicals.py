@@ -47,12 +47,36 @@ def compute_levels(ticker: str, day: date, daily: list[Bar], pm_high: float | No
                 pullback = True
     last = prior[-1]
     vols = [b.v for b in prior[-50:]]
+    gaps = [abs(prior[i].o / prior[i - 1].c - 1) * 100
+            for i in range(max(1, len(prior) - 20), len(prior)) if prior[i - 1].c]
     return Levels(day=day, ticker=ticker, prior_high=last.h, prior_low=last.l,
                   prior_close=last.c, pm_high=pm_high, pm_low=pm_low, ema20d=e20[-1],
                   ema50d=e50[-1], ema10d=e10[-1], atr14d=atr[-1],
                   high20d=max(highs[-20:]), close_high20d=max(closes[-20:]),
                   avg_vol50d=sum(vols) / len(vols) if vols else None,
-                  low5d=min(lows[-5:]), pullback_to_ema=pullback, history_days=len(prior))
+                  low5d=min(lows[-5:]), pullback_to_ema=pullback, history_days=len(prior),
+                  avg_gap20d=sum(gaps) / len(gaps) if gaps else None)
+
+
+def classify_regime(spy_daily: list[Bar], day: date, spy_gap_pct: float | None,
+                    high_vol_atr_ratio: float, high_vol_gap_pct: float
+                    ) -> tuple[str, float | None, str]:
+    """RG-1: ``high-vol`` when SPY's ATR(14-day) is above ``high_vol_atr_ratio`` x its 60-day
+    average, or the opening gap is at least ``high_vol_gap_pct``; else ``normal``."""
+    prior = [b for b in spy_daily if to_et(b.ts).date() < day]
+    atr = [a for a in atr_series([b.h for b in prior], [b.l for b in prior],
+                                 [b.c for b in prior], 14) if a is not None]
+    ratio = None
+    if len(atr) >= 20:
+        window = atr[-61:-1] if len(atr) > 60 else atr[:-1]
+        avg = sum(window) / len(window)
+        ratio = atr[-1] / avg if avg > 0 else None
+    reasons = []
+    if ratio is not None and ratio > high_vol_atr_ratio:
+        reasons.append(f"SPY ATR14 {ratio:.2f}x its 60-day average")
+    if spy_gap_pct is not None and abs(spy_gap_pct) >= high_vol_gap_pct:
+        reasons.append(f"SPY gap {spy_gap_pct:+.2f}%")
+    return ("high-vol" if reasons else "normal"), ratio, "; ".join(reasons) or "calm"
 
 
 def session_screen(daily: list[Bar], lv: Levels) -> dict[str, Any]:
@@ -164,6 +188,8 @@ class TechnicalAgent:
         self.news_available = True
         self.day: date | None = None
         self.days: dict[str, TickerDay] = {}
+        self.regime = "normal"   # RG-1, set by the engine at 8:30 and 9:30
+        self.passive_setups: set[str] = set()   # EXQ-1: limit at the trigger
 
     # -- lifecycle ---------------------------------------------------------------------------
     def start_day(self, d: date) -> None:
@@ -182,12 +208,21 @@ class TechnicalAgent:
                                                        "pm_low": st.pm_low})
 
     # -- helpers -----------------------------------------------------------------------------
+    def trend_day(self, st: SymbolState) -> bool:
+        """RG-3 with the configured thresholds."""
+        rg = self.cfg.regime
+        hh, mm = (int(x) for x in rg.trend_day_high_after.split(":"))
+        return st.trend_day(rg.trend_day_vwap_pct, time(hh, mm))
+
     def _buffer(self, atr5: float) -> float:
         return 0.05 * atr5
 
-    def entry_price(self, trigger: float, atr5: float) -> Decimal:
+    def entry_price(self, trigger: float, atr5: float, setup: str | None = None) -> Decimal:
         """STRATEGY_SPEC §2: limit at trigger + 0.10 ATR5 + marketable offset, never above the
-        chase limit trigger + 0.25 ATR5 (CK-6)."""
+        chase limit trigger + 0.25 ATR5 (CK-6). EXQ-1: a setup with high slippage enters with
+        a passive limit at the trigger."""
+        if setup is not None and setup in self.passive_setups:
+            return cents(trigger)
         e = self.cfg.entries
         raw = trigger + 0.10 * atr5 + trigger * e.limit_offset_pct / 100
         cap = trigger + e.max_chase_atr5 * atr5
@@ -230,7 +265,7 @@ class TechnicalAgent:
         s += max(0.0, min(room / 3.0, 1.0)) * 20
         if st.above_vwap():
             s += 10
-        if st.trend_day():
+        if self.trend_day(st):
             s += 5
         if (st.ema9_5m.value or 0) > (st.ema20_5m.value or 0):
             s += 5
@@ -239,8 +274,17 @@ class TechnicalAgent:
         s += {"positive": 10, "neutral": 5, "mixed": 5, "negative": 0}[tone]
         return int(round(max(0.0, min(s, 100.0))))
 
+    def quote_reliable(self, ticker: str, now: datetime) -> bool:
+        """DQ-8 / MF-6: two-sided, not crossed, and at most ``data.quote_max_age_s`` old."""
+        q = self.md.state[ticker].quote
+        if q is None:
+            return not self.require_quotes
+        age = (now - q.ts).total_seconds()
+        return (q.bid > 0 and q.ask > 0 and q.ask >= q.bid
+                and -1.0 <= age <= self.cfg.data.quote_max_age_s)
+
     def filters(self, ticker: str, now: datetime, setup: str, score: int) -> dict[str, bool]:
-        """MF-1..MF-5 pass/fail (A4-4)."""
+        """MF-1..MF-6 pass/fail (A4-4). MF-6: the spread check needs a reliable quote."""
         f = self.cfg.filters
         st = self.md.state[ticker]
         qqq = self.md.state.get("QQQ")
@@ -262,13 +306,15 @@ class TechnicalAgent:
             mf2 = bool(smh and smh.above_vwap())
         rv = st.rvol()
         mf3 = rv is not None and rv >= f.min_rvol
+        mf6 = self.quote_reliable(ticker, now)
         if st.quote is not None:
-            mf4 = st.quote.spread_pct < f.max_spread_pct
+            mf4 = mf6 and st.quote.spread_pct < f.max_spread_pct   # DQ-8: never by default
         else:
             mf4 = not self.require_quotes
         mf5 = not (self.md.recent_halt(ticker, now, f.halt_lookback_min)
                    or self.md.is_stale(now) or st.incomplete)
-        return {"MF-1": bool(qqq_ok), "MF-2": mf2, "MF-3": mf3, "MF-4": mf4, "MF-5": mf5}
+        return {"MF-1": bool(qqq_ok), "MF-2": mf2, "MF-3": mf3, "MF-4": mf4, "MF-5": mf5,
+                "MF-6": mf6}
 
     def _setup_id(self, ticker: str, setup: str, ts: datetime) -> str:
         key = f"{ticker}|{setup}|{ts.isoformat()}"
@@ -281,7 +327,7 @@ class TechnicalAgent:
         atr5 = st.atr5.value
         if atr5 is None or atr5 <= 0:
             return None
-        entry = self.entry_price(trigger, atr5)
+        entry = self.entry_price(trigger, atr5, setup)
         b = self._buffer(atr5) if buffer is None else buffer
         stop = cents_down(stop_level - b)
         r = entry - stop
@@ -296,7 +342,8 @@ class TechnicalAgent:
         ctx = {"atr14d": (self.levels[ticker].atr14d if ticker in self.levels else None),
                "hod": st.hod, "ema9_5m": st.ema9_5m.value, "ema20_5m": st.ema20_5m.value,
                "or5": st.or5, "rel_strength": self.rel_strength(st),
-               "trend_day": st.trend_day(), "breakout_level": trigger, **(context or {})}
+               "trend_day": self.trend_day(st), "regime": self.regime,
+               "breakout_level": trigger, **(context or {})}
         return SetupTriggered(
             setup_id=self._setup_id(ticker, setup, now), ts=now, ticker=ticker,
             style="swing" if style == "swing" else "day",
@@ -413,6 +460,11 @@ class TechnicalAgent:
         atr_pct = lv.atr14d / lv.prior_close * 100
         if not 1.0 <= g <= min(3 * atr_pct, 6.0):
             return None
+        rg = self.cfg.regime
+        if self.regime == "high-vol" and lv.avg_gap20d and g > rg.gap_and_go_max_normal_x * \
+                lv.avg_gap20d:   # RG-2: no gap-and-go on an outsized gap in a high-vol regime
+            log.info("gap_skip_high_vol", ticker=t, gap=g, normal=lv.avg_gap20d)
+            return None
         news = self.news.get(t)
         if not self.news_available or news is None or news.catalyst.lower() in ("", "none"):
             return None
@@ -487,7 +539,7 @@ class TechnicalAgent:
                     ) -> SetupTriggered | None:
         if td.power_done or st.hod_before_1500 is None or len(st.bars5) < 3:
             return None
-        if not st.trend_day() or not st.above_vwap():
+        if not self.trend_day(st) or not st.above_vwap():   # RG-3
             return None
         if bar.c <= st.hod_before_1500:
             return None
@@ -502,7 +554,7 @@ class TechnicalAgent:
         if td.trend_done or st.atr5.value is None:
             return
         vw = st.vwap_value
-        if vw is None or not st.trend_day():
+        if vw is None or not self.trend_day(st):   # RG-3
             return
         for b, v in zip(st.bars5, st.vwap_at_5m, strict=True):
             if _t(b.end) > time(14, 0) and b.c < v:

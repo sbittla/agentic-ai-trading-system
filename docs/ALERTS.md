@@ -43,15 +43,12 @@ Postgres, Ollama/Qwen, a GPU, FinBERT/PyTorch or Grafana.
 5. Run it:
 
    ```bash
-   # Docker (recommended): one small container, restarts automatically
-   docker compose -f docker/docker-compose.yml --profile alerts up -d alerts
-   docker compose -f docker/docker-compose.yml logs -f alerts
-
-   # or directly (Python 3.12)
-   pip install -e . websockets
-   set -a; . ./.env.alerts; set +a
-   trader alerts
+   ./run.sh alerts          # one small container, restarts automatically
+   ./run.sh logs alerts
    ```
+
+   `./run.sh` (start) also starts it when `.env.alerts` has its own Alpaca key; with the
+   same key as trader-core it is skipped and trader-core sends the alerts itself (AL-1).
 
 > Alpaca allows **one** market-data WebSocket per account. Do not run `alerts` and
 > `trader-core` with the same Alpaca keys at the same time (use a second paper account, or
@@ -104,6 +101,20 @@ the top and bottom movers.
 Only chat ids in `TELEGRAM_ALLOWED_CHAT_IDS` (default: `TELEGRAM_CHAT_ID`) are answered;
 messages sent while the bot was offline are skipped at start-up.
 
+## Planned changes (REQUIREMENTS 1.3, §10.5)
+
+Not built yet. These change how alerts work, for this bot and for alerts sent by trader-core:
+
+| ID | Change |
+| --- | --- |
+| AL-1 | While trader-core runs, it sends the alerts from its own stream, because Alpaca allows one WebSocket per account. This bot is for when the core is off, or for a second account |
+| AL-2 | Each alert is labelled **raw signal** or **qualified setup (checklist n/10, first failed item)** |
+| AL-3 | Each directional alert carries a plan: trigger, invalidation (stop), T1/T2, share size for the risk budget, R:R, RVOL, position against VWAP and QQQ |
+| AL-4 | Schedule `windows` (default: pre-market, 9:30–10:30, 3:00–4:00) or `all_day` |
+| AL-5 | At most 3 alerts per symbol per window, and 12 per window in total |
+| AL-6 | Ranked by quality; the top 5 per 10 minutes go out at once, the rest in a 10-minute digest |
+| AL-7 | Every alert type is graded (+1R before −1R within 30 minutes); weak types are flagged |
+
 ## Notes
 
 - IEX is ~2–3% of US volume: prices track the market closely, volume numbers are IEX-only
@@ -111,3 +122,17 @@ messages sent while the bot was offline are skipped at start-up.
   Set `feed: sip` if you pay for Alpaca's SIP data.
 - While muted, a one-shot rule that fires is still used up (it is logged, not sent).
 - Not financial advice; alerts are information, not trade signals.
+
+## Options line (optional, OP-14)
+
+With `options.enabled: true` in `config/alerts.yaml`, ORB, VWAP and HOD/LOD alerts get one
+extra line with a defined-risk options structure (the same A14 code trader-core uses):
+
+```
+Options: Call debit spread Oct 23 190C/193C · debit ~1.25 · max loss $125 x1 · OI not checked · indicative
+```
+
+- One snapshot call per alert, at most one every `min_interval_s` (10 s).
+- Sized to `fixed_risk_usd` (default $200). No IV history and no open-interest check in the
+  bot (one call only); trader-core's full options ideas have both (OPTIONS_REQUIREMENTS.md).
+- Advisory only: nothing is ordered.

@@ -26,3 +26,11 @@ signals:                        # automatic scanner alerts on 1-minute bar close
   gap_pct: 2.0                  # gap vs prior close at the open
   move_step_pct: 2.0            # alert at ±2%, ±4%, ... from prior close (0 = off)
   cooldown_min: 15              # per symbol and signal for VWAP, HOD/LOD and volume
+
+# OP-14: one options line on ORB, VWAP and HOD/LOD alerts (one snapshot call per alert,
+# at most one every 10 s). Off by default; trader-core holds the full options logic.
+options:
+  enabled: false
+  fixed_risk_usd: 200           # size every line to this dollar risk
+  min_interval_s: 10
+  day_dte: [5, 14]

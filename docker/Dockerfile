@@ -4,7 +4,10 @@
 #   news     -> news-sentiment (adds PyTorch + transformers for FinBERT)
 #   notifier -> WhatsApp sender and reply poller
 #   alerts   -> standalone Telegram price alerts (base + websockets; ~40 MB RAM at runtime)
+#   console  -> Owner Console web app (base + starlette/uvicorn; UI_REQUIREMENTS UI-23)
 #   tools    -> backup and admin jobs (adds postgres client)
+#   toolbox  -> owner helper commands run by run.sh (init-env, select-model, check-connections,
+#               telegram-chats, import-trades): core + notifier deps; nothing runs on the host
 #   dev      -> dev container (adds test and lint tools)
 
 FROM python:3.12-slim AS base
@@ -47,9 +50,23 @@ COPY requirements/alerts.lock requirements/alerts.lock
 RUN pip install --require-hashes -r requirements/alerts.lock
 USER trader
 
+FROM base AS console
+USER root
+COPY requirements/console.lock requirements/console.lock
+RUN pip install --require-hashes -r requirements/console.lock
+USER trader
+
 FROM base AS tools
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+USER trader
+
+FROM core AS toolbox
+USER root
+COPY requirements/notifier.lock requirements/notifier.lock
+RUN pip install --require-hashes -r requirements/notifier.lock && \
+    apt-get update && apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 USER trader
 

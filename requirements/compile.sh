@@ -4,7 +4,7 @@
 #   cd requirements && sh compile.sh
 set -e
 UV="${UV:-uv}"
-for f in base core notifier alerts dev; do
+for f in base core notifier alerts console dev; do
   "$UV" pip compile --quiet --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
     --generate-hashes --emit-index-url "$f.in" -o "$f.lock"
 done

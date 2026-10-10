@@ -55,9 +55,9 @@ The existing alert-bot indicators (RSI, MACD, Bollinger, Keltner, OBV, CMF) are 
 
 Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared by the containers with one role each (`docker/postgres/init.sql`). Replay and backtest runs write a per-run SQLite file with the same schema, so runs are self-contained. Times stored in UTC; reports shown in ET.
 
-**Writers by container:** `trader-core` writes every table except `news_items` and `event_flags` (written by `news-sentiment`) and inbound commands (written by `notifier` into `outbox`). Backups and Grafana use the read-only role.
+**Writers by container:** `trader-core` writes every table except `news_items` and `event_flags` (written by `news-sentiment`), inbound commands (written by `notifier` and `console` into `outbox`), and `owner_notes` / `console_chats` (written by `console`, which also logs its Ask calls to `llm_calls`). The `console_rw` role reads every table and is refused every other write (`trader migrate` grants, `upgrade.sql`). Backups and Grafana use the read-only role, which also reads every sequence so `pg_dump` works (found by the OPS-1 restore test).
 
-**Outbox bus (cross-container):** table `journal.outbox` (id, created_at, source, channel, payload JSONB, consumed_at). Channels: `news_flags` (news → core), `outbound_msg` (core → notifier), `inbound_cmd` (notifier → core), `heartbeat` (all). A trigger enforces which role may publish on which channel and issues `NOTIFY`.
+**Outbox bus (cross-container):** table `journal.outbox` (id, created_at, source, channel, payload JSONB, consumed_at). Channels: `news_flags` (news → core), `outbound_msg` (core → notifier), `inbound_cmd` (notifier and console → core; the trigger forces `source = console` for the console role), `heartbeat` (all). A trigger enforces which role may publish on which channel and issues `NOTIFY`.
 
 | Table | Key columns | Written by |
 | --- | --- | --- |
@@ -82,6 +82,22 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | `daily_metrics` | date, trades, wins, losses, pnl, peak_pnl, max_dd, expectancy_r, rule_breaches | A11 |
 | `llm_calls` | id, agent, prompt_version, input_hash, output, valid, latency_ms, tokens | ollama client |
 | `incidents` | id, ts, type, detail, resolved_at | A10 |
+| `commands` | ts, sender, text, accepted, reason, source (telegram, whatsapp, local, console) | CommandAuthority (SEC-14, UI-13) |
+| `status_snapshots` | ts, json (equity, health, positions, window …) | trader-core heartbeat; the console's fallback (UI-27) |
+| `next_day_ideas` | run_at, plan_for, ticker, rank, status, score, screen fields, morning/afternoon setup, trigger, stop, target, outcome fields | A5-1 |
+| `equity` | ts, equity, hwm | A10 |
+| `latency` | proposal_id, setup_id, ticker, setup, mode, trigger_ts, order_ts, latency_s, model_s, owner_s, prearmed, outcome (ORDER/MISSED), reason_code | engine (LAT-1, LAT-4) |
+| `shadow_trades` | setup_id, proposal_id, ts, ticker, setup, window, direction, taken, reason_code, entry, stop, t1, t2, filled_at, closed_at, exit_price, exit_reason, r_multiple, status | engine (SH-1, SH-2) |
+| `alerts_log` | ts, ticker, kind, direction, label (raw/qualified), checklist_score, first_failed, quality, delivery, price, stop, t1, text, plan_json, hit, graded_at | core alerts (AL-1..AL-7) |
+| `regime_daily` | date, regime, spy_atr_ratio, spy_gap_pct, detail | A4 (RG-1) |
+| `data_divergence` | date, ticker, IEX and SIP opening-range high/low, or_diff_pct, iex_volume_share_pct, setups_checked, setups_within | engine (DQ-6, DQ-7) |
+| `external_trades` | imported_at, broker, account, ts, ticker, side, qty, price, fees, source_file, row_hash (unique per import) | `trader import-trades` (WS-9) |
+| `in_play` | date, ticker, gap_pct, pm_volume_ratio, news, rank, on_list | engine (UN-1, UN-2) |
+| `ops_checks` | ts, kind (restore_test/drill), passed, detail | `trader restore-test`, `trader drill` (OPS-1, OPS-2) |
+| `options_iv_daily` | date, ticker, atm_iv_30d, iv_rank, iv_pct, expected_move_30d, history_days | A13 (A13-3, A13-6) |
+| `option_suggestions` | suggestion_id, ts, ticker, direction, source, style, structure, expiry, legs_json, contracts, entry_price (+debit/−credit), max_loss, max_gain, breakeven, underlying, invalidation, t1, iv_rank, detail_json (view, numbers, entry quotes), text, status, mark, exit_price, exit_reason, closed_at, pnl, r_multiple, stock_view_right | A14 / A16 |
+| `owner_notes` | ts, ref_type, ref_id, tags, note, screenshot_b64 | console (UI-29) |
+| `console_chats` | ts, day, question, answer, tool, rows_json, model_used | console (UI-8d) |
 
 **Retention:** journal kept for 7 years (tax records). Raw news text may be pruned after 90 days; headlines and scores are kept.
 

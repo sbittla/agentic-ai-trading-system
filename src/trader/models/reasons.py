@@ -51,6 +51,20 @@ class Reason(StrEnum):
     NT_DR6 = "NT_DR6"
     NT_DR7 = "NT_DR7"
     NT_DR8 = "NT_DR8"
+    # REQUIREMENTS 1.3
+    NT_CHASE_AT_SEND = "NT_CHASE_AT_SEND"          # LAT-3
+    NT_MODEL_TIMEOUT = "NT_MODEL_TIMEOUT"          # LAT-4
+    NT_LIMIT = "NT_LIMIT"                          # LAT-4 (generic limit block)
+    NT_NO_RELIABLE_QUOTE = "NT_NO_RELIABLE_QUOTE"  # DQ-8 / MF-6
+    NT_MACRO_RELEASE = "NT_MACRO_RELEASE"          # TW-6
+    NT_REGIME = "NT_REGIME"                        # RG-2
+    NT_NOT_TREND_DAY = "NT_NOT_TREND_DAY"          # RG-3
+    NT_UNSETTLED_FUNDS = "NT_UNSETTLED_FUNDS"      # AC-1
+    NT_ACCOUNT_MISMATCH = "NT_ACCOUNT_MISMATCH"    # AC-2
+    NT_NEWS_SHOCK = "NT_NEWS_SHOCK"                # NW-2
+    NT_NOTIFIER_DOWN = "NT_NOTIFIER_DOWN"          # NF-1
+    NT_OPTIONS_ONLY = "NT_OPTIONS_ONLY"            # BR-4: bearish signals never trade stock
+    COPILOT_PLAN = "COPILOT_PLAN"                  # CP-1: plan sent, no order
     SIZE_TOO_SMALL = "SIZE_TOO_SMALL"
     SIZE_REDUCED = "SIZE_REDUCED"
     SETUP_DISABLED = "SETUP_DISABLED"
@@ -94,6 +108,9 @@ class Reason(StrEnum):
     EXIT_DAILY_LIMIT = "EXIT_DAILY_LIMIT"
     EXIT_YEAR_END_WASH = "EXIT_YEAR_END_WASH"
     EXIT_RECONCILE = "EXIT_RECONCILE"
+    EXIT_GAP_BELOW_STOP = "EXIT_GAP_BELOW_STOP"    # EX-5
+    STOP_SHOCK = "STOP_SHOCK"                      # NW-2 stop move
+    STOP_MACRO_BREAKEVEN = "STOP_MACRO_BREAKEVEN"  # TW-6 stop move
     # commands
     CMD_ACCEPTED = "CMD_ACCEPTED"
     CMD_REJECTED = "CMD_REJECTED"

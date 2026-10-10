@@ -23,6 +23,9 @@ What the system measures about itself, what the owner sees, and when it alerts. 
 | GPU memory free | > 2 GB | 0.5–2 GB | < 0.5 GB |
 | Macro calendar coverage | Next CPI date listed | < 30 days of dates left | No future dates |
 | Key age | < 75 days | 75–90 days | > 90 days (no block, daily alert) |
+| Latency (LAT-1) | Trigger-to-order p95 ≤ budget (10 s) | p95 over budget | — (missed triggers are journaled with their reason, LAT-4) |
+| Nightly backup | `trader backup` succeeded last night | — | `BACKUP FAILED` (the health file stays stale; found by the OPS-1 restore test) |
+| Restore test and drill (OPS-1, OPS-2) | Passed in the last 35 days | Overdue (listed in the monthly report) | — |
 
 Pre-flight is **green** only if every check is green or amber; any red sends "NO TRADING TODAY: <reason>".
 
@@ -40,15 +43,16 @@ Pre-flight is **green** only if every check is green or amber; any red sends "NO
 | Drawdown | Equity vs high-water mark | ≥ 3% (RC-1 size cut), ≥ 6% month (LL-6) |
 | Rule breaches | Any order without a full decision record, any day trade open past its flatten time | Any (immediate alert, kill switch) |
 | Time in market | Minutes with an open day trade outside windows | > 0 |
+| Slippage per setup (EXQ-1) | Average entry slippage in R over the last 10 fills of a setup | > 0.1R: the setup switches to passive limits at the trigger, then back to paper |
+| Alert hit rate (AL-7) | Share of alerts of a kind that reach +1R before −1R in 30 min | < 40% over 50 graded (weekly report flag) |
+| Shadow vs taken (SH-2) | Expectancy of setups not taken vs taken | Not-taken beats taken over 40 (a filter may cost money) |
+| Options expectancy (A16) | Average R per graded options suggestion, per structure and direction | Below the A16-4 promotion gate (≥ +0.15R, PF ≥ 1.3 over ≥ 40 and ≥ 20 sessions) |
 
 ## 3. Dashboards (Grafana, `monitoring` profile)
 
 Start or stop the browser view (it is optional; trading does not depend on it):
 
-```powershell
-docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana grafana-proxy
-docker compose -f docker/docker-compose.yml --profile monitoring stop grafana grafana-proxy
-```
+`./run.sh` starts it with everything else; `./run.sh monitoring` starts or repairs it alone, `./run.sh --no-monitoring` skips it.
 
 Open http://localhost:3000, user `admin`, password in `secrets/grafana_admin_password.txt`. The home page is **Today**; the others are under Dashboards → Trader.
 
@@ -57,7 +61,7 @@ How it is wired (SEC-9, SEC-17):
 - `grafana` (`grafana/grafana:13.2.3`) is on the `internal` network only, so it has no internet and no host port. Plugin auto-install is off (`GF_PLUGINS_PREINSTALL_DISABLED`), so it runs the plugins bundled in the image.
 - `grafana-proxy` (`nginx:1.30.5-alpine`) is the only door: it publishes `127.0.0.1:3000` and forwards to Grafana. An `internal` network cannot publish ports, and Docker Desktop ignores "no NAT" bridge options, hence the proxy.
 - The `Journal` data source logs in as the `<prefix>readonly` role (SELECT only), with the password read from the `pg_readonly_password` Docker secret. No separate metrics store is needed because every metric is a journal query (ADR-012).
-- Data source and dashboards are provisioned from `docker/grafana/` and cannot be edited in the UI. To change a panel, edit `tools/build_grafana_dashboards.py`, run `python tools/build_grafana_dashboards.py`, and Grafana picks it up within 30 s. A unit test fails if the JSON is stale or a query writes.
+- Data source and dashboards are provisioned from `docker/grafana/` and cannot be edited in the UI. To change a panel, edit `tools/build_grafana_dashboards.py`, regenerate the JSON in a container (`docker compose -f docker/docker-compose.yml --profile tools run --rm --entrypoint python toolbox tools/build_grafana_dashboards.py`), and Grafana picks it up within 30 s. A unit test fails if the JSON is stale or a query writes.
 
 | Dashboard | Shows |
 | --- | --- |
@@ -67,6 +71,9 @@ How it is wired (SEC-9, SEC-17):
 | **4. LLM (Qwen)** | Calls, JSON validity, p50/p95 latency by agent, disagree rate, tokens, errors, per prompt version, recent calls with output |
 | **5. Data quality** | Last bar age per ticker, stream gaps, non-green health history, bars and news per hour, service heartbeats, incidents |
 | **6. Next-day ideas** | Latest after-close run: every ticker's readiness score, day change, close-in-range, volume vs 50-day, ATR distance to key levels, picks per window, news tone, Qwen's reason; hit rates and a track record graded on the planned session's daily bar |
+| **7. Options** (A16-3) | Advisory options suggestions: count, open, win rate, expectancy in R, profit factor, "view right but option lost"; breakdown by structure, direction, IV regime and DTE bucket; the A16-4 promotion gate per structure and direction; every suggestion with its paper result |
+
+The **Owner Console** (http://localhost:8080, [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md)) is the interactive companion: the same cockpit live via server-sent events, plus latency and missed trades (UI-31), the scanner (UI-30), trade stories and the options payoff view. It falls back to the last `status_snapshots` row when trader-core is down (UI-27).
 
 Thresholds on the panels match the tables in §1 and §2. Panels stay empty until the system has traded or replayed a day. The 4:30 PM static HTML report is still produced.
 

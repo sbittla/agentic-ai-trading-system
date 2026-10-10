@@ -46,8 +46,10 @@ SIGNAL_LOG_DAYS = 30
 class AlertService:
     def __init__(self, cfg: AlertsConfig, store: AlertStore, rest: AlpacaRest,
                  stream: AlpacaStream, telegram: Any, allowed_chats: set[str],
-                 now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+                 now: Callable[[], datetime] = lambda: datetime.now(UTC),
+                 options_line: Any = None) -> None:
         self.cfg = cfg
+        self.options_line = options_line          # OP-14 (None when options.enabled is off)
         self.store = store
         self.rest = rest
         self.stream = stream
@@ -198,8 +200,14 @@ class AlertService:
                 self.store.delete_rule(a.rule_id)
             if a.rule_id is None and (not signals_on or a.symbol not in watch):
                 continue
-            self.store.log_alert(a.ts, a.symbol, a.kind, a.price, a.text)
-            out.append(a.text)
+            text = a.text
+            if a.rule_id is None and self.options_line is not None:
+                line = await self.options_line.line(a.kind, a.symbol, a.price or 0.0,
+                                                    self.engine.state.get(a.symbol))
+                if line:
+                    text += "\n" + line
+            self.store.log_alert(a.ts, a.symbol, a.kind, a.price, text)
+            out.append(text)
         if any(a.consumed for a in alerts):
             await self._resubscribe()   # drop trade streams no rule needs any more
         if out and not self.muted():
@@ -361,7 +369,14 @@ def main(config_path: str | None = None) -> None:
     chat = _env("TELEGRAM_CHAT_ID")
     allowed = {c.strip() for c in (os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS") or chat)
                .split(",") if c.strip()}
+    line = None
+    if cfg.options.enabled:   # OP-14
+        from trader.alerts.options_line import OptionsLine
+        from trader.options.data import AlpacaOptionsClient
+
+        line = OptionsLine(cfg.options, AlpacaOptionsClient(key, secret, paper=True),
+                           lambda: datetime.now(UTC))
     svc = AlertService(cfg, AlertStore(cfg.db_path), AlpacaRest(key, secret, cfg.feed),
                        AlpacaStream(key, secret, cfg.feed), TelegramNotifier(token, chat),
-                       allowed)
+                       allowed, options_line=line)
     asyncio.run(svc.run())

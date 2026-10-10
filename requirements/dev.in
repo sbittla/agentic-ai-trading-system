@@ -1,5 +1,6 @@
 -c base.lock
 -c core.lock
+-c console.lock
 pytest>=8
 pytest-asyncio>=0.23
 hypothesis>=6
@@ -8,3 +9,7 @@ mypy>=1.10
 pip-tools>=7.4
 types-PyYAML
 pandas-stubs
+# the console tests (tests/unit/test_console.py)
+starlette>=0.40
+uvicorn>=0.30
+python-multipart>=0.0.9

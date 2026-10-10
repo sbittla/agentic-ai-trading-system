@@ -1,4 +1,4 @@
-"""NYSE sessions, macro events and trading windows (TW-1..TW-5, A10-1).
+"""NYSE sessions, macro events and trading windows (TW-1..TW-6, A10-1).
 
 ``MarketCalendar`` uses the offline ``exchange_calendars`` XNYS calendar (holidays and
 half days); live trading cross-checks it with Alpaca's calendar at pre-flight.
@@ -35,6 +35,8 @@ class MarketCalendar:
 
     def __init__(self, extra_closed: set[date] | None = None) -> None:
         self._extra_closed = extra_closed or set()
+        self._td_cache: dict[date, bool] = {}
+        self._session_cache: dict[date, Session] = {}
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -44,14 +46,23 @@ class MarketCalendar:
         return xcals.get_calendar("XNYS", start="2015-01-01")
 
     def is_trading_day(self, d: date) -> bool:
+        hit = self._td_cache.get(d)
+        if hit is not None:
+            return hit
         if d in self._extra_closed or d.weekday() >= 5:
-            return False
-        try:
-            return bool(self._xnys().is_session(d.isoformat()))
-        except Exception:   # noqa: BLE001 - outside calendar range: weekdays only
-            return True
+            ok = False
+        else:
+            try:
+                ok = bool(self._xnys().is_session(d.isoformat()))
+            except Exception:   # noqa: BLE001 - outside calendar range: weekdays only
+                ok = True
+        self._td_cache[d] = ok
+        return ok
 
     def session(self, d: date) -> Session:
+        cached = self._session_cache.get(d)
+        if cached is not None:
+            return cached
         if not self.is_trading_day(d):
             raise ValueError(f"{d} is not a trading day")
         try:
@@ -60,7 +71,9 @@ class MarketCalendar:
             c = cal.session_close(d.isoformat()).to_pydatetime().astimezone(ET)
         except Exception:   # noqa: BLE001 - outside calendar range
             o, c = et_datetime(d, time(9, 30)), et_datetime(d, time(16, 0))
-        return Session(day=d, open=o, close=c, early_close=c.time() < time(16, 0))
+        sess = Session(day=d, open=o, close=c, early_close=c.time() < time(16, 0))
+        self._session_cache[d] = sess
+        return sess
 
     def next_trading_day(self, d: date) -> date:
         n = d + timedelta(days=1)
@@ -96,6 +109,9 @@ class MacroCalendar:
     cpi: frozenset[date]
     jobs: frozenset[date]
     extra_caution: frozenset[date]
+    release_1000: frozenset[date] = frozenset()   # TW-6: 10:00 AM ET releases
+    speeches: tuple[datetime, ...] = ()           # TW-6: scheduled Fed speeches (ET)
+    releases_required: bool = False               # TW-6: True for a calendar file
 
     @classmethod
     def load(cls, path: str | Path) -> MacroCalendar:
@@ -111,8 +127,13 @@ class MacroCalendar:
                 items.extend(section)
             return frozenset(date.fromisoformat(str(x)) for x in items)
 
+        speeches = []
+        for x in raw.get("fed_speeches") or []:
+            dt = datetime.fromisoformat(str(x))
+            speeches.append(dt if dt.tzinfo else dt.replace(tzinfo=ET))
         return cls(dates("fomc_decision_days"), dates("cpi_release_days"),
-                   dates("jobs_report_days"), dates("extra_caution_days"))
+                   dates("jobs_report_days"), dates("extra_caution_days"),
+                   dates("ten_am_release_days"), tuple(sorted(speeches)), True)
 
     @classmethod
     def empty(cls) -> MacroCalendar:
@@ -131,6 +152,19 @@ class MacroCalendar:
         """A10 refuses to start if today is past the last listed CPI date."""
         last = self.last_cpi()
         return last is not None and d <= last
+
+    def is_release_1000(self, d: date) -> bool:
+        return d in self.release_1000
+
+    def speeches_on(self, d: date) -> list[datetime]:
+        return [x for x in self.speeches if to_et(x).date() == d]
+
+    def releases_cover(self, d: date) -> bool:
+        """TW-6: the 10:00 release list must reach at least to ``d`` (always true for the
+        in-memory empty calendar used by tests and synthetic replays)."""
+        if not self.releases_required:
+            return True
+        return bool(self.release_1000) and max(self.release_1000) >= d
 
     def next_fomc(self, d: date) -> date | None:
         future = sorted(x for x in self.fomc if x >= d)
@@ -155,6 +189,11 @@ class TradingWindows:
         self.a_swing_from = parse_hhmm(w.afternoon.swing_entries_from)
         self.a_swing_until = parse_hhmm(w.afternoon.swing_entries_until)
         self.a_flatten = parse_hhmm(w.afternoon.flatten_at)
+        md = w.macro_days
+        self.rel_from = parse_hhmm(md.release_block_from)
+        self.rel_until = parse_hhmm(md.release_block_until)
+        self.speech_before = timedelta(minutes=md.speech_block_before_min)
+        self.speech_after = timedelta(minutes=md.speech_block_after_min)
 
     # -- day properties -------------------------------------------------------------------
     def morning_entries_from(self, d: date) -> time:
@@ -182,14 +221,42 @@ class TradingWindows:
             return "afternoon"
         return None
 
+    def macro_block(self, now: datetime) -> str:
+        """TW-6: a reason string when ``now`` is inside a release or speech block, else ""."""
+        local = to_et(now)
+        d, t = local.date(), local.time()
+        if self.macro.is_release_1000(d) and self.rel_from <= t <= self.rel_until:
+            return (f"TW-6 10:00 release block {self.rel_from:%H:%M}-{self.rel_until:%H:%M}")
+        for sp in self.macro.speeches_on(d):
+            if sp - self.speech_before <= local <= sp + self.speech_after:
+                return f"TW-6 Fed speech at {to_et(sp):%H:%M}"
+        return ""
+
+    def macro_block_starts(self, d: date) -> list[datetime]:
+        """Start times of today's TW-6 blocks inside an entry window (break-even moves)."""
+        out = []
+        if self.macro.is_release_1000(d):
+            out.append(et_datetime(d, self.rel_from))
+        for sp in self.macro.speeches_on(d):
+            start = sp - self.speech_before
+            if self.window_at(start) is not None:
+                out.append(start)
+        return out
+
     def entry_window(self, now: datetime, style: Style) -> tuple[Window | None, str]:
         """Return (window, "") if ``style`` may enter at ``now``, else (None, reason)."""
         local = to_et(now)
         d, t = local.date(), local.time()
         if not self.cal.is_trading_day(d):
             return None, "not a trading day"
+        block = self.macro_block(now)
+        if block:
+            return None, block
         if style == "day":
             if self.morning_entries_from(d) <= t <= self.m_until:
+                if not self.macro.releases_cover(d):
+                    return None, ("TW-6 macro calendar has no 10:00 releases on or after "
+                                  "today: morning window blocked until it is updated")
                 return "morning", ""
             if self.afternoon_open(d) and self.a_from <= t <= self.a_day_until:
                 return "afternoon", ""

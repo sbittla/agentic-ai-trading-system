@@ -113,8 +113,11 @@ class AlpacaBroker:
     async def account(self) -> Account:
         a = await self._call(self.client.get_account)
         # SR-1: daytrade_count / daytrading_buying_power are not used
+        nmbp = getattr(a, "non_marginable_buying_power", None)
         return Account(equity=Decimal(str(a.equity)), cash=Decimal(str(a.cash)),
-                       buying_power=Decimal(str(a.buying_power)), status=_v(a.status))
+                       buying_power=Decimal(str(a.buying_power)), status=_v(a.status),
+                       multiplier=int(float(getattr(a, "multiplier", 1) or 1)),
+                       non_marginable_buying_power=Decimal(str(nmbp)) if nmbp else None)
 
     async def positions(self) -> list[BrokerPosition]:
         ps = await self._call(self.client.get_all_positions)

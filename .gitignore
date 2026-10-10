@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ---- Secrets and owner-specific config: never commit (SEC-6, SEC-18) ----
 # Env files anywhere (.env, .env.core, docker/.env, ...); only the *.example templates are tracked
 .env
@@ -39,42 +38,3 @@ __pycache__/
 
 # WSL-side Linux venv created by run.sh (the repo .venv is the Windows one)
 .venv-wsl/
-=======
-# ---- Secrets and owner-specific config: never commit (SEC-6, SEC-18) ----
-# Env files anywhere (.env, .env.core, docker/.env, ...); only the *.example templates are tracked
-.env
-.env.*
-!*.example
-secrets/*
-!secrets/README.md
-*.pem
-*.key
-*.p12
-*.pfx
-config/config.yaml
-config/alerts.yaml
-config/*.local.yaml
-.claude/settings.local.json
-
-# ---- Runtime and personal trading data (journal, bars, reports, backups) ----
-/data/
-/reports/
-/runs/
-/recordings/
-/backups/
-/llm_cache/
-*.db
-*.db-wal
-*.db-shm
-*.sqlite
-*.dump
-
-# ---- Python / tooling ----
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-*.egg-info/
-.mypy_cache/
-.ruff_cache/
->>>>>>> 9218670 (pushing the trading system canges)

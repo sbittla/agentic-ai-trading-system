@@ -110,6 +110,12 @@ class Account(Msg):
     buying_power: Decimal
     status: str = "ACTIVE"
     currency: str = "USD"
+    multiplier: int = 1                     # AC-2: 1 = cash account, 2/4 = margin
+    non_marginable_buying_power: Decimal | None = None
+
+    @property
+    def account_type(self) -> Literal["cash", "margin"]:
+        return "cash" if self.multiplier <= 1 else "margin"
 
 
 class BrokerPosition(Msg):
@@ -182,6 +188,7 @@ class Levels(Msg):
     low5d: float | None = None
     pullback_to_ema: bool = False         # a low within 0.5% of EMA20d/EMA50d, last 5 sessions
     history_days: int = 0
+    avg_gap20d: float | None = None       # RG-2: mean absolute opening gap %, 20 sessions
 
 
 class EventFlags(Msg):
@@ -337,7 +344,7 @@ class Command(Msg):
     arg: str = ""
     sender: str = "local"
     received_at: datetime
-    source: Literal["whatsapp", "telegram", "local"] = "local"
+    source: Literal["whatsapp", "telegram", "local", "console"] = "local"
 
 
 class HealthStatus(Msg):

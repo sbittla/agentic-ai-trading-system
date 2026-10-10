@@ -24,3 +24,31 @@ jobs_report_days:              # Employment Situation, 08:30 ET
 
 # Optional: other events the owner wants treated like CPI days (morning entries from 09:45)
 extra_caution_days: []
+
+# TW-6: 10:00 AM ET releases (ISM manufacturing and services, JOLTS, Conference Board consumer
+# confidence, University of Michigan sentiment). No new entries 09:57-10:05 on these days; open
+# day trades at +0.5R move to break-even first.
+# !! Generated from the usual release rules (ISM: 1st/3rd business day; JOLTS: Tuesday of the
+# !! first full week; Conference Board: last Tuesday; UMich: 2nd and 4th Friday). VERIFY each
+# !! month against https://www.ismworld.org, https://www.bls.gov/schedule and add or move dates.
+# A missing or out-of-date list blocks the morning window (TW-6), like the CPI rule for TW-5.
+ten_am_release_days:
+  2026: ["2026-10-23", "2026-10-27", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-13",
+         "2026-11-24", "2026-11-27", "2026-12-01", "2026-12-03", "2026-12-08", "2026-12-11",
+         "2026-12-29"]
+  2027: ["2027-01-04", "2027-01-05", "2027-01-06", "2027-01-08", "2027-01-22", "2027-01-26",
+         "2027-02-01", "2027-02-03", "2027-02-09", "2027-02-12", "2027-02-23", "2027-02-26",
+         "2027-03-01", "2027-03-03", "2027-03-09", "2027-03-12", "2027-03-30", "2027-04-01",
+         "2027-04-05", "2027-04-06", "2027-04-09", "2027-04-23", "2027-04-27", "2027-05-03",
+         "2027-05-04", "2027-05-05", "2027-05-14", "2027-05-25", "2027-05-28", "2027-06-01",
+         "2027-06-03", "2027-06-08", "2027-06-11", "2027-06-25", "2027-06-29", "2027-07-01",
+         "2027-07-06", "2027-07-09", "2027-07-23", "2027-07-27", "2027-08-02", "2027-08-03",
+         "2027-08-04", "2027-08-13", "2027-08-27", "2027-08-31", "2027-09-01", "2027-09-03",
+         "2027-09-07", "2027-09-10", "2027-09-24", "2027-09-28", "2027-10-01", "2027-10-05",
+         "2027-10-08", "2027-10-22", "2027-10-26", "2027-11-01", "2027-11-03", "2027-11-09",
+         "2027-11-12", "2027-11-26", "2027-11-30", "2027-12-01", "2027-12-03", "2027-12-07",
+         "2027-12-10", "2027-12-24", "2027-12-28"]
+
+# TW-6: scheduled Fed speeches inside a trading window (ET, "YYYY-MM-DDTHH:MM"). No new entries
+# from 3 minutes before to 5 minutes after. Add them from https://www.federalreserve.gov/newsevents.htm
+fed_speeches: []

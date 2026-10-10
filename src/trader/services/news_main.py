@@ -94,7 +94,44 @@ class NewsService:
                 wait = cfg.data.news_poll_min * 60 if active else 15 * 60
                 await asyncio.sleep(_until_next(now, wait))
 
-        await asyncio.gather(heartbeat(), poll())
+        def hot_tickers() -> list[str]:
+            """NW-1: tickers with an open position or on today's game plan (journal reads
+            granted to the news role by `trader migrate`)."""
+            from sqlalchemy import select
+
+            from trader.journal import schema as s
+
+            out: set[str] = set()
+            with contextlib.suppress(Exception):
+                for r in journal.query(select(s.positions.c.ticker).where(
+                        s.positions.c.closed_at.is_(None))):
+                    out.add(r["ticker"])
+            with contextlib.suppress(Exception):
+                today = to_et(datetime.now(UTC)).date()
+                for r in journal.query(select(s.game_plans.c.ticker).where(
+                        s.game_plans.c.date == today)):
+                    if r["ticker"]:
+                        out.add(r["ticker"])
+            return sorted(out)
+
+        async def hot_poll() -> None:
+            while True:
+                now = datetime.now(UTC)
+                local = to_et(now)
+                minute = local.hour * 60 + local.minute
+                in_window = cal.is_trading_day(local.date()) and (
+                    9 * 60 + 25 <= minute <= 10 * 60 + 35 or 14 * 60 + 55 <= minute <= 16 * 60)
+                if in_window:
+                    try:
+                        hot = await asyncio.to_thread(hot_tickers)
+                        for ef in await agent.hot_cycle(hot):
+                            await outbox.publish("news_flags", ef)
+                    except Exception as exc:   # noqa: BLE001
+                        log.warning("news_hot_cycle_failed", error=str(exc))
+                await asyncio.sleep(_until_next(now, cfg.data.news_poll_open_s if in_window
+                                                else 300))
+
+        await asyncio.gather(heartbeat(), poll(), hot_poll())
 
 
 def _until_next(now: datetime, seconds: int) -> float:

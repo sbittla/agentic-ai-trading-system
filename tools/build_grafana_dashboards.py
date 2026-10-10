@@ -419,9 +419,60 @@ ORDER BY plan_for DESC, rank""", w=14, h=10,
     return b
 
 
+def options() -> Board:
+    """A16-3: options suggestions (advisory, paper-tracked) by structure, direction, IV, DTE."""
+    b = Board("trader-options", "7. Options", time_from="now-90d", refresh="1m")
+    sug = f"FROM {J}.option_suggestions WHERE $__timeFilter(ts)"
+    closed = f"{sug} AND status = 'closed'"
+    b.add("Suggestions", f"SELECT count(*) AS suggestions {sug}", kind="stat", w=4, h=4,
+          thresholds=[("blue", None)])
+    b.add("Open (paper-tracked)", f"SELECT count(*) AS open {sug} AND status = 'open'",
+          kind="stat", w=4, h=4, thresholds=[("blue", None)])
+    b.add("Win rate", f"SELECT 100.0 * avg((pnl > 0)::int) AS win_rate {closed}",
+          kind="stat", w=4, h=4, unit="percent", decimals=0,
+          thresholds=[("red", None), ("orange", 35), ("green", 45)])
+    b.add("Expectancy (R)", f"SELECT avg(r_multiple) AS expectancy {closed}", kind="stat",
+          w=4, h=4, decimals=2, thresholds=[("red", None), ("orange", 0), ("green", 0.15)],
+          desc="R = max loss per contract. Promotion gate A16-4: >= +0.15R.")
+    b.add("Profit factor",
+          f"SELECT sum(pnl) FILTER (WHERE pnl > 0) / NULLIF(-sum(pnl) FILTER (WHERE pnl < 0), 0)"
+          f" AS profit_factor {closed}", kind="stat", w=4, h=4, decimals=2,
+          thresholds=[("red", None), ("orange", 1), ("green", 1.3)],
+          desc="Promotion gate A16-4: >= 1.3.")
+    b.add("View right, option lost",
+          f"SELECT count(*) FILTER (WHERE stock_view_right AND pnl <= 0) AS n {closed}",
+          kind="stat", w=4, h=4, thresholds=[("green", None), ("orange", 3)],
+          desc="The structure, not the view, lost (A16-2).")
+    iv = ("CASE WHEN iv_rank IS NULL THEN 'n/a' WHEN iv_rank < 30 THEN 'IV<30' "
+          "WHEN iv_rank <= 60 THEN 'IV30-60' ELSE 'IV>60' END")
+    dte = ("CASE WHEN expiry - (ts AT TIME ZONE 'America/New_York')::date <= 7 THEN '0-7' "
+           "WHEN expiry - (ts AT TIME ZONE 'America/New_York')::date <= 14 THEN '8-14' "
+           "WHEN expiry - (ts AT TIME ZONE 'America/New_York')::date <= 30 THEN '15-30' "
+           "ELSE '31+' END")
+    for by, col in (("structure", "structure"), ("direction", "direction"),
+                    ("IV regime", iv), ("DTE bucket", dte)):
+        b.add(f"By {by}", f"""
+SELECT {col} AS "{by}", count(*) AS graded, round(100.0 * avg((pnl > 0)::int), 0) AS win_pct,
+       round(avg(r_multiple)::numeric, 2) AS avg_r, round(sum(pnl), 2) AS pnl {closed}
+GROUP BY 1 ORDER BY 1""", w=6, h=8)
+    b.add("Promotion gate (A16-4: >= 40 graded, >= +0.15R, PF >= 1.3, >= 20 sessions)", f"""
+SELECT structure, direction, count(*) AS graded, round(avg(r_multiple)::numeric, 2) AS avg_r,
+       round((sum(pnl) FILTER (WHERE pnl > 0) / NULLIF(-sum(pnl) FILTER (WHERE pnl < 0), 0))
+             ::numeric, 2) AS pf,
+       count(DISTINCT (ts AT TIME ZONE 'America/New_York')::date) AS sessions
+FROM {J}.option_suggestions WHERE status = 'closed'
+GROUP BY 1, 2 ORDER BY 1, 2""", w=24, h=7)
+    b.add("Suggestions", f"""
+SELECT ts, ticker, direction, source, structure, expiry, contracts, entry_price, max_loss,
+       max_gain, iv_rank, status, mark AS pl_per_contract, pnl, round(r_multiple::numeric, 2) AS r,
+       exit_reason, stock_view_right
+{sug} ORDER BY ts DESC LIMIT 500""", w=24, h=12)
+    return b
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    for build in (today, pipeline, performance, llm, data_quality, ideas):
+    for build in (today, pipeline, performance, llm, data_quality, ideas, options):
         print(build().write().relative_to(OUT.parents[2]))
 
 

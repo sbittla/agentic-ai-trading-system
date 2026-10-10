@@ -29,9 +29,30 @@ One YAML file controls every tunable value. It is loaded once at start, snapshot
 | `storage` | Env var holding the Postgres URL, bar path, backup time | Env var present; Postgres reachable |
 | `services` | Heartbeat interval, staleness limits for news and notifier, notifier polling intervals | Approval polling ≤ 5 s |
 
+### Fields added by REQUIREMENTS 1.3, the options layer and the console
+
+Every field has a default (`src/trader/config.py`); add a section to `config/config.yaml` only to change it.
+
+| Section | Fields (default) | Validation at start |
+| --- | --- | --- |
+| `mode` | `day_trades` / `swing_trades` also accept `copilot` (CP-1); `account_type` `auto`/`cash`/`margin` (AC-1) | a set `account_type` that differs from Alpaca's blocks the day (AC-2) |
+| `latency` | `budget_s` 10, `prearm` true, `prearm_atr` 0.3, `prearm_tolerance_atr` 0.1, `approval_grace_s` 30 (LAT-1..LAT-4) | `budget_s` ≤ 30 |
+| `windows.macro_days` | `release_block_from` 09:57, `release_block_until` 10:05, `speech_block_before_min` 3, `speech_block_after_min` 5, `breakeven_at_r` 0.5 (TW-6) | block inside the morning window, from < until |
+| `regime` | `high_vol_atr_ratio` 1.5, `high_vol_gap_pct` 1.5, `risk_factor_high_vol` 0.5, `gap_and_go_max_normal_x` 2.0, `trend_day_vwap_pct` 80, `trend_day_high_after` 13:00 (RG-1..RG-3) | ratio ≥ 1.0; factor 0–1 |
+| `data` | `quote_max_age_s` 2 (DQ-8), `news_poll_open_s` 60 (NW-1), `sip_divergence_pct` 0.05, `sip_gate_days` 20 (DQ-6, DQ-7) | `news_poll_open_s` ≥ 30 (Finnhub limit); live on the IEX feed needs the `data_sip` gate |
+| `alerts` | `enabled` true, `schedule` `windows`/`all_day`, `per_symbol_cap` 3, `per_window_cap` 12, `top_n` 5, `digest_min` 10, `grade_window_min` 30, `min_hit_rate` 0.4, `min_graded` 50, `disabled_kinds` (AL-1..AL-7) | caps ≥ 1 |
+| `notifications` | `approval_chart` true, `approval_live_update_s` 5 (AP-1..AP-3), `notifier_down_after_s` 120 (NF-1) | — |
+| `execution` | `slippage_switch_r` 0.1, `slippage_window` 10 (EXQ-1); stops are always stop-market (EX-5, not configurable) | `slippage_switch_r` > 0 |
+| `shadow` | `enabled` true, `flag_after` 40 (SH-1, SH-2) | — |
+| `in_play` | `enabled` true, `top_n` 5, `rotation_days` 3, `rotation_lookback` 5, `symbols` (50 largest S&P 500 names) (UN-1, UN-2) | — |
+| `tax` | `set_aside_rate_pct` 30 (TX-1) | 0–60 |
+| `options` | `mode` `advisory` (`off`/`advisory`/`paper`/`live`), `account_level` 3, `from_alerts` false, `structures`, `allow_0dte` false, `day_dte` [5, 14], `swing_dte` [21, 45], `min_open_interest` 500, `min_volume` 100 (`min_volume_early` 20 before 10:00), `max_spread_pct` 5, `iv_rank_cheap` 30, `iv_rank_rich` 60, `max_premium_pct` 1, `max_contracts` 10, `avoid_earnings` true, `max_alerts_per_window` 6, `min_rr_at_t1` 1.5, `max_target_expected_move_x` 1.5 (OPTIONS_REQUIREMENTS §10) | `paper`/`live` need their gates (`options_paper`, `options_live`); structures within `account_level`; DTE ranges ordered. Option order placement is not built: every mode is advisory |
+
+`config/alerts.yaml` (standalone bot) gains `options:` with `enabled` false, `fixed_risk_usd` 200, `min_interval_s` 10, `day_dte` [5, 14] (OP-14).
+
 ## Environment variables (secrets)
 
-Each container reads only its own env file (SECURITY.md SEC-18). Templates are the `.env.<name>.example` files in the repo root (`trader init-env` creates the real files); how to obtain every value is in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md). Reddit values may be left empty (the news service runs without them).
+Each container reads only its own env file (SECURITY.md SEC-18). Templates are the `.env.<name>.example` files in the repo root (`./run.sh setup` creates the real files); how to obtain every value is in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md). Reddit values may be left empty (the news service runs without them).
 
 | File | Container | Variables |
 | --- | --- | --- |
@@ -41,7 +62,11 @@ Each container reads only its own env file (SECURITY.md SEC-18). Templates are t
 | `.env.notifier` | notifier | Telegram (default, ADR-014): `NOTIFIER_CHANNEL=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, optional `TELEGRAM_ALLOWED_CHAT_IDS`. WhatsApp: `TWILIO_SID`, `TWILIO_TOKEN`, `WHATSAPP_FROM`, `WHATSAPP_TO`, `WHATSAPP_ALLOWED_SENDERS`, optional `WHATSAPP_CONTENT_SID` / `WHATSAPP_CONTENT_VARIABLE`, `DATABASE_URL` (role `notifier_rw`) |
 | `.env.backup` | backup | `DATABASE_URL` (role `readonly`) |
 | `.env.replay` | replay, dev | None required (offline) |
-| `secrets/pg_<role>_password.txt` | postgres | Admin and the four role passwords, read at initialisation only |
+| `.env.console` | console | `DATABASE_URL` (role `console_rw`), `CORE_API_URL` (`http://trader-core:8081`), `OLLAMA_URL`, `CONSOLE_IDLE_MIN` (30), optional `CONSOLE_ASK_MODEL=0` to answer Ask with tables only |
+| `.env.alerts` | alerts (optional) | `ALPACA_KEY`, `ALPACA_SECRET` (its own Alpaca account), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| `.env.core` (optional extras) | trader-core | NF-1 e-mail fallback: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `FALLBACK_EMAIL_TO`; `ALPACA_OPTIONS_FEED` (`indicative` on the free plan, `opra` when paid); `CORE_API_PORT` (8081) |
+| `secrets/console_password.txt` | console | Owner Console login (at least 12 characters) |
+| `secrets/pg_<role>_password.txt` | postgres | Admin and the role passwords (core, news, notifier, readonly, console), read at initialisation; the console role is also created or updated by `upgrade.sql` on every start |
 | `docker/.env` | Compose | `PG_DATABASE`, `PG_ADMIN_USER`, `DB_ROLE_PREFIX`, `OLLAMA_MODEL` (template: `docker/.env.example`) |
 
 All of these are git-ignored. Live keys are loaded only when `mode.environment` is `live`.

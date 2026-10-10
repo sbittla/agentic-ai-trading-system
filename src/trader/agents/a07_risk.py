@@ -101,6 +101,9 @@ class RiskState:
     live_disabled: bool = False      # LL-6
     kill_switch: bool = False
     paused_styles: set[str] = field(default_factory=set)
+    regime: str = "normal"                 # RG-1 (set by the engine)
+    slippage_paper: set[str] = field(default_factory=set)   # EXQ-1: setups back to paper
+    news_blocked: set[str] = field(default_factory=set)     # NW-2: tickers blocked today
     reduced_since: Decimal | None = None   # RC-1: HWM at the time size was cut
     reduced_trades: list[float] = field(default_factory=list)
     history: list[ClosedTrade] = field(default_factory=list)
@@ -161,6 +164,7 @@ class RiskManager:
         st.window_entries.clear()
         st.window_losses.clear()
         st.halted = None
+        st.news_blocked = set()
         st.day_r_usd = equity * Decimal(str(self.cfg.risk.risk_per_trade_pct)) / 100
         self._update_reduced()
 
@@ -256,6 +260,11 @@ class RiskManager:
         r = self.cfg.risk
         pct = Decimal(str(r.drawdown_risk_per_trade_pct if self.state.reduced_since is not None
                           else r.risk_per_trade_pct))
+        if self.state.regime == "high-vol":   # RG-2: halve, never stacked below the RC-1 floor
+            hv = max(Decimal(str(r.risk_per_trade_pct)) * Decimal(
+                str(self.cfg.regime.risk_factor_high_vol)),
+                Decimal(str(r.drawdown_risk_per_trade_pct)))
+            pct = min(pct, hv)
         if not planned:   # DR-7
             pct *= Decimal(str(self.cfg.entries.unplanned_size_factor))
         return pct
@@ -292,7 +301,8 @@ class RiskManager:
             return "broker"   # the broker *is* the paper account
         st = self.state
         if (self.cfg.style_mode(style) == "paper" or st.live_disabled
-                or st.paper_only_until is not None or self.setup_status(setup) == "paper"):
+                or st.paper_only_until is not None or self.setup_status(setup) == "paper"
+                or setup in st.slippage_paper):
             return "paper"
         return "broker"
 
@@ -320,17 +330,19 @@ class RiskManager:
         # CK-2 inside an entry window (TW-1..TW-5)
         win, why = self.windows.entry_window(ctx.now, s.style)
         ok = win is not None and win == s.window
+        code2 = Reason.NT_MACRO_RELEASE if why.startswith("TW-6") else Reason.NT_WINDOW
         items.append(ChecklistItem(id="CK-2", passed=ok,
-                                   detail="" if ok else f"{Reason.NT_WINDOW}: {why or 'window'}"))
+                                   detail="" if ok else f"{code2}: {why or 'window'}"))
         # CK-3 filters MF-1..MF-5
-        failed = [k for k in ("MF-1", "MF-2", "MF-3", "MF-4", "MF-5")
-                  if not ctx.filters.get(k, False)]
+        failed = [k for k in ("MF-1", "MF-2", "MF-3", "MF-4", "MF-5", "MF-6")
+                  if not ctx.filters.get(k, k == "MF-6")]   # MF-6 absent = no quote rule
         if ctx.data_stale and "MF-5" not in failed:
             failed.append("MF-5")
+        code3 = (Reason.NT_NO_RELIABLE_QUOTE if "MF-6" in failed   # DQ-8
+                 else f"NT_FILTER_{failed[0].replace('-', '')}" if failed else "")
         items.append(ChecklistItem(
             id="CK-3", passed=not failed,
-            detail="" if not failed else
-            f"NT_FILTER_{failed[0].replace('-', '')}: failed {', '.join(failed)}"))
+            detail="" if not failed else f"{code3}: failed {', '.join(failed)}"))
         # CK-4 named playbook setup, right window/style, planned or flagged unplanned
         ok4, d4 = True, ""
         if s.setup not in SETUP_NAMES:
@@ -403,6 +415,8 @@ class RiskManager:
             return False, f"{Reason.NT_STALE_DATA}: data stale (A2-4)"
         if s.style in st.paused_styles:
             return False, f"{Reason.NT_STYLE_PAUSED}: {s.style} paused"
+        if g in st.news_blocked:
+            return False, f"{Reason.NT_NEWS_SHOCK}: negative news, 8-K or halt on {g} today"
         if st.halted is not None:
             return False, f"{st.halted}: trading halted for today"
         if st.trades_total_today >= r.max_trades_per_day:
@@ -441,6 +455,11 @@ class RiskManager:
     def evaluate(self, s: SetupTriggered, ctx: DecisionContext, review: Review | None,
                  comp: ComplianceResult | None, proposal_id: str) -> Decision:
         """Full checklist CK-1..CK-10 and size (A7-1, A7-2)."""
+        if s.context.get("direction") == "bear" or s.context.get("route") == "options_only":
+            return Decision(proposal_id=proposal_id, result="REJECT",   # BR-4, ADR-008
+                            reason_code=Reason.NT_OPTIONS_ONLY, checklist=(),
+                            detail="bearish signal: options only, never a stock order",
+                            entry=s.entry, stop=s.stop, t1=s.t1, t2=s.t2)
         items = self._items(s, ctx, review, comp)
         mode = self.cfg.style_mode(s.style)
         route = self.route_for(s.setup, s.style)
@@ -458,8 +477,9 @@ class RiskManager:
                                                 exposure, ctx.planned)
         if ok and qty < 1:
             ok, why = False, f"{Reason.SIZE_TOO_SMALL}: qty {qty} ({binding})"
-        if ok and mode == "approve" and route == "broker" and not ctx.approvals_available:
-            ok, why = False, f"{Reason.NT_HEALTH}: notifier down, approve mode blocked"
+        if ok and mode in ("approve", "copilot") and route == "broker" \
+                and not ctx.approvals_available:   # NF-1: no silent auto-reject
+            ok, why = False, f"{Reason.NT_NOTIFIER_DOWN}: notifier down, {mode} mode blocked"
         items.append(ChecklistItem(id="CK-10", passed=ok,
                                    detail=why or f"qty {qty}, risk ${risk_usd:.2f} ({pct}%), "
                                    f"binding {binding}"))
@@ -469,6 +489,8 @@ class RiskManager:
         reason = Reason.NEEDS_APPROVAL if needs else Reason.APPROVED
         if self.state.reduced_since is not None:
             reason = Reason.NEEDS_APPROVAL if needs else Reason.SIZE_REDUCED
+        if mode == "copilot" and route == "broker":   # CP-1: plan only, the owner executes
+            needs, reason = False, Reason.COPILOT_PLAN
         return Decision(proposal_id=proposal_id,
                         result="NEEDS_APPROVAL" if needs else "APPROVE",
                         reason_code=reason, qty=qty, risk_usd=risk_usd, risk_pct=pct,

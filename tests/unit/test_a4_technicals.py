@@ -104,7 +104,8 @@ def test_orb_fires_on_closed_breakout(sc: Scenario) -> None:
     assert s.entry - s.trigger <= Decimal(str(0.25 * s.atr5)) + Decimal("0.005")
     assert s.t2 - s.entry == (s.entry - s.stop) * 2 or abs(
         (s.t2 - s.entry) - 2 * (s.entry - s.stop)) <= Decimal("0.01")
-    assert 0 <= s.score <= 100 and set(s.filters) == {"MF-1", "MF-2", "MF-3", "MF-4", "MF-5"}
+    assert 0 <= s.score <= 100
+    assert set(s.filters) == {"MF-1", "MF-2", "MF-3", "MF-4", "MF-5", "MF-6"}
 
 
 @pytest.mark.rule("A4-3")

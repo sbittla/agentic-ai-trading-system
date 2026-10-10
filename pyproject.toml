@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 news = ["praw>=7.7", "transformers>=4.44", "torch>=2.3"]   # news-sentiment image only (FinBERT)
 notifier = ["twilio>=9.0"]                                  # notifier image only
+console = ["starlette>=0.40", "uvicorn>=0.30", "python-multipart>=0.0.9"]  # console image only
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10",
        "pip-tools>=7.4", "types-PyYAML", "pandas-stubs"]
 
@@ -35,7 +36,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-trader = ["prompts/*/*.md"]
+trader = ["prompts/*/*.md", "console/static/*"]
 
 [tool.ruff]
 line-length = 100

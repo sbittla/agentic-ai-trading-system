@@ -85,6 +85,8 @@ def cmd_run(a: argparse.Namespace) -> int:
         from trader.services.news_main import main
     elif a.service == "alerts":
         return cmd_alerts(a)
+    elif a.service == "console":
+        from trader.console.main import main
     else:
         from trader.services.notifier_main import main
     main(a.config)
@@ -255,12 +257,81 @@ def cmd_replay(a: argparse.Namespace) -> int:
     return 0
 
 
+def _history_data(cfg: config_mod.Config, days: int) -> tuple[dict[date, list[Any]],
+                                                             dict[str, list[Any]], list[Any]]:
+    """BT-6: real minute bars from the bar store (``trader fetch-history``), by ET day."""
+    from trader.data.store import BarStore, resolve_bars_path
+    from trader.timeutil import et_date
+
+    store = BarStore(resolve_bars_path(cfg.storage.bars_path))
+    daily = {sym: store.read("daily", sym) for sym in store.symbols("daily")}
+    by_day: dict[date, list[Any]] = {}
+    for sym in store.symbols("minute"):
+        for b in store.read("minute", sym):
+            by_day.setdefault(et_date(b.ts), []).append(b)
+    days_sorted = sorted(by_day)
+    if len(days_sorted) < 21:
+        raise SystemExit(f"bar store has {len(days_sorted)} days of minute bars; run "
+                         "`trader fetch-history --minute-days 500` first (needs >= 21)")
+    seed_days, run_days = days_sorted[:20], days_sorted[20:][-days:]
+    seed = [b for d in seed_days for b in by_day[d]]
+    minutes = {d: sorted(by_day[d], key=lambda b: (b.ts, b.symbol)) for d in run_days}
+    return minutes, daily, seed
+
+
+def _bt6_breakdown(journal_path: Path) -> dict[str, Any]:
+    """BT-6: expectancy by setup, window and regime from a replay journal."""
+    from trader.journal import schema as s
+    from trader.journal.store import SqlJournal
+    from trader.timeutil import et_date
+
+    j = SqlJournal(f"sqlite:///{journal_path.as_posix()}", create=False)
+    regime = {r["date"]: r["regime"] for r in j.rows(s.regime_daily, order_by="id")}
+    groups: dict[str, dict[str, list[float]]] = {"setup": {}, "window": {}, "regime": {}}
+    for p in j.closed_positions():
+        r = float(p.get("r_multiple") or 0)
+        groups["setup"].setdefault(p.get("setup") or "?", []).append(r)
+        groups["window"].setdefault(p.get("window") or "?", []).append(r)
+        groups["regime"].setdefault(regime.get(et_date(p["closed_at"]), "normal"), []).append(r)
+    return {g: {k: {"trades": len(v), "expectancy_r": round(sum(v) / len(v), 3)}
+                for k, v in d.items()} for g, d in groups.items()}
+
+
 def cmd_backtest(a: argparse.Namespace) -> int:
     from trader.backtest.synthetic import generate
     from trader.backtest.walkforward import walk_forward
 
     configure_logging("WARNING", json_logs=False)
     cfg = _cfg(a.config)
+    if a.history:   # BT-6: the playbook on real minute bars before paper trading
+        from trader.backtest.engine import run_replay
+
+        minutes, daily, seed = _history_data(cfg, a.days)
+        out = Path(a.out or f"runs/{date.today().isoformat()}_backtest_history")
+        if a.walk_forward:
+            res = asyncio.run(walk_forward(cfg, minutes, daily, out, in_sample=a.in_sample,
+                                           out_sample=a.out_sample, news={},
+                                           seed_minutes=seed))
+            (out / "walk_forward.json").write_text(json.dumps(res, indent=1, default=str),
+                                                   encoding="utf-8")
+            print(json.dumps({k: res[k] for k in ("oos", "unstable_params", "pass_bar")},
+                             indent=1, default=str))
+            return 0
+        rr = asyncio.run(run_replay(cfg, minutes=minutes, daily=daily, llm=_llm("rules", cfg),
+                                    out_dir=out, news={}, approvals="yes", seed_minutes=seed,
+                                    name=out.name))
+        breakdown = {}
+        jp = next(out.glob("*.db"), None)
+        if jp is not None:
+            breakdown = _bt6_breakdown(jp)
+            (out / "bt6_breakdown.json").write_text(json.dumps(breakdown, indent=1),
+                                                    encoding="utf-8")
+        m = rr.metrics
+        print(json.dumps({"days": len(minutes), **{k: m[k] for k in (
+            "trades", "win_rate", "expectancy_r", "profit_factor", "max_drawdown_pct")},
+            "by": breakdown}, indent=1, default=str))
+        print(f"run folder: {out}")
+        return 0
     data = generate(date.fromisoformat(a.start), a.synthetic, seed=a.seed)
     out = Path(a.out or f"runs/{date.today().isoformat()}_backtest")
     if a.walk_forward:
@@ -275,6 +346,99 @@ def cmd_backtest(a: argparse.Namespace) -> int:
     a.synthetic, a.llm, a.approvals, a.compare = a.synthetic, "rules", "yes", None
     a.mode, a.cache, a.day = None, "llm_cache", []
     return cmd_replay(a)
+
+
+def _journal_from_env(a: argparse.Namespace) -> Any:
+    for f in getattr(a, "env_file", None) or []:
+        load_env_file(f)
+    return _journal(create=False)
+
+
+def cmd_import_trades(a: argparse.Namespace) -> int:
+    """WS-9: other-broker trades -> journal; losses become wash-sale locks."""
+    from trader.agents import external_trades as ext
+    from trader.agents.a12_compliance import ComplianceGuard
+    from trader.calendar import MarketCalendar
+
+    cfg = _cfg(a.config)
+    j = _journal_from_env(a)
+    trades, skipped = ext.parse_csv(Path(a.file).read_text(encoding="utf-8-sig"), a.broker)
+    now = datetime.now(UTC)
+    new = ext.store(j, trades, a.broker, a.file, now)
+    guard = ComplianceGuard(cfg, MarketCalendar(), j)
+    guard.load_from_journal(now)
+    created, warnings = ext.apply_locks(guard, ext.load(j), now, cfg.wash_sale.lock_days,
+                                        cfg.canonical)
+    print(f"{len(trades)} trades read ({new} new, {len(skipped)} rows skipped); "
+          f"{created} wash-sale lock(s) created (WS-9)")
+    for w in warnings:
+        print(f"WARNING: {w}")
+    for sk in skipped[:10]:
+        print(f"  skipped {sk}")
+    return 0
+
+
+def cmd_restore_test(a: argparse.Namespace) -> int:
+    """OPS-1: compare a scratch restore (JSON from the restore-test container) with
+    production and record the result."""
+    from sqlalchemy import func, select
+
+    from trader.agents import ops
+    from trader.journal import schema as s
+
+    j = _journal_from_env(a)
+    raw = sys.stdin.read() if a.report == "-" else Path(a.report).read_text(encoding="utf-8")
+    line = next((ln for ln in reversed(raw.strip().splitlines()) if ln.startswith("{")), "{}")
+    restored = json.loads(line)
+    live: dict[str, int] = {}
+    with j.engine.connect() as c:
+        for t in s.metadata.sorted_tables:
+            live[t.name] = int(c.execute(select(func.count()).select_from(t)).scalar() or 0)
+        last = c.execute(select(func.max(s.events.c.ts))).scalar()
+    from trader.journal.schema import UtcDateTime
+
+    last_dt = UtcDateTime().process_result_value(last, j.engine.dialect) if last else None
+    ok, problems = ops.compare_restore(restored, live, last_dt)
+    ops.record_check(j, "restore_test", ok, {"problems": problems,
+                                             "file": restored.get("file")}, datetime.now(UTC))
+    print(("PASS" if ok else "FAIL") + f" restore test of {restored.get('file', '?')}")
+    for p in problems:
+        print(f"  - {p}")
+    return 0 if ok else 1
+
+
+def cmd_drill(a: argparse.Namespace) -> int:
+    """OPS-2: walk through the monthly emergency drill on the paper account and record it."""
+    from trader.agents import ops
+
+    j = _journal_from_env(a)
+    results: dict[str, Any] = {}
+    print("Monthly emergency drill (OPS-2): run it on the PAPER account with one position "
+          "open.\n")
+    for key, question in ops.DRILL_STEPS:
+        ans = input(f"{question} [y/n] ").strip().lower()
+        note = input("  note (optional): ").strip()
+        results[key] = {"ok": ans.startswith("y"), "note": note}
+    passed = all(v["ok"] for v in results.values())
+    ops.record_check(j, "drill", passed, results, datetime.now(UTC))
+    print("drill recorded: " + ("PASS" if passed else "FAIL (see notes)"))
+    return 0 if passed else 1
+
+
+def cmd_data_gate(a: argparse.Namespace) -> int:
+    """DQ-7: evaluate IEX vs SIP divergence; record gate 'data_sip' when it passes."""
+    from trader.agents import ops
+    from trader.journal import schema as s
+
+    cfg = _cfg(a.config)
+    j = _journal_from_env(a)
+    ok, detail = ops.data_gate(j.rows(s.data_divergence), cfg.data.sip_gate_days,
+                               cfg.data.sip_divergence_pct, cfg.data.sip_divergence_share_pct)
+    print(("PASS " if ok else "NOT YET ") + detail)
+    if ok and a.record:
+        j.incident(datetime.now(UTC), "GATE_PASSED", f"data_sip: {detail}")
+        print("gate data_sip recorded")
+    return 0 if ok else 1
 
 
 def cmd_eval(a: argparse.Namespace) -> int:
@@ -331,7 +495,16 @@ def cmd_backup(a: argparse.Namespace) -> int:
             url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://")
             out = dest / f"trader_{now:%Y%m%d}.dump"
             pg_dump = shutil.which("pg_dump") or "pg_dump"
-            subprocess.run([pg_dump, "--format=custom", f"--file={out}", url], check=False)  # noqa: S603
+            res = subprocess.run([pg_dump, "--format=custom", f"--file={out}", url],  # noqa: S603
+                                 check=False, capture_output=True, text=True)
+            if res.returncode != 0:
+                # never report a failed backup as healthy (OPS-1 found this silently failing)
+                print(f"BACKUP FAILED: pg_dump exit {res.returncode}: {res.stderr.strip()[:500]}",
+                      file=sys.stderr, flush=True)
+                out.unlink(missing_ok=True)
+                last = None   # retry in a minute
+                time.sleep(60)
+                continue
             bars = Path("/app/data/bars")
             if bars.exists():
                 shutil.copytree(bars, dest / f"bars_{now:%Y%m%d}", dirs_exist_ok=True)
@@ -518,7 +691,9 @@ def cmd_check(a: argparse.Namespace) -> int:
 
 
 ENV_ROLES = {".env.core": ("core", "core_rw"), ".env.news": ("news", "news_rw"),
-             ".env.notifier": ("notifier", "notifier_rw"), ".env.backup": ("readonly", "readonly")}
+             ".env.notifier": ("notifier", "notifier_rw"), ".env.backup": ("readonly", "readonly"),
+             ".env.console": ("console", "console_rw")}
+OPTIONAL_ENV = (".env.alerts", ".env.console")   # created only when their template exists
 REQUIRED_KEYS = {".env.core": ("ALPACA_PAPER_KEY", "ALPACA_PAPER_SECRET"),
                  ".env.news": ("FINNHUB_TOKEN", "SEC_USER_AGENT"),
                  ".env.notifier": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")}
@@ -569,16 +744,17 @@ def cmd_init_env(a: argparse.Namespace) -> int:
 
     # secrets/: one random password per role, plus the Grafana admin login
     alphabet = string.ascii_letters + string.digits
-    for name in (*(f"pg_{r}" for r in ("admin", "core", "news", "notifier", "readonly")),
-                 "grafana_admin"):
+    for name in (*(f"pg_{r}" for r in ("admin", "core", "news", "notifier", "readonly",
+                                       "console")),
+                 "grafana_admin", "console"):
         write_new(root / "secrets" / f"{name}_password.txt",
                   "".join(pysecrets.choice(alphabet) for _ in range(28)))
 
     # env files with the database URL filled in
     for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay",
-                 ".env.alerts"):
-        if name == ".env.alerts" and not (root / f"{name}.example").exists():
-            continue   # optional: standalone price alerts
+                 *OPTIONAL_ENV):
+        if name in OPTIONAL_ENV and not (root / f"{name}.example").exists():
+            continue   # optional: standalone price alerts, owner console
         t = (root / f"{name}.example").read_text(encoding="utf-8")
         if name in ENV_ROLES:
             role, user = ENV_ROLES[name]
@@ -608,8 +784,7 @@ def cmd_init_env(a: argparse.Namespace) -> int:
         print("still to fill in (docs/ACCOUNT_SETUP.md):")
         for m in missing:
             print(f"  - {m}")
-    print("then: trader check-connections --service core --service news --service notifier "
-          "--env-file .env.core --env-file .env.news --env-file .env.notifier")
+    print("then: ./run.sh connections   (read-only checks of every key, in a container)")
     return 0
 
 
@@ -646,7 +821,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("--service", choices=["core", "news", "notifier", "alerts"], required=True)
+    r.add_argument("--service", choices=["core", "news", "notifier", "alerts", "console"],
+                   required=True)
     r.add_argument("--alerts-config", default=None)
     r.set_defaults(fn=cmd_run)
     al = sub.add_parser("alerts", help="lightweight Telegram price alerts (no LLM/Postgres)")
@@ -712,7 +888,27 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--in-sample", type=int, default=40)
     bt.add_argument("--out-sample", type=int, default=10)
     bt.add_argument("--out", default=None)
+    bt.add_argument("--history", action="store_true",
+                    help="BT-6: real minute bars from the bar store instead of synthetic")
+    bt.add_argument("--days", type=int, default=500)
     bt.set_defaults(fn=cmd_backtest)
+    it = sub.add_parser("import-trades", help="WS-9: other-broker trades for wash sales")
+    it.add_argument("file")
+    it.add_argument("--broker", default="generic",
+                    choices=["generic", "robinhood", "webull", "fidelity", "schwab"])
+    it.add_argument("--env-file", action="append")
+    it.set_defaults(fn=cmd_import_trades)
+    rt = sub.add_parser("restore-test", help="OPS-1: compare a scratch restore with production")
+    rt.add_argument("--report", default="-", help="JSON from the restore-test container")
+    rt.add_argument("--env-file", action="append")
+    rt.set_defaults(fn=cmd_restore_test)
+    dr = sub.add_parser("drill", help="OPS-2: record the monthly emergency drill")
+    dr.add_argument("--env-file", action="append")
+    dr.set_defaults(fn=cmd_drill)
+    dg = sub.add_parser("data-gate", help="DQ-7: IEX vs SIP divergence gate")
+    dg.add_argument("--record", action="store_true")
+    dg.add_argument("--env-file", action="append")
+    dg.set_defaults(fn=cmd_data_gate)
     ev = sub.add_parser("eval-prompts")
     ev.add_argument("--llm", choices=["rules", "ollama", "cached"], default="ollama")
     ev.add_argument("--good", type=int, default=50)
