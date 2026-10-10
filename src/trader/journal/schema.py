@@ -314,6 +314,121 @@ outbox = Table("outbox", metadata,
                Column("payload", JSON, nullable=False),
                Column("consumed_at", UtcDateTime))
 
+# --- REQUIREMENTS 1.3 ------------------------------------------------------------------------
+
+latency = Table("latency", metadata, _id(),                       # LAT-1, LAT-4
+                Column("proposal_id", String(64), index=True),
+                Column("setup_id", String(64)),
+                Column("ticker", String(8)), Column("setup", String(32)),
+                Column("mode", String(12)),
+                Column("trigger_ts", UtcDateTime, index=True),
+                Column("order_ts", UtcDateTime),
+                Column("latency_s", Float), Column("model_s", Float),
+                Column("owner_s", Float),
+                Column("prearmed", Boolean),
+                Column("outcome", String(16)),        # ORDER | MISSED
+                Column("reason_code", String(32)))
+
+shadow_trades = Table("shadow_trades", metadata, _id(),           # SH-1, SH-2
+                      Column("setup_id", String(64), index=True),
+                      Column("proposal_id", String(64)),
+                      Column("ts", UtcDateTime, index=True),
+                      Column("ticker", String(8)), Column("setup", String(32)),
+                      Column("window", String(10)), Column("style", String(6)),
+                      Column("direction", String(5)),
+                      Column("taken", Boolean),
+                      Column("reason_code", String(32)),
+                      Column("entry", Money), Column("stop", Money),
+                      Column("t1", Money), Column("t2", Money),
+                      Column("filled_at", UtcDateTime), Column("closed_at", UtcDateTime),
+                      Column("exit_price", Money), Column("exit_reason", String(24)),
+                      Column("r_multiple", Float), Column("status", String(10)))
+
+alerts_log = Table("alerts_log", metadata, _id(),                 # AL-1..AL-7
+                   Column("ts", UtcDateTime, index=True),
+                   Column("ticker", String(8), index=True), Column("kind", String(24)),
+                   Column("direction", String(5)),
+                   Column("label", String(10)),        # raw | qualified
+                   Column("checklist_score", Integer), Column("first_failed", String(48)),
+                   Column("quality", Float),
+                   Column("delivery", String(10)),     # sent | digest | capped | off | muted
+                   Column("price", Money), Column("stop", Money), Column("t1", Money),
+                   Column("text", Text), Column("plan_json", JSON),
+                   Column("hit", Boolean), Column("graded_at", UtcDateTime))
+
+regime_daily = Table("regime_daily", metadata, _id(),             # RG-1
+                     Column("date", Date, index=True),
+                     Column("regime", String(10)),
+                     Column("spy_atr_ratio", Float), Column("spy_gap_pct", Float),
+                     Column("detail", Text))
+
+data_divergence = Table("data_divergence", metadata, _id(),       # DQ-6
+                        Column("date", Date, index=True),
+                        Column("ticker", String(8)),
+                        Column("iex_or_high", Float), Column("sip_or_high", Float),
+                        Column("iex_or_low", Float), Column("sip_or_low", Float),
+                        Column("or_diff_pct", Float), Column("iex_volume_share_pct", Float),
+                        Column("setups_checked", Integer), Column("setups_within", Integer))
+
+external_trades = Table("external_trades", metadata, _id(),       # WS-9
+                        Column("imported_at", UtcDateTime),
+                        Column("broker", String(16)), Column("account", String(32)),
+                        Column("ts", UtcDateTime, index=True),
+                        Column("ticker", String(8), index=True),
+                        Column("side", String(4)), Column("qty", Float),
+                        Column("price", Money), Column("fees", Money),
+                        Column("source_file", Text),
+                        Column("row_hash", String(64), unique=True))
+
+owner_notes = Table("owner_notes", metadata, _id(),               # UI-29 (console writes)
+                    Column("ts", UtcDateTime, index=True),
+                    Column("ref_type", String(16)), Column("ref_id", String(64), index=True),
+                    Column("tags", JSON), Column("note", Text),
+                    Column("screenshot_b64", Text))
+
+in_play = Table("in_play", metadata, _id(),                       # UN-1, UN-2
+                Column("date", Date, index=True),
+                Column("ticker", String(8)),
+                Column("gap_pct", Float), Column("pm_volume_ratio", Float),
+                Column("news", Boolean), Column("rank", Integer),
+                Column("on_list", Boolean))
+
+ops_checks = Table("ops_checks", metadata, _id(),                 # OPS-1, OPS-2
+                   Column("ts", UtcDateTime, index=True),
+                   Column("kind", String(16)),          # restore_test | drill
+                   Column("passed", Boolean),
+                   Column("detail", JSON))
+
+options_iv_daily = Table("options_iv_daily", metadata, _id(),     # A13-3, A13-6
+                         Column("date", Date, index=True),
+                         Column("ticker", String(8), index=True),
+                         Column("atm_iv_30d", Float), Column("iv_rank", Float),
+                         Column("iv_pct", Float), Column("expected_move_30d", Float),
+                         Column("history_days", Integer))
+
+option_suggestions = Table("option_suggestions", metadata, _id(),  # A14, A16
+                           Column("suggestion_id", String(64), unique=True),
+                           Column("ts", UtcDateTime, index=True),
+                           Column("ticker", String(8), index=True),
+                           Column("direction", String(5)), Column("source", String(24)),
+                           Column("style", String(6)), Column("structure", String(16)),
+                           Column("expiry", Date), Column("legs_json", JSON),
+                           Column("contracts", Integer),
+                           Column("entry_price", Money),        # net debit (+) / credit (-)
+                           Column("max_loss", Money), Column("max_gain", Money),
+                           Column("breakeven", Float),
+                           Column("underlying", Float), Column("invalidation", Float),
+                           Column("t1", Float), Column("iv_rank", Float),
+                           Column("detail_json", JSON), Column("text", Text),
+                           Column("status", String(10)),        # open | closed
+                           Column("mark", Money), Column("marked_at", UtcDateTime),
+                           Column("exit_price", Money), Column("exit_reason", String(24)),
+                           Column("closed_at", UtcDateTime),
+                           Column("pnl", Money), Column("r_multiple", Float),
+                           Column("stock_view_right", Boolean))
+
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
 NEWS_WRITES = ("news_items", "event_flags", "llm_calls")
 NOTIFIER_WRITES = ("commands",)
+CONSOLE_WRITES = ("owner_notes",)
+NEWS_READS = ("positions", "game_plans")   # NW-1: tickers with a position or a plan setup

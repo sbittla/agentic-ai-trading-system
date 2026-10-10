@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from trader.timeutil import parse_hhmm
 
-StyleMode = Literal["paper", "approve", "auto"]
+StyleMode = Literal["paper", "approve", "auto", "copilot"]   # copilot: CP-1
 
 
 class ConfigError(Exception):
@@ -38,6 +38,7 @@ class ModeCfg(_Frozen):
     environment: Literal["paper", "live"] = "paper"
     day_trades: StyleMode = "approve"
     swing_trades: StyleMode = "approve"
+    account_type: Literal["auto", "cash", "margin"] = "auto"   # AC-1/AC-2; auto = from Alpaca
 
 
 class CorrelatedGroup(_Frozen):
@@ -77,6 +78,11 @@ class AfternoonWindow(_Frozen):
 class MacroDays(_Frozen):
     cpi_jobs_morning_entries_from: str = "09:45"
     skip_afternoon_on_fomc: bool = True
+    release_block_from: str = "09:57"      # TW-6: 10:00 AM releases
+    release_block_until: str = "10:05"
+    speech_block_before_min: int = 3       # TW-6: scheduled Fed speeches inside a window
+    speech_block_after_min: int = 5
+    breakeven_at_r: float = 0.5            # TW-6: open day trades at +0.5R move to break-even
 
 
 class WindowsCfg(_Frozen):
@@ -166,6 +172,11 @@ class DataCfg(_Frozen):
     alpaca_feed: Literal["iex", "sip"] = "iex"
     stale_after_sec: int = 60
     news_poll_min: int = 15
+    news_poll_open_s: int = 60             # NW-1: tickers with a position or a plan setup
+    quote_max_age_s: float = 2.0           # DQ-8 / MF-6
+    sip_divergence_pct: float = 0.05       # DQ-6 / DQ-7
+    sip_divergence_share_pct: float = 95.0  # DQ-7: share of setups within the tolerance
+    sip_gate_days: int = 20                # DQ-7
     reddit_subreddits: tuple[str, ...] = ("stocks", "investing", "wallstreetbets", "StockMarket")
     sec_user_agent: str = "agentic-ai-trading-system owner owner@example.com"
 
@@ -188,6 +199,103 @@ class LlmCfg(_Frozen):
 class NotificationsCfg(_Frozen):
     whatsapp_enabled: bool = True
     approval_timeout_sec: int = 90
+    approval_chart: bool = True            # AP-1
+    approval_live_update_s: int = 5        # AP-3
+    notifier_down_after_s: int = 120       # NF-1
+
+
+class LatencyCfg(_Frozen):
+    """LAT-1..LAT-4."""
+
+    budget_s: float = 10.0
+    prearm: bool = True
+    prearm_atr: float = 0.3
+    prearm_tolerance_atr: float = 0.1
+    approval_grace_s: int = 30
+
+
+class RegimeCfg(_Frozen):
+    """RG-1..RG-3."""
+
+    high_vol_atr_ratio: float = 1.5
+    high_vol_gap_pct: float = 1.5          # SPY opening gap that alone marks a high-vol day
+    risk_factor_high_vol: float = 0.5
+    gap_and_go_max_normal_x: float = 2.0
+    trend_day_vwap_pct: float = 80.0
+    trend_day_high_after: str = "13:00"
+
+
+class AlertsCfg(_Frozen):
+    """Owner alerts produced by trader-core (AL-1..AL-7)."""
+
+    enabled: bool = True
+    schedule: Literal["windows", "all_day"] = "windows"
+    per_symbol_cap: int = 3
+    per_window_cap: int = 12
+    top_n: int = 5
+    digest_min: int = 10
+    grade_window_min: int = 30
+    min_hit_rate: float = 0.40
+    min_graded: int = 50
+    disabled_kinds: tuple[str, ...] = ()
+
+
+class ExecutionCfg(_Frozen):
+    """EX-5 / EXQ-1 (stops are always stop-market; not configurable)."""
+
+    slippage_switch_r: float = 0.1
+    slippage_window: int = 10
+
+
+class ShadowCfg(_Frozen):
+    """SH-1 / SH-2."""
+
+    enabled: bool = True
+    flag_after: int = 40
+
+
+class InPlayCfg(_Frozen):
+    """UN-1 / UN-2: the 50 largest S&P 500 names (watch only; edit as rankings change)."""
+
+    enabled: bool = True
+    top_n: int = 5
+    rotation_days: int = 3
+    rotation_lookback: int = 5
+    symbols: tuple[str, ...] = (
+        "NVDA", "AAPL", "GOOGL", "MSFT", "AMZN", "META", "AVGO", "TSLA", "MU", "LLY",
+        "BRK.B", "AMD", "JPM", "WMT", "V", "XOM", "JNJ", "INTC", "MA", "ABBV", "ORCL", "COST",
+        "NFLX", "PLTR", "HD", "PG", "BAC", "UNH", "KO", "CVX", "GE", "CSCO", "PM", "WFC",
+        "CRM", "IBM", "MS", "ABT", "AXP", "GS", "MCD", "LIN", "CAT", "MRK", "TMO", "PEP",
+        "DIS", "ISRG", "UBER", "QCOM")
+
+
+class TaxCfg(_Frozen):
+    set_aside_rate_pct: float = 30.0       # TX-1 (an estimate, not tax advice)
+
+
+class OptionsCfg(_Frozen):
+    """Options suggestions (OPTIONS_REQUIREMENTS.md §10). Advisory first."""
+
+    mode: Literal["off", "advisory", "paper", "live"] = "advisory"
+    account_level: int = 3
+    from_alerts: bool = False
+    structures: tuple[str, ...] = ("long_call", "long_put", "call_debit", "put_debit",
+                                   "put_credit", "call_credit")
+    allow_0dte: bool = False
+    day_dte: tuple[int, int] = (5, 14)
+    swing_dte: tuple[int, int] = (21, 45)
+    min_open_interest: int = 500
+    min_volume: int = 100
+    min_volume_early: int = 20
+    max_spread_pct: float = 5.0
+    iv_rank_cheap: float = 30
+    iv_rank_rich: float = 60
+    max_premium_pct: float = 1.0
+    max_contracts: int = 10
+    avoid_earnings: bool = True
+    max_alerts_per_window: int = 6
+    min_rr_at_t1: float = 1.5
+    max_target_expected_move_x: float = 1.5
 
 
 class StorageCfg(_Frozen):
@@ -223,6 +331,14 @@ class Config(_Frozen):
     notifications: NotificationsCfg = NotificationsCfg()
     storage: StorageCfg = StorageCfg()
     services: ServicesCfg = ServicesCfg()
+    latency: LatencyCfg = LatencyCfg()
+    regime: RegimeCfg = RegimeCfg()
+    alerts: AlertsCfg = AlertsCfg()
+    execution: ExecutionCfg = ExecutionCfg()
+    shadow: ShadowCfg = ShadowCfg()
+    in_play: InPlayCfg = InPlayCfg()
+    tax: TaxCfg = TaxCfg()
+    options: OptionsCfg = OptionsCfg()
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
@@ -361,6 +477,46 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
         p.append("notifications.approval_timeout_sec <= 120")
     if cfg.services.notifier_poll_sec.approval > 5:
         p.append("services.notifier_poll_sec.approval <= 5")
+    # REQUIREMENTS 1.3
+    try:
+        mb = w.macro_days
+        if not _t(mb.release_block_from) < _t(mb.release_block_until):
+            p.append("windows.macro_days: release_block_from < release_block_until (TW-6)")
+        _t(cfg.regime.trend_day_high_after)
+    except (ValueError, AttributeError) as exc:
+        p.append(f"windows.macro_days / regime: times must be HH:MM ({exc})")
+    if not 0 < cfg.latency.budget_s <= 30:
+        p.append("latency.budget_s in (0, 30] (LAT-1)")
+    if not 0 < cfg.latency.prearm_tolerance_atr <= cfg.latency.prearm_atr:
+        p.append("latency.prearm_tolerance_atr in (0, prearm_atr] (LAT-2)")
+    if cfg.regime.high_vol_atr_ratio < 1.0:
+        p.append("regime.high_vol_atr_ratio >= 1.0 (RG-1)")
+    if not 0 < cfg.regime.risk_factor_high_vol <= 1:
+        p.append("regime.risk_factor_high_vol in (0, 1] (RG-2)")
+    if cfg.data.news_poll_open_s < 30:
+        p.append("data.news_poll_open_s >= 30 (Finnhub free limit, NW-1)")
+    if not 0 < cfg.data.quote_max_age_s <= 10:
+        p.append("data.quote_max_age_s in (0, 10] (DQ-8)")
+    a_ = cfg.alerts
+    if min(a_.per_symbol_cap, a_.per_window_cap, a_.top_n, a_.digest_min) < 1:
+        p.append("alerts: caps, top_n and digest_min >= 1 (AL-5, AL-6)")
+    if cfg.execution.slippage_switch_r <= 0:
+        p.append("execution.slippage_switch_r > 0 (EXQ-1)")
+    if not 0 <= cfg.tax.set_aside_rate_pct <= 60:
+        p.append("tax.set_aside_rate_pct in [0, 60] (TX-1)")
+    o = cfg.options
+    if not o.day_dte[0] <= o.day_dte[1] or not o.swing_dte[0] <= o.swing_dte[1]:
+        p.append("options: DTE ranges must be ordered (low <= high)")
+    if o.account_level < 3 and set(o.structures) & {"call_debit", "put_debit", "put_credit",
+                                                     "call_credit"}:
+        p.append("options.structures: spreads need options.account_level >= 3 (A15-4)")
+    if o.account_level < 2:
+        p.append("options.account_level >= 2 (long options) for any suggestion (A15-4)")
+    unknown = set(o.structures) - {"long_call", "long_put", "call_debit", "put_debit",
+                                   "put_credit", "call_credit"}
+    if unknown:
+        p.append(f"options.structures: only defined-risk structures allowed (OP-1): "
+                 f"{sorted(unknown)}")
     # storage
     if check_env and not os.environ.get(cfg.storage.journal_url_env):
         p.append(f"storage: env var {cfg.storage.journal_url_env} must be set")
@@ -372,6 +528,14 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
                          "recorded as passed")
         if cfg.mode.environment == "live" and "live" not in gates_passed:
             p.append("mode.environment: live not allowed until gate 'live' is recorded")
+        if cfg.mode.environment == "live" and cfg.data.alpaca_feed == "iex" \
+                and "data_sip" not in gates_passed:
+            p.append("data.alpaca_feed: live on IEX needs the DQ-7 data gate (gate 'data_sip') "
+                     "or the SIP feed")
+        if o.mode == "paper" and "options_paper" not in gates_passed:
+            p.append("options.mode: paper needs the A16-4 promotion gate 'options_paper'")
+        if o.mode == "live" and "options_live" not in gates_passed:
+            p.append("options.mode: live needs gate 'options_live' (OPTIONS_REQUIREMENTS §9)")
     return p
 
 

@@ -89,8 +89,16 @@ class SqlJournal:
         if not re.fullmatch(r"[a-z0-9_]*", p):
             raise ValueError(f"invalid DB_ROLE_PREFIX {p!r}")
         news, notifier, ro = f'"{p}news_rw"', f'"{p}notifier_rw"', f'"{p}readonly"'
+        console = f'"{p}console_rw"'
         stmts = [f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO {ro}",
-                 f"GRANT SELECT ON {s.SCHEMA}.config_snapshots TO {news}, {notifier}"]
+                 f"GRANT SELECT ON {s.SCHEMA}.config_snapshots TO {news}, {notifier}",
+                 # UI-C2: the console reads everything and writes only its own notes
+                 f"GRANT SELECT ON ALL TABLES IN SCHEMA {s.SCHEMA} TO {console}"]
+        for t in s.NEWS_READS:   # NW-1: news polls fast for open positions and plan tickers
+            stmts.append(f"GRANT SELECT ON {s.SCHEMA}.{t} TO {news}")
+        for t in s.CONSOLE_WRITES:
+            stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {console}")
+            stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {console}")
         for t in s.NEWS_WRITES:
             stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {news}")
             stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {news}")

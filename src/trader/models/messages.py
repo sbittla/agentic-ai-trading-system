@@ -110,6 +110,12 @@ class Account(Msg):
     buying_power: Decimal
     status: str = "ACTIVE"
     currency: str = "USD"
+    multiplier: int = 1                     # AC-2: 1 = cash account, 2/4 = margin
+    non_marginable_buying_power: Decimal | None = None
+
+    @property
+    def account_type(self) -> Literal["cash", "margin"]:
+        return "cash" if self.multiplier <= 1 else "margin"
 
 
 class BrokerPosition(Msg):

@@ -39,11 +39,13 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
       DB_ROLE_PREFIX: ${DB_ROLE_PREFIX:-}
     secrets: [pg_admin_password, pg_core_password, pg_news_password, pg_notifier_password,
-              pg_readonly_password]
+              pg_readonly_password, pg_console_password]
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ./postgres/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
       - ./postgres/init.sql:/init/init.sql:ro
+      - ./postgres/upgrade.sql:/init/upgrade.sql:ro
+      - ./postgres/upgrade.sh:/init/upgrade.sh:ro
     networks: [internal]
     mem_limit: 1g                       # ~75 MB steady; caps below are ~3x measured use so a
                                         # leak restarts one service instead of exhausting
@@ -183,6 +185,30 @@ services:
       postgres: {condition: service_healthy}
     networks: [internal]
 
+  toolbox:                              # owner helper commands; run.sh calls these (no host Python)
+    build: {context: .., dockerfile: docker/Dockerfile, target: toolbox}
+    profiles: [tools]
+    restart: "no"
+    entrypoint: ["trader"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"   # files it writes belong to you, not root
+    working_dir: /work
+    environment:
+      TZ: America/New_York
+      HOME: /tmp
+      TRADER_CONFIG: /work/config/config.yaml
+    volumes:
+      - ..:/work                        # the repo: init-env writes env files and secrets here
+    security_opt: ["no-new-privileges:true"]
+    networks: [internal, egress]
+
+  toolbox-gpu:                          # same, with the GPU visible for `select-model` (nvidia-smi)
+    extends: {service: toolbox}
+    profiles: [tools]
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: utility
+
   replay:
     <<: *app
     build: {context: .., dockerfile: docker/Dockerfile, target: core}
@@ -286,5 +312,9 @@ secrets:                                # git-ignored files, one password per li
     file: ../secrets/pg_notifier_password.txt
   pg_readonly_password:
     file: ../secrets/pg_readonly_password.txt
+  pg_console_password:
+    file: ../secrets/pg_console_password.txt
+  console_password:
+    file: ../secrets/console_password.txt
   grafana_admin_password:
     file: ../secrets/grafana_admin_password.txt

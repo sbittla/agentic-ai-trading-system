@@ -518,7 +518,9 @@ def cmd_check(a: argparse.Namespace) -> int:
 
 
 ENV_ROLES = {".env.core": ("core", "core_rw"), ".env.news": ("news", "news_rw"),
-             ".env.notifier": ("notifier", "notifier_rw"), ".env.backup": ("readonly", "readonly")}
+             ".env.notifier": ("notifier", "notifier_rw"), ".env.backup": ("readonly", "readonly"),
+             ".env.console": ("console", "console_rw")}
+OPTIONAL_ENV = (".env.alerts", ".env.console")   # created only when their template exists
 REQUIRED_KEYS = {".env.core": ("ALPACA_PAPER_KEY", "ALPACA_PAPER_SECRET"),
                  ".env.news": ("FINNHUB_TOKEN", "SEC_USER_AGENT"),
                  ".env.notifier": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")}
@@ -569,16 +571,17 @@ def cmd_init_env(a: argparse.Namespace) -> int:
 
     # secrets/: one random password per role, plus the Grafana admin login
     alphabet = string.ascii_letters + string.digits
-    for name in (*(f"pg_{r}" for r in ("admin", "core", "news", "notifier", "readonly")),
-                 "grafana_admin"):
+    for name in (*(f"pg_{r}" for r in ("admin", "core", "news", "notifier", "readonly",
+                                       "console")),
+                 "grafana_admin", "console"):
         write_new(root / "secrets" / f"{name}_password.txt",
                   "".join(pysecrets.choice(alphabet) for _ in range(28)))
 
     # env files with the database URL filled in
     for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay",
-                 ".env.alerts"):
-        if name == ".env.alerts" and not (root / f"{name}.example").exists():
-            continue   # optional: standalone price alerts
+                 *OPTIONAL_ENV):
+        if name in OPTIONAL_ENV and not (root / f"{name}.example").exists():
+            continue   # optional: standalone price alerts, owner console
         t = (root / f"{name}.example").read_text(encoding="utf-8")
         if name in ENV_ROLES:
             role, user = ENV_ROLES[name]
@@ -608,8 +611,7 @@ def cmd_init_env(a: argparse.Namespace) -> int:
         print("still to fill in (docs/ACCOUNT_SETUP.md):")
         for m in missing:
             print(f"  - {m}")
-    print("then: trader check-connections --service core --service news --service notifier "
-          "--env-file .env.core --env-file .env.news --env-file .env.notifier")
+    print("then: ./run.sh connections   (read-only checks of every key, in a container)")
     return 0
 
 

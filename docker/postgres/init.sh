@@ -19,3 +19,6 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   -v notifier_pw="$(secret pg_notifier_password)" \
   -v readonly_pw="$(secret pg_readonly_password)" \
   -f /init/init.sql
+
+# REQUIREMENTS 1.3 roles and guard (same script run.sh applies to existing volumes)
+sh /init/upgrade.sh
