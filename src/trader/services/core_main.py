@@ -115,6 +115,16 @@ class CoreService:
         engine.snapshots = rest.snapshots
         engine.sip_history = AlpacaHistory(*data_keys, feed="sip")
         engine.fallback = EmailFallback.from_env()
+        if cfg.options.mode != "off":   # OPTIONS_REQUIREMENTS: A13-A16 inside trader-core
+            from trader.options.data import AlpacaOptionsClient, OptionsData
+            from trader.options.desk import OptionsDesk
+
+            ocli = AlpacaOptionsClient(*data_keys, paper=env != "live",
+                                       feed=os.environ.get("ALPACA_OPTIONS_FEED", "indicative"))
+            engine.options = OptionsDesk(cfg, engine, OptionsData(
+                ocli, journal, now=lambda: datetime.now(UTC)))
+            restored = engine.options.book.restore()
+            log.info("options_desk", mode=cfg.options.mode, restored=restored)
         self.engine, self.journal, self.llm, self.broker = engine, journal, llm, broker
         self.outbox, self.notifier = outbox, notifier
         self.cfg = cfg

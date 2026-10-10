@@ -128,3 +128,21 @@ services:                         # ADR-010
 
 # Secrets are NOT stored here. Each container reads its own env file (.env.core, .env.news,
 # .env.notifier, ...); see .env.example and docs/SECURITY.md SEC-18.
+
+options:                           # OPTIONS_REQUIREMENTS.md §10 (advisory: no option orders)
+  mode: advisory                   # off | advisory | paper | live (paper/live need their gates)
+  account_level: 3                 # Alpaca options level: 2 = long options, 3 = spreads
+  from_alerts: false               # also suggest on core alert signals (lower conviction, 50%)
+  structures: [long_call, long_put, call_debit, put_debit, put_credit, call_credit]
+  allow_0dte: false
+  day_dte: [5, 14]
+  swing_dte: [21, 45]
+  min_open_interest: 500
+  min_volume: 100
+  max_spread_pct: 5.0
+  iv_rank_cheap: 30
+  iv_rank_rich: 60
+  max_premium_pct: 1.0             # of equity, per suggestion
+  max_contracts: 10
+  avoid_earnings: true
+  max_alerts_per_window: 6

@@ -25,6 +25,7 @@ from trader.agents import external_trades as ext
 from trader.agents import ops as ops_mod
 from trader.agents.a01_universe import UniverseAgent
 from trader.agents.a02_market_data import MarketDataAgent
+from trader.agents.a04_bearish import BearishScanner, BearSignal
 from trader.agents.a04_technicals import (
     TechnicalAgent,
     classify_regime,
@@ -86,6 +87,7 @@ from trader.notify.commands import CommandAuthority
 from trader.timeutil import ET, et_date, et_datetime, to_et
 
 log = structlog.get_logger(__name__)
+CHECKLIST_FAIL_PREFIXES = ("NT_CK", "NT_MF")    # the view's own checklist (OP-9)
 LLM_UNLOAD_AT = time(17, 45)   # after the daily/weekly/monthly reports
 D0 = Decimal(0)
 
@@ -190,6 +192,9 @@ class TradingEngine:
             equity=lambda: self.equity)
         self.copilot_plans: dict[str, tuple[SetupTriggered, Decision, datetime]] = {}  # CP-1
         self.options: Any = None          # OPTIONS_REQUIREMENTS (set by trader-core)
+        self.bear = BearishScanner(cfg, self.md, self.ta)                      # BR-1..BR-4
+        self._bear_buffer: list[BearSignal] = []
+        self._reject_codes: dict[str, str] = {}     # proposal id -> reason (OP-9 view check)
         self.fallback: Any = None         # NF-1 local fallback channel (e-mail), optional
         self.snapshots: Any = None        # UN-1: async (symbols) -> Alpaca snapshots
         self.sip_history: Any = None      # DQ-6: HistoricalData on the SIP feed
@@ -210,6 +215,10 @@ class TradingEngine:
             sch.add("in_play", time(8, 30), self.job_in_play, until=time(9, 25))     # UN-1
             sch.add("data_divergence", time(16, 20), self.job_divergence,
                     until=time(23, 59))                                              # DQ-6
+            sch.add("options_chains", time(8, 30), self.job_options_chains,
+                    until=time(9, 25))                                               # A13-1
+            sch.add("options_close", time(16, 5), self.job_options_close,
+                    until=time(23, 59))                                              # A16-1
         sch.add("morning_plan", time(9, 0), lambda now: self.job_plan(now, "morning"),
                 until=time(10, 15), retry_min=5)
         sch.add("premarket_levels", time(9, 30), self.job_open_refresh, until=time(10, 15))
@@ -330,6 +339,8 @@ class TradingEngine:
         close = self.cal.session(d).close.time() if self.cal.is_trading_day(d) else time(16, 0)
         self.md.start_day(d, close)
         self.ta.start_day(d)
+        self.bear.start_day(d)
+        self._reject_codes = {}
         self._window_orders = {"morning": 0, "afternoon": 0}
         self._candidates = {}
         self._macro_done = set()
@@ -673,8 +684,14 @@ class TradingEngine:
             self.journal.insert_many(s.next_day_ideas, rows)
         except Exception as exc:   # noqa: BLE001 - the alert still goes out
             log.warning("ideas_journal_failed", error=str(exc))
-        await self.say(alert_text(nd, session_date, market, plans, rows, off, last_result,
-                                  passed), "next_day_ideas")
+        text = alert_text(nd, session_date, market, plans, rows, off, last_result, passed)
+        if self.options is not None:                                          # OP-10 (3), BR-3
+            try:
+                text += await self.options.next_day_section(
+                    idea_views(plans, screens, compact, off))
+            except Exception as exc:   # noqa: BLE001 - the stock ideas still go out
+                log.warning("options_ideas_failed", error=str(exc))
+        await self.say(text, "next_day_ideas")
         if to_et(now).time() >= LLM_UNLOAD_AT or not self.cal.is_trading_day(et_date(now)):
             await self._unload_llm(now)   # evening/weekend run: free VRAM and RAM again
         return True
@@ -736,6 +753,11 @@ class TradingEngine:
                 pt4 = self._pt4_text(et_date(now))                               # PT-4
                 if pt4:
                     text += "\n" + pt4
+                if self.options is not None:                                     # A16-3
+                    otext = self.options.report_text(since=et_datetime(et_date(now),
+                                                                       time(0, 0)))
+                    if otext:
+                        text += "\n" + otext
             await self.say(text, f"report_{kind}")
         except JournalUnavailable as exc:
             log.error("report_failed", error=str(exc))
@@ -776,6 +798,12 @@ class TradingEngine:
             text += "\n" + atext + "".join(f"\n  FLAG: {f}" for f in aflags)
         except Exception as exc:   # noqa: BLE001
             log.warning("alert_report_failed", error=str(exc))
+        if self.options is not None:                                          # A16-3, A16-4
+            try:
+                otext = self.options.report_text(since=now - timedelta(days=7))
+                text += ("\n" + otext if otext else "") + "\n" + self.options.promotion_text()
+            except Exception as exc:   # noqa: BLE001
+                log.warning("options_report_failed", error=str(exc))
         await self.say(text, "report_weekly")
 
     async def job_monthly(self, now: datetime) -> None:
@@ -833,6 +861,10 @@ class TradingEngine:
                 actions.append(act)
         for text in self.core_alerts.on_bar(bar, now):                        # AL-1..AL-6
             await self.say(text, "alert_signal")
+        signals, self.core_alerts.signals = self.core_alerts.signals, []
+        if self.options is not None:                                          # OP-10 (2)
+            for sym, direction, plan, kind, passed in signals:
+                self._spawn(self.options.on_alert(sym, direction, plan, kind, passed))
         if self.shadow is not None and self.day is not None:                  # SH-1
             self.shadow.on_bar(bar, self._cached("flatten", lambda d: {
                 w: self.windows.flatten_time(d, w) for w in ("morning", "afternoon")}))
@@ -843,6 +875,7 @@ class TradingEngine:
             actions += self._on_5m(b5, now)
             if b5.symbol in self.cfg.universe.tickers:
                 setups += self.ta.on_5m_close(b5, now)
+                self._bear_buffer += self.bear.on_5m_close(b5, now)          # BR-1
         await self.execute_actions(actions)
         self._buffer += setups
 
@@ -897,6 +930,7 @@ class TradingEngine:
             await self.execute_actions(self._on_5m(b5, now))
             if b5.symbol in self.cfg.universe.tickers:
                 self._buffer += self.ta.on_5m_close(b5, now)
+                self._bear_buffer += self.bear.on_5m_close(b5, now)          # BR-1
         await self.execute_actions(self.pm.on_tick(now))
         await self._macro_breakeven(now, d)
         await self._check_exit_orders(now)
@@ -920,11 +954,21 @@ class TradingEngine:
         self.sup.set_health("latency", level, detail, now)  # type: ignore[arg-type]
         if self.prearm_enabled:
             self._prearm_scan(now, d)
+        if self._bear_buffer:
+            bears, self._bear_buffer = self._bear_buffer, []
+            await self._on_bears(bears)
+        if self.options is not None and (now.second < 2 or self.sim_mode) \
+                and self.windows.window_at(now) is not None:
+            if self.sim_mode:                                                 # A16-1
+                await self.options.on_minute(now)
+            else:
+                self._spawn(self.options.on_minute(now))
         if self._buffer:
             buf, self._buffer = sorted(self._buffer, key=lambda x: -x.score), []
             if self.sim_mode:   # replay: inline, deterministic
                 for setup in buf:
                     await self.evaluate_setup(setup)
+                    await self._options_view(setup)
             else:   # live: Qwen calls must never delay flatten times, exits or cancels
                 self._spawn(self._evaluate_batch(buf))
 
@@ -967,6 +1011,8 @@ class TradingEngine:
                                                                st.atr5.value):
                 self.prearm.in_flight.add(k)
                 self._spawn(self._prearm(item, window or "", k, now))
+                if self.options is not None:                                  # OP-20
+                    self._spawn(self.options.prefetch(item.ticker))
 
     async def _prearm(self, item: Any, window: str, k: tuple[date, str, str, str],
                       now: datetime) -> None:
@@ -997,6 +1043,7 @@ class TradingEngine:
             for setup in buf:
                 try:
                     await self.evaluate_setup(setup)
+                    await self._options_view(setup)
                 except Exception as exc:   # noqa: BLE001 - one bad setup must not stop the rest
                     log.exception("evaluate_failed", setup=setup.setup_id, error=str(exc))
                     self.journal.incident(self.now(), "PIPELINE_ERROR", str(exc)[:500])
@@ -1100,6 +1147,7 @@ class TradingEngine:
         self._journal_decision(d, s_)
         self._note_candidate(s_, list(items or ()), code)
         self.stats.rejected += 1
+        self._reject_codes[pid] = code
         self._missed(s_, pid, code)
 
     def _missed(self, s_: SetupTriggered, pid: str, code: str) -> None:
@@ -1116,6 +1164,45 @@ class TradingEngine:
         self._shadowed.add(s_.setup_id)
         self.shadow.add(s_, pid, taken, reason)
 
+    async def _on_bears(self, bears: list[BearSignal]) -> None:
+        """BR-4: journal each bearish signal like a long setup; options only."""
+        for sig in bears:
+            try:
+                self.journal.upsert(s.setups, {"id": sig.setup_id}, sig.journal_row())
+            except Exception as exc:   # noqa: BLE001
+                log.warning("bear_journal_failed", error=str(exc))
+            if self.options is None:
+                continue
+            if self.sim_mode:
+                await self.options.on_bear(sig)
+            else:
+                self._spawn(self.options.on_bear(sig))
+
+    async def _options_view(self, s_: SetupTriggered) -> None:
+        """OP-10 (1): after the stock pipeline decided. OP-9: no suggestion when the view's
+        own checklist failed; A15-2: none when the stock entry was taken."""
+        if self.options is None:
+            return
+        pid = proposal_id_for(s_.setup_id)
+        code = self._reject_codes.get(pid, "")
+        checklist_ok = not code.startswith(CHECKLIST_FAIL_PREFIXES) and code not in (
+            Reason.NT_UNIVERSE, Reason.NT_NO_RELIABLE_QUOTE, Reason.NT_OPTIONS_ONLY)
+        plan = self.copilot_plans.get(self.cfg.canonical(s_.ticker))
+        stock_taken = self.exec.seen(pid) or pid in self._pending_approval or (
+            plan is not None and plan[0].setup_id == s_.setup_id)
+        try:
+            await self.options.on_setup(s_, checklist_ok, stock_taken)
+        except Exception as exc:   # noqa: BLE001 - options never affect the stock pipeline
+            log.warning("options_view_failed", ticker=s_.ticker, error=str(exc))
+
+    async def job_options_chains(self, now: datetime) -> None:
+        if self.options is not None:
+            await self.options.job_chain_load(now)
+
+    async def job_options_close(self, now: datetime) -> None:
+        if self.options is not None:
+            await self.options.job_close(now)
+
     async def evaluate_setup(self, s_: SetupTriggered) -> Decision | None:
         """Run one triggered setup through the full pipeline."""
         now = self.now()
@@ -1129,6 +1216,9 @@ class TradingEngine:
         self.bus.publish(s_)
         if self.exec.seen(pid) or pid in self._pending_approval:
             return None   # duplicate event: one order set only
+        if s_.context.get("direction") == "bear":                             # BR-4, ADR-008
+            self._reject(s_, pid, Reason.NT_OPTIONS_ONLY, "bearish signal: options only")
+            return None
         ok_u, why_u = self.universe.check(s_.ticker)
         if not ok_u:
             self._reject(s_, pid, Reason.NT_UNIVERSE, why_u)
@@ -1891,3 +1981,35 @@ def _cfg_hash(cfg: Config) -> str:
 
 
 AsyncFn = Callable[[datetime], Awaitable[None]]
+
+
+def idea_views(plans: dict[str, GamePlan], screens: dict[str, dict[str, Any]],
+               compact: dict[str, dict[str, Any]], off: dict[str, str]) -> list[Any]:
+    """Options views for the 4:15 PM ideas: each long pick (swing structure) and up to three
+    bearish candidates (BR-3: close near the low of the range, not in an uptrend)."""
+    from trader.options.strategist import View
+
+    views: list[Any] = []
+    seen: set[str] = set()
+    for plan in plans.values():
+        for item in plan.watch:
+            scr = screens.get(item.ticker)
+            if scr is None or item.ticker in seen or item.ticker in off:
+                continue
+            seen.add(item.ticker)
+            views.append(View(item.ticker, "bull", float(scr["close"]), float(item.stop),
+                              float(item.target_1), None, "swing", 0, "idea", item.setup,
+                              False, True, window="next"))
+    bears = sorted((t for t, scr in screens.items()
+                    if t not in off and scr.get("range_pos") is not None
+                    and scr["range_pos"] <= 0.10 and not scr.get("trend_up")),
+                   key=lambda t: screens[t]["range_pos"])[:3]
+    for t in bears:
+        atr = (compact.get(t, {}).get("levels") or {}).get("atr14d")
+        close = float(screens[t]["close"])
+        if not atr:
+            continue
+        views.append(View(t, "bear", close, close + float(atr), close - 1.5 * float(atr),
+                          close - 3 * float(atr), "swing", 0, "idea", "CLOSE_NEAR_LOW", False,
+                          True, window="next"))
+    return views

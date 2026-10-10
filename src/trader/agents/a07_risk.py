@@ -455,6 +455,11 @@ class RiskManager:
     def evaluate(self, s: SetupTriggered, ctx: DecisionContext, review: Review | None,
                  comp: ComplianceResult | None, proposal_id: str) -> Decision:
         """Full checklist CK-1..CK-10 and size (A7-1, A7-2)."""
+        if s.context.get("direction") == "bear" or s.context.get("route") == "options_only":
+            return Decision(proposal_id=proposal_id, result="REJECT",   # BR-4, ADR-008
+                            reason_code=Reason.NT_OPTIONS_ONLY, checklist=(),
+                            detail="bearish signal: options only, never a stock order",
+                            entry=s.entry, stop=s.stop, t1=s.t1, t2=s.t2)
         items = self._items(s, ctx, review, comp)
         mode = self.cfg.style_mode(s.style)
         route = self.route_for(s.setup, s.style)

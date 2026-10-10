@@ -95,6 +95,7 @@ class CoreAlerts:
     bucket_sent: int = 0
     digest: list[tuple[float, str]] = field(default_factory=list)
     pending: list[Logged] = field(default_factory=list)
+    signals: list[tuple[str, str, Any, str, int]] = field(default_factory=list)  # OP-10 (2)
 
     def __post_init__(self) -> None:
         self.engine = AlertEngine(SignalSettings())
@@ -246,6 +247,7 @@ class CoreAlerts:
             self.digest.append((q, text))
         row_id = self._log(now, a, direction, label, passed, failed, q, delivery, plan, text)
         if plan is not None and direction in ("long", "short"):
+            self.signals.append((a.symbol, direction, plan, a.kind, passed))
             self.pending.append(Logged(row_id, now, a.symbol, a.kind, direction, plan.stop,
                                        plan.t1))
         return text if delivery == "sent" else None

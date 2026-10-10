@@ -63,6 +63,7 @@ class Reason(StrEnum):
     NT_ACCOUNT_MISMATCH = "NT_ACCOUNT_MISMATCH"    # AC-2
     NT_NEWS_SHOCK = "NT_NEWS_SHOCK"                # NW-2
     NT_NOTIFIER_DOWN = "NT_NOTIFIER_DOWN"          # NF-1
+    NT_OPTIONS_ONLY = "NT_OPTIONS_ONLY"            # BR-4: bearish signals never trade stock
     COPILOT_PLAN = "COPILOT_PLAN"                  # CP-1: plan sent, no order
     SIZE_TOO_SMALL = "SIZE_TOO_SMALL"
     SIZE_REDUCED = "SIZE_REDUCED"

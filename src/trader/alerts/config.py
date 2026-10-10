@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from trader.alerts.options_line import OptionsLineSettings
+
 MAX_IEX_SYMBOLS = 30   # Alpaca free plan: 30 symbols on the IEX stream
 
 # 20 largest S&P 500 companies by market cap (snapshot October 2026; one share class each).
@@ -46,6 +48,7 @@ class AlertsConfig(BaseModel):
     bad_print_pct: float = Field(default=5.0, gt=0)  # a lone trade this far from the last price
     signals: SignalSettings = Field(default_factory=lambda: SignalSettings())
     daily_summary: bool = True
+    options: OptionsLineSettings = Field(default_factory=lambda: OptionsLineSettings())  # OP-14
     db_path: str = "data/alerts.sqlite"
 
     def symbols(self) -> list[str]:

@@ -206,6 +206,52 @@ Rows marked **Planned** are specified but not built yet; CI counts them but does
 | `BT-6` | Real-history backtest of the playbook on 2 years of minute bars before paper trading (TEST_PLAN.md). | backtest | unit/test_req13_workflow.py | — |
 | `PT-4` | Paper fills re-checked against the replay fill model; paper statistics use the stricter result (TEST_PLAN.md). | backtest, A11 | unit/test_req13_workflow.py | — |
 
+### Options (OPTIONS_REQUIREMENTS.md)
+
+Advisory mode is built: suggestions, follow-ups and grading, no option orders. `options.mode: paper|live` still needs its gate (config validation) and, until order placement is built, behaves as advisory.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `BR-1` | Mirrored bearish setups (ORB breakdown, VWAP rejection, gap-down-and-go, failed breakout, close near low) | A4 (a04_bearish) | unit/test_options.py | — |
+| `BR-2` | Mirrored market filter: QQQ below VWAP or relative weakness; RVOL ≥ 1.5; not in the first 5 minutes or after a halt | A4 | unit/test_options.py | — |
+| `BR-3` | Next-day ideas rank bearish candidates in a "Bearish (options only)" section | A5, options desk | unit/test_options.py | — |
+| `BR-4` | Bearish signals journaled with direction = bear, route = options_only; A7 rejects any stock order from them | A4, A7 | unit/test_options.py | NT_OPTIONS_ONLY |
+| `A13-1` | Chains 0–60 DTE, strikes ±20%, with open interest; 8:30 and on demand | A13 | unit/test_options.py | — |
+| `A13-2` | Snapshots only when needed, cached 15 s; never streamed | A13 | unit/test_options.py | — |
+| `A13-3` | ATM IV 30d, IV rank/percentile (short-history label), expected move, term, skew | A13 | unit/test_options.py | — |
+| `A13-4` | Events (earnings, ex-dividend, FOMC/CPI) attached to each expiry | A13 | unit/test_options.py | — |
+| `A13-5` | Quote age; > 60 s or zero bid unusable; "prices indicative" on the free feed | A13 | unit/test_options.py | — |
+| `A13-6` | options_iv_daily history; suggestion quotes stored with the suggestion | A13 | unit/test_options.py | — |
+| `OP-1` | Defined-risk structures by direction and IV rank only | A14 | unit/test_options.py | — |
+| `OP-2` | Expiry by style (day 5–14 DTE, swing 21–45), no earnings inside unless asked | A14 | unit/test_options.py | — |
+| `OP-3` | Strikes tied to the stock's levels (delta bands, short leg at T1, credit beyond invalidation) | A14 | unit/test_options.py | — |
+| `OP-4` | Per-leg liquidity filter and fill estimate (mid ± 25% of the width) | A14 | unit/test_options.py | — |
+| `OP-5` | Size from the stock risk rules; premium and contract caps | A14 | unit/test_options.py | — |
+| `OP-6` | Exits planned up front (invalidation, T1/70%, time, credit 50%, expiry day) | A14, A16 | unit/test_options.py | — |
+| `OP-7` | All numbers computed by code (Black-Scholes repricing, breakeven, P(profit) estimate) | A14 | unit/test_options.py | — |
+| `OP-8` | Qwen explains after the close only; no digits allowed; template in market hours | A14 | unit/test_options.py | — |
+| `OP-9` | Gate before sending (checklist, R/R at T1, expected move, liquidity, staleness, A15) | A14, A15 | unit/test_options.py | — |
+| `OP-10` | Triggers: A4 setups, bearish setups, alert signals (optional), next-day ideas, OPT | engine, options desk | unit/test_options.py | — |
+| `OP-11` | Telegram format | options desk | unit/test_options.py | — |
+| `OP-12` | Follow-up alerts on open suggestions, each once | A16 | unit/test_options.py | — |
+| `OP-13` | OPT / CHAIN / IV / OPTS / OPTIONS ON|OFF (read-only) | options desk, commands | unit/test_options.py | — |
+| `OP-14` | Alerts bot options line (optional, rate-limited, fixed $ risk, same A14 code) | alerts bot | unit/test_options.py | — |
+| `OP-15` | One per ticker/direction/window; per-window cap; follow-ups grouped per minute | A15, options desk | unit/test_options.py | — |
+| `OP-16` | Options tab on the console stock page | console | Planned: console (Phase F) | — |
+| `OP-17` | Payoff view | console | Planned: console (Phase F) | — |
+| `OP-18` | Suggestions list on the console | console | Planned: console (Phase F) | — |
+| `OP-19` | Ask gains read-only options tools | console | Planned: console (Phase F) | — |
+| `OP-20` | Prefetch the chain snapshot when a setup is pre-armed | A13, engine | unit/test_options.py | — |
+| `A15-1` | Wash sales both ways (options locked with the stock; option loss locks the stock) | A15, A12 | unit/test_options.py | NT_WASH_LOCK |
+| `A15-2` | Shared limits; one trade per suggestion; no stock entry and option idea on the same view | A15, A7 | unit/test_options.py | — |
+| `A15-3` | Event rules (earnings, ex-dividend short call, last 15 minutes, FOMC after 13:30) | A15 | unit/test_options.py | — |
+| `A15-4` | Account options level decides the structures | A14, A15 | unit/test_options.py | — |
+| `A15-5` | Correlated groups include options | A15 | unit/test_options.py | — |
+| `A16-1` | Every suggestion paper-tracked at the estimated fill; marks each minute; plan exits; survives restart | A16 | unit/test_options.py | — |
+| `A16-2` | Result: $ and R, exit reason, view right vs option made money | A16 | unit/test_options.py | — |
+| `A16-3` | Report sections by structure, direction, IV regime and DTE | A16, A11 | unit/test_options.py | — |
+| `A16-4` | Promotion gate: ≥ 40 graded, ≥ +0.15R, PF ≥ 1.3, ≥ 20 sessions | A16 | unit/test_options.py | — |
+
 ## How to use
 
 - Mark each test: `@pytest.mark.rule("CK-6")`. One test can cover several IDs; every ID needs at least one test.
