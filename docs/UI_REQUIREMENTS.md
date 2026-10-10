@@ -155,6 +155,10 @@ Grafana stays: it is the right tool for time-series analytics. The console links
   - the monthly wash-sale report
   - for each lock, the loss sale that caused it
 
+### 3.6a Options (draft)
+
+- **UI-28** Options tab, payoff view, suggestions list and options Q&A tools: OP-16 to OP-19 in [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) §8.
+
 ### 3.7 System and settings (read-mostly)
 
 - **UI-18** Config viewer: the effective config for today (from `config_snapshots`) and any edits waiting for tomorrow (SR-5), as a diff. Config is still edited in `config/config.yaml`; the console does not write it (DV-3).

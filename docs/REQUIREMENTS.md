@@ -59,7 +59,7 @@ The system trades only a fixed list of 10 large-cap US stocks, through Alpaca, u
 | Direction | Long only to start | Shorting adds borrow and margin rules; add later if wanted |
 | Default action | No trade | A trade happens only when every checklist item passes |
 
-**Out of scope for v1:** options, shorting, crypto, any stock outside the list, Webull, Robinhood.
+**Out of scope for v1:** option *orders*, shorting stock, crypto, any stock outside the list, Webull, Robinhood. **Planned next (draft, not built):** advisory options suggestions and alerts for bullish and bearish views, defined risk only, bearish views via puts and put spreads, never by shorting stock: [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) (agents A13–A16, ADR-015 proposed).
 
 ---
 
@@ -319,6 +319,8 @@ flowchart TD
 | A10 | Supervisor | Code | Always | Windows, health checks, kill switch |
 | A11 | Reporter | Qwen | 10:30 AM, 4:30 PM, Friday, month end | Reports to WhatsApp and files |
 | A12 | Compliance guard | Code | Before every entry and loss exit; monthly | Lock decisions, wash-sale report |
+
+Planned (draft): A13 Options data, A14 Options strategist, A15 Options risk & compliance, A16 Options monitor & grader, and bearish setups in A4 for options only. See [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) §12.
 
 ---
 

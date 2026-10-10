@@ -36,6 +36,7 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 
 | Document | What it covers |
 | --- | --- |
+| [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) | Draft: options suggestions and alerts for bullish and bearish views (agents A13–A16), defined risk, advisory first |
 | [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Draft requirements for a local Owner Console: cockpit, any-stock lookup, plain-language Q&A, approvals, controls |
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
