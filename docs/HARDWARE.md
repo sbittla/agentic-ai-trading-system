@@ -98,13 +98,13 @@ Supported Qwen3 models. "Needs" is the GPU memory at 8K context with the compose
 | `qwen3:30b-a3b` | 19 GB | 20.2 GB | 24 GB GPU when speed matters (`--model qwen3:30b-a3b`) | strong, fast (mixture of experts) |
 | `qwen3:32b` | 20 GB | 21.9 GB | 24 GB+ GPU | strongest |
 
-Let the tool decide. Run it on the host that has the GPU, because it reads `nvidia-smi`:
+Let the tool decide. It runs in the `toolbox` container with the GPU visible (it reads `nvidia-smi`; without GPU passthrough it falls back to detecting RAM only):
 
-```powershell
-trader select-model                         # detect GPU + RAM, show the table, recommend
-trader select-model --apply                 # write the recommendation to docker/.env and config/config.yaml
-trader select-model --model qwen3:4b --apply   # choose a different supported model
-trader select-model --vram 16 --ram 64      # plan for another machine (no detection)
+```bash
+./run.sh model                          # detect GPU + RAM, show the table, recommend
+./run.sh model --apply                  # write the recommendation to docker/.env and config/config.yaml
+./run.sh model --model qwen3:4b --apply # choose a different supported model
+./run.sh model --vram 16 --ram 64       # plan for another machine (no detection)
 ```
 
 The tool:
@@ -115,9 +115,8 @@ The tool:
 
 Then:
 
-1. Download the model: RUNBOOK §1 step 6, or `tools/fetch_ollama_model.py <tag>` on Windows.
-2. Restart `ollama` and `trader-core`.
-3. Check that `trader check-connections --service llm` shows `100% on GPU`.
+1. `./run.sh restart`: it downloads the model if missing and restarts `ollama` and `trader-core` (or `tools/fetch_ollama_model.py <tag>`, ACCOUNT_SETUP §0).
+2. Its last step checks the model runs `100% on GPU`; the console's Model page shows the live VRAM use.
 
 Model changes take effect the next trading day (SR-5), like any other config change.
 

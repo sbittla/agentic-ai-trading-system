@@ -8,31 +8,22 @@ How to set up a development environment, the coding rules for this repo, and the
 
 ## 1. Local setup (Windows)
 
-**Preferred:** open the repo in VS Code with the dev container (copy `tools/devcontainer.json` to `.devcontainer/devcontainer.json`, then *Reopen in Container*). It uses the same image as production (`dev` target) with Postgres and Ollama from Compose, so nothing but Docker Desktop and VS Code is installed on Windows.
+Nothing in this repo runs on the host: every service, helper and check runs in a container.
 
-**Without the dev container:**
+**Checks from WSL (repo root):** `./run.sh test` builds the `dev` image and runs `ruff`, `mypy`, `pytest` and the traceability check against the working tree (mounted at `/workspace`, with `PYTHONPATH=/workspace/src`). Extra pytest arguments pass through: `./run.sh test tests/unit/test_options.py -k payoff`.
 
-```powershell
-# Python 3.12 virtual environment
-py -3.12 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev,notifier]"   # add ,news only if you work on FinBERT (large download)
+**Editing in VS Code:** open the repo in the dev container (`.devcontainer/devcontainer.json`, *Reopen in Container*). It uses the same image as production (`dev` target) with Postgres and Ollama from Compose, so nothing but Docker Desktop and VS Code is installed on Windows.
 
-# Local files from the *.example templates (never overwrites; replay needs no keys)
-trader init-env
+Other containerized entry points:
 
-# Model server on the local NVIDIA GPU (ACCOUNT_SETUP.md §0)
-docker compose -f docker/docker-compose.yml up -d ollama
-docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull
-
-# Checks
-ruff check src tests
-mypy
-pytest tests/unit tests/contract -q
-python tools/check_traceability.py docs/TRACEABILITY.md tests
+```bash
+./run.sh setup              # local files from the *.example templates (toolbox container)
+./run.sh replay 10          # whole system on 10 synthetic days, no keys or GPU
+./run.sh backtest 500       # playbook on real minute bars (BT-6)
+docker compose -f docker/docker-compose.yml --profile replay run --rm replay replay --day 2026-10-15 --speed 20
 ```
 
-Run a recorded day locally (after milestone M4): `trader replay --day 2026-10-15 --speed 20`.
+Postgres integration tests run when the `TEST_PG_*` URLs are set (one per role, `postgresql+psycopg://<role>:<password>@postgres:5432/trader`); without them they are skipped.
 
 ## 2. Coding rules
 

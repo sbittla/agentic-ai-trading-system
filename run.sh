@@ -18,6 +18,7 @@
 #   ./run.sh alerts          only the standalone Telegram price-alert bot (docs/ALERTS.md)
 #   ./run.sh replay [days]   offline trial on synthetic days (no broker keys, no GPU)
 #   ./run.sh backtest [days] playbook on real minute bars from the journal store (BT-6)
+#   ./run.sh test            lint, type check, tests and traceability in the dev container
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -299,6 +300,13 @@ case "$cmd" in
   backtest) check_docker
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
-  help|-h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  test)    check_docker   # developers too: nothing runs from a host venv
+           "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
+           "${COMPOSE[@]}" --profile dev run --rm -T --user "$HOST_UID:$HOST_GID" \
+             -e HOME=/tmp -e PYTHONPATH=/workspace/src -w /workspace dev sh -c \
+             'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
+              pytest -q -p no:cacheprovider "$@" &&
+              python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
+  help|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac

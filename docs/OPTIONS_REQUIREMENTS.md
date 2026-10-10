@@ -1,6 +1,6 @@
 # Options Suggestions and Alerts: Requirements
 
-**Version:** 0.1 draft (October 10, 2026) · Status: **for owner review, nothing built yet** · Proposed decision: ADR-015 ([DECISIONS.md](DECISIONS.md))
+**Version:** 0.2 (October 10, 2026) · Status: **advisory mode built** (suggestions, follow-ups, grading; `src/trader/options/`, `agents/a04_bearish.py`); option order placement (§9 paper/live) not built · Proposed decision: ADR-015 ([DECISIONS.md](DECISIONS.md))
 
 The system already produces directional views on its stocks:
 
@@ -14,7 +14,7 @@ This document adds an **options layer** on top of those views. When the system h
 
 **Scope rule:** options start **advisory only** (suggest and track). Placing option orders is a later, gated phase (§9), like the go-live gates for stocks. A bearish view is expressed by **buying puts or put spreads, or selling call spreads, never by shorting stock**, so ADR-008 (no short selling) still holds.
 
-Requirement IDs are `OP-n` (options), `BR-n` (bearish signals) and `A13-n` to `A16-n` (new agents). They go into [TRACEABILITY.md](TRACEABILITY.md) when they are built, each with its tests.
+Requirement IDs are `OP-n` (options), `BR-n` (bearish signals) and `A13-n` to `A16-n` (new agents). They are in [TRACEABILITY.md](TRACEABILITY.md) with their tests (`tests/unit/test_options.py`, `tests/unit/test_console.py`).
 
 ---
 

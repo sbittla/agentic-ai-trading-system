@@ -1,6 +1,6 @@
 # Owner Console: UI Requirements
 
-**Version:** 0.1 draft (October 10, 2026) · Status: **for owner review, nothing built yet**
+**Version:** 0.2 (October 10, 2026) · Status: **built** (`src/trader/console/`, container `console` on http://localhost:8080, started by `./run.sh`); UI-24 (phone/LAN) stays a later phase
 
 The owner already has three ways to see and control the system:
 

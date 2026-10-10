@@ -8,18 +8,17 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 
 ## 1. One-time setup
 
-**One script does all of this from WSL** (repo root): `./run.sh setup` once (env files, passwords, model choice), fill in the keys it lists, then `./run.sh` to check everything and start every service. `./run.sh help` lists the rest (`status`, `logs`, `stop`, `alerts`, `replay`, `start --monitoring`). It refuses to start if git tracks any secret file. The steps below are what it automates.
+**One script does all of this from WSL** (repo root), and nothing runs on the host: every service and every helper command runs in a container (helpers in the `toolbox` image, checks in the `dev` image). It refuses to start if git tracks any secret file.
 
 1. Install Docker Desktop (WSL2 backend) and the NVIDIA driver with WSL GPU support; confirm `docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` works ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
-2. Create an Alpaca account; generate **paper** API keys. Keep live keys ungenerated until stage 5 of the test plan.
-3. Create a Finnhub key, a Reddit "script" app (optional), and a Twilio WhatsApp sandbox sender. Step-by-step instructions for every account, key and password are in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
-4. Copy `config/config.example.yaml` to `config/config.yaml`; review every value in `risk` and `wash_sale`.
-5. Run `trader init-env --prefix <your prefix>` to create the env files (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) from their `.example` templates and the five password files in `secrets/` (`pg_admin_password.txt`, `pg_core_password.txt`, `pg_news_password.txt`, `pg_notifier_password.txt`, `pg_readonly_password.txt`); optionally set the database and role names in `docker/.env`. Run `trader check-connections` to verify the keys ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §6, §8) ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
-6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull` to download the model set in `OLLAMA_MODEL` (default `qwen3:8b`; `trader select-model --apply` picks the right one for your GPU and sets `OLLAMA_MODEL` and `llm.model` together, [HARDWARE.md](HARDWARE.md)). The runtime `ollama` service has no internet access (SEC-9), so it cannot pull models itself. If Docker Desktop is unstable during large downloads, use `tools/fetch_ollama_model.py` and `tools/import_ollama_model.ps1` instead ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
-7. `docker compose -f docker/docker-compose.yml run --rm trader-core trader migrate` to create the journal tables.
-8. `docker compose -f docker/docker-compose.yml up -d` to start every service (trader-core, news-sentiment, notifier, ollama, postgres, backup); `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
-9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works. With the Twilio sandbox, WhatsApp delivers free-form messages only within 24 hours of your last message, so reply `STATUS` once a day ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §5).
-10. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
+2. Create the accounts and keys: Alpaca **paper** keys (keep live keys ungenerated until stage 5 of the test plan), Finnhub, a Telegram bot (Reddit optional). Step by step: [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
+3. `./run.sh setup` creates every missing local file from the `.example` templates (never overwrites): `config/config.yaml`, the env files (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`, `.env.console`), the password files in `secrets/` (Postgres roles including `pg_console_password.txt`, `console_password.txt` for the Owner Console, `grafana_admin_password.txt`) and `docker/.env`; then it picks the Qwen model that fits your GPU ([HARDWARE.md](HARDWARE.md)). Review every value in `risk` and `wash_sale` in `config/config.yaml`. Confirm `git status` shows none of these files.
+4. Fill in the keys it lists, then `./run.sh connections` (read-only checks of Alpaca, Finnhub, Telegram, the database roles and Qwen; [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §6, §8).
+5. `./run.sh` starts everything in order: Postgres and Ollama, the database role/guard upgrade (`upgrade.sql`, idempotent), the model download if missing, `trader migrate` (tables and grants, idempotent), then trader-core, news-sentiment, notifier, backup, the **Owner Console** (http://localhost:8080) and **Grafana** (http://localhost:3000). It waits until every container is healthy and checks the model runs 100% on the GPU. `./run.sh status` shows them all; `./run.sh --no-console` or `--no-monitoring` skips those two.
+6. Check the 7:00 AM pre-flight message arrives on Telegram the next trading day, and send `STATUS` to confirm inbound polling works.
+7. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
+
+Optional: `./run.sh alerts` starts the standalone price-alert bot when it has its own Alpaca account ([ALERTS.md](ALERTS.md)); otherwise trader-core sends the alerts itself (AL-1).
 
 ## 2. Daily routine for the owner
 
@@ -27,27 +26,34 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 | --- | --- |
 | 7:00 | Read the pre-flight message: green means the system will trade; red names the problem |
 | 9:00 | Read the game plan: tickers in play, setups, off-limits list (also avoid those tickers in other accounts) |
-| 9:35–10:30 | In approve mode, answer approvals within 90 seconds; no answer means no trade |
+| 9:35–10:30 | In approve mode, answer approvals within 90 seconds (Telegram buttons, or the console's Approvals page with the code from your phone); no answer means no trade. In co-pilot mode the plan arrives as a ticket: place the order yourself, then press **I filled** (console) or send `FILLED NVDA 40 @ 190.05` |
 | 10:30 | Read the morning summary |
 | 3:00–4:00 | Approvals as above |
 | 4:15 | Read the **next-day ideas** alert: up to 4 picks per window with trigger, stop and T1, built from today's close (code screen + Qwen review), plus how the previous ideas played out. Grafana **6. Next-day ideas** shows every ticker's screen. Ideas are refreshed at 9:00 and 2:45 with gap and pre-market data; they mark trades as planned (full size), they never place orders |
-| 4:30 | Read the daily review; note any rule breach or incident |
+| 4:15 | Options ideas (advisory, OPTIONS_REQUIREMENTS.md) arrive with the next-day ideas; follow-ups for open ideas come during the windows |
+| 4:30 | Read the daily review (now with latency, slippage, strict paper fills and the options section); note any rule breach or incident |
+| Any time | Owner Console http://localhost:8080: cockpit, stock lookup with the live checklist ("why isn't it buying NVDA?"), Ask, trade stories, journal notes and tags |
 | Friday | Read the weekly review; decide on any setup returned to paper |
 
 ## 3. Commands
 
 Commands are accepted only from allow-listed senders (`TELEGRAM_ALLOWED_CHAT_IDS` / `TELEGRAM_CHAT_ID` with Telegram, the default channel per ADR-014; `WHATSAPP_ALLOWED_SENDERS` with WhatsApp); approvals need the one-time code, and destructive commands need a second confirmation code ([SECURITY.md](SECURITY.md) SEC-1..3).
 
+The Owner Console sends the same commands through the same checks (Controls page; source `console` in the audit list).
+
 | Action | Telegram / WhatsApp | Local |
 | --- | --- | --- |
-| Status | `STATUS` | `docker compose -f docker/docker-compose.yml exec trader-core trader status` |
+| Status | `STATUS` | `./run.sh status` |
 | Rebuild next-day ideas (outside market hours) | `PLAN` | `docker compose -f docker/docker-compose.yml exec trader-core trader plan` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
-| Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `trader resume` |
-| Flatten everything now | `FLATTEN`, then the confirmation code | `trader flatten --confirm` |
+| Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `docker compose -f docker/docker-compose.yml exec trader-core trader resume` |
+| Flatten everything now | `FLATTEN`, then the confirmation code | `docker compose -f docker/docker-compose.yml exec trader-core trader flatten --confirm` |
 | Approve / reject a trade | `YES <code>` / `NO <code>` | — |
 | Acknowledge a critical alert | `ACK` | — |
-| Pause one style | `PAUSE DAY` / `PAUSE SWING` | `trader pause day` |
+| Pause one style | `PAUSE DAY` / `PAUSE SWING` | `docker compose -f docker/docker-compose.yml exec trader-core trader pause day` |
+| Signal alerts on/off | `ALERTS ON` / `ALERTS OFF` | Console → Alerts |
+| Co-pilot fills | `FILLED <T> <qty> @ <price>` / `SOLD <T> <qty> @ <price>` | Console → Co-pilot |
+| Options | `OPT <T> [bull\|bear] [day\|swing]`, `CHAIN <T>`, `IV <T>`, `OPTS`, `OPTIONS ON\|OFF` (read-only, no orders) | Console → Stock → Options |
 
 ## 4. Incident playbooks
 
@@ -98,7 +104,10 @@ Setup and machine problems (Docker Desktop crashes, model loading, GPU, Telegram
 | Task | When |
 | --- | --- |
 | Postgres dump and bar files copied to `BACKUP_PATH` by the `backup` container | Nightly, automatic |
-| Restore test: load last night's dump into a scratch Postgres container and run `trader validate-journal` | Monthly |
+| Restore test (OPS-1): `./run.sh restore-test` restores the newest dump into a throwaway Postgres container (no network), compares row counts with production and records the result | Monthly; the monthly report lists it when overdue |
+| Emergency drill (OPS-2): `./run.sh drill` walks through KILL, FLATTEN and a network pull on paper and records it | Monthly |
+| Other-broker trades for wash sales (WS-9): `./run.sh import-trades FILE --broker robinhood\|webull\|fidelity\|schwab\|generic` | After any trade in another account |
+| Check the backup really ran: Grafana / `./run.sh logs backup` shows no `BACKUP FAILED` (the restore test found a silent failure once; `trader backup` now fails loudly) | Weekly |
 | Update pinned image versions and dependency locks; rebuild; replay library diff | Monthly |
 | Rotate Alpaca and Finnhub keys | Every 90 days |
 | Update macro calendar (CPI, jobs, FOMC dates) | December for the next year; check monthly |

@@ -15,7 +15,10 @@ flowchart LR
             A2[A2 Market data<br/>single Alpaca stream]
             BUS((in-process bus))
             DEC[A1, A4–A12<br/>strategy · review · risk · execution · positions · supervisor · reports]
+            OPT[A13–A16 options desk<br/>advisory]
+            API[internal read-only API :8081]
         end
+        CON[console<br/>Owner Console · 127.0.0.1:8080]
         NEWS[news-sentiment<br/>A3 + FinBERT]
         NOTI[notifier<br/>Telegram or WhatsApp out + polled replies]
         OLL[ollama<br/>Qwen3 8B · GPU]
@@ -38,6 +41,11 @@ flowchart LR
     NOTI <--> PG
     NOTI <-->|send + poll replies| TW
     BK --> PG
+    DEC <--> OPT
+    OPT -->|options snapshots| ALP
+    CON -->|reads console_rw · inbound_cmd only| PG
+    CON -->|GET| API
+    CON -->|Ask, low priority| OLL
 ```
 
 ### Containers
@@ -50,7 +58,10 @@ flowchart LR
 | 4 | `notifier` | target `notifier` | Always | internal + egress to Telegram (default, ADR-014) or Twilio | Holds the channel keys; sends messages and **polls** for replies (Telegram `getUpdates` long polling or Twilio's Messages API), so nothing on the host is reachable from the internet |
 | 5 | `postgres` | `postgres:16` (pinned) | Always | internal only | Journal, tax lots and the cross-container outbox bus |
 | 6 | `backup` | target `tools` | Always (sleeps; runs nightly) | internal + local backup folder | Nightly `pg_dump` and Parquet copy |
+| 7 | `console` | target `console` (Starlette + uvicorn) | Always (`./run.sh --no-console` skips it) | internal + console-host, port bound to `127.0.0.1:8080` | Owner Console (UI_REQUIREMENTS.md). Reads with the `console_rw` role and trader-core's internal API; every action is an `inbound_cmd` outbox row with source `console`, checked by the same CommandAuthority as Telegram. Holds no broker keys |
 | — | `replay` | target `core` | On demand (`--profile replay`) | internal only | Backtests and replays use the same code as live, with fake broker and data |
+| — | `toolbox` | target `toolbox` | On demand (run.sh helpers) | internal + egress | `init-env`, `select-model`, `check-connections`, `telegram-chats`, `import-trades`, `restore-test`, `drill`: nothing runs on the host |
+| — | `restore-test` | `postgres:16` | On demand (`./run.sh restore-test`) | none | Restores the newest dump into a throwaway cluster (OPS-1) |
 | — | `grafana` | `grafana/grafana:13.2.3` | Optional (`--profile monitoring`) | internal only (no internet, no port) | Dashboards read Postgres directly as `readonly`; no Prometheus needed ([MONITORING.md](MONITORING.md) §3) |
 | — | `grafana-proxy` | `nginx:1.30.5-alpine` | With `grafana` | internal + monitoring, port bound to `127.0.0.1:3000` | Only forwards the browser to Grafana |
 | — | dev container | target `dev` | Development | — | Same Python toolchain as production in VS Code |
@@ -75,6 +86,8 @@ flowchart LR
 | `trader-core` → `notifier` | Outbox row + `NOTIFY outbound_msg` | Approvals, alerts, reports |
 | `notifier` → `trader-core` | Outbox row + `NOTIFY inbound_cmd` (only after SEC-1..3 checks) | `YES K7Q2`, `KILL`, `FLATTEN` + confirmation |
 | Any → `ollama` | HTTP JSON on the internal network | Structured Qwen calls |
+| `console` → `trader-core` | HTTP GET on the internal network (port 8081, never published) | Quotes, bars, checklist dry-run, scanner, latency, option chains |
+| `console` → `trader-core` (actions) | Outbox row + `NOTIFY inbound_cmd`, source forced to `console` by the database guard | `KILL`, `YES <code>`, `FILLED NVDA 40 @ 190.05` |
 
 If Postgres is down, `trader-core` blocks new entries (no journal, no trade) while broker-side brackets keep protecting open positions.
 

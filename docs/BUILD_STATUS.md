@@ -1,6 +1,6 @@
 # Build Status
 
-**As of:** October 1, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
+**As of:** October 10, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
 
 Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (small live) need the owner's accounts, keys and the local model, and real trading days.
 
@@ -16,6 +16,9 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 | M5 Technicals + setups | Done | `agents/a04_technicals.py`: all 8 setups, MF-1..MF-5, levels, score |
 | M6 Qwen agents + news | Done (offline) | `llm/ollama_client.py`, `agents/a03_news.py`, `a05_strategy.py`, `a06_review.py`, `prompts/*/v1.md`, `backtest/evaluation.py`, `news/sources.py` |
 | M7 Supervisor, notifications, reports | Done (offline) | `agents/a10_supervisor.py`, `a11_reporter.py`, `notify/`, `services/*_main.py`, `cli.py` |
+| REQUIREMENTS 1.3 (day-trader review) | Done (offline) | Latency and pre-arming (`agents/speed.py`), shadow trades, regime, slippage feedback, settled cash/account type, news shock, core alerts (`agents/alerts_core.py`), approval charts and buttons (`notify/chart.py`), co-pilot mode, notifier-down fallback (`notify/fallback.py`), in-play scan, tax set-aside, other-broker import (`agents/external_trades.py`), IEX-vs-SIP gate, strict paper fills, restore test and drill (`agents/ops.py`) |
+| Options layer (OPTIONS_REQUIREMENTS.md) | Done, advisory | `agents/a04_bearish.py` (BR-1..4), `options/` (A13 data, A14 strategist, A15 risk, A16 monitor, desk), OP-14 line in the alerts bot. Option order placement (§9 paper/live) is not built |
+| Owner Console (UI_REQUIREMENTS.md) | Done | `console/` (Starlette app, Ask tools, SVG charts), `services/core_api.py` (trader-core internal read-only API), `console` container on 127.0.0.1:8080 |
 | M8 Backtest + paper | Ready to start | Needs keys, history download, and 20+ paper days |
 | M9 Small live | Not started | After the M8 gates |
 
@@ -23,10 +26,12 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 
 | Check | Result |
 | --- | --- |
-| `pytest` | 263 passed, plus 9 Postgres integration tests passed against a real Postgres 16 initialised with `init.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not yet downloaded) |
-| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 137 of 137 automated requirement IDs covered |
+| `pytest` | 436 passed, including the Postgres integration tests against a real Postgres 16 initialised with `init.sql` + `upgrade.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not downloaded in CI) |
+| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 248 of 248 automated requirement IDs covered |
 | `ruff check src tests` (incl. bandit `S` rules) | Clean |
-| `mypy` (strict) | Clean, 62 files |
+| `mypy` (strict) | Clean, 101 files |
+| Console role on real Postgres | Every page renders as `console_rw`; it may publish only `inbound_cmd` (source forced to `console`), insert notes/chats/LLM logs, and is refused on every other write |
+| Restore test (OPS-1) on real Postgres | `pg_dump` as the read-only role, restore into a scratch cluster, counts compared: PASS |
 | Replay determinism (RP-2) | Same days twice give byte-identical decision logs |
 | 60-day synthetic backtest (`trader backtest --synthetic 60`) | Runs end to end in about 20 s |
 
@@ -43,6 +48,8 @@ Synthetic results only prove the plumbing; they say nothing about whether the st
 | `CREATE SCHEMA IF NOT EXISTS` fails for the least-privilege `core_rw` role | The migration checks for the schema first (found against a real Postgres) |
 | After a restart, reconcile flagged the system's own bracket legs as foreign orders | Reconcile also recognises orders from the journal and the restored legs |
 | QW-1: this machine has an 8 GB GPU (RTX 4060 Laptop) | Local `config/config.yaml` uses `qwen3:8b` |
+| The restore test (OPS-1) found the nightly `pg_dump` failing: the read-only backup role could not read sequences, and `trader backup` did not notice | Sequence grants for `readonly` (in `trader migrate` and `upgrade.sql`); `trader backup` checks the exit code, prints BACKUP FAILED, retries and leaves the health file stale so Grafana and the supervisor flag it |
+| A console needs live values that the journal does not hold (bars, quotes, checklist) | trader-core serves a GET-only JSON API on the internal network; the console holds no broker keys |
 
 ## What the owner needs to provide (M8)
 
@@ -53,15 +60,16 @@ Step-by-step instructions for every item: [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
 3. **Telegram bot** token and your chat id in `.env.notifier` (default channel, ADR-014), or Twilio WhatsApp.
 4. Postgres passwords in `secrets/pg_<role>_password.txt` and each `.env.*` file; database/role names in `docker/.env`.
 5. The model: `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull`.
-6. Then: `trader fetch-history`, `trader eval-prompts --llm ollama`, `docker compose ... up -d`, and 20+ days of paper trading in approve mode (RUNBOOK §1, TEST_PLAN stage 4).
+6. Then: `./run.sh connections`, `./run.sh` (starts everything), `./run.sh backtest`, and 20+ days of paper trading in approve mode (RUNBOOK §1, TEST_PLAN stage 4).
 
 ## Quick commands
 
-```powershell
-.venv\Scripts\Activate.ps1
-pytest -q                                              # all offline tests
-trader validate-config --config config/config.yaml
-trader replay --synthetic 10 --start 2026-10-05        # full system on synthetic days
-trader backtest --synthetic 120 --walk-forward --in-sample 40 --out-sample 10
-trader eval-prompts --llm ollama                       # AGENT_PROMPTS §8 against local Qwen
+All from WSL at the repo root; everything runs in containers.
+
+```bash
+./run.sh test                  # ruff, mypy, pytest, traceability (dev container)
+./run.sh replay 10             # full system on synthetic days
+./run.sh backtest 500          # playbook on real minute bars (BT-6)
+./run.sh restore-test          # OPS-1: newest backup into a scratch database
+docker compose -f docker/docker-compose.yml exec trader-core trader eval-prompts --llm ollama
 ```

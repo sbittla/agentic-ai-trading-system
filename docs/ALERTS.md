@@ -43,15 +43,12 @@ Postgres, Ollama/Qwen, a GPU, FinBERT/PyTorch or Grafana.
 5. Run it:
 
    ```bash
-   # Docker (recommended): one small container, restarts automatically
-   docker compose -f docker/docker-compose.yml --profile alerts up -d alerts
-   docker compose -f docker/docker-compose.yml logs -f alerts
-
-   # or directly (Python 3.12)
-   pip install -e . websockets
-   set -a; . ./.env.alerts; set +a
-   trader alerts
+   ./run.sh alerts          # one small container, restarts automatically
+   ./run.sh logs alerts
    ```
+
+   `./run.sh` (start) also starts it when `.env.alerts` has its own Alpaca key; with the
+   same key as trader-core it is skipped and trader-core sends the alerts itself (AL-1).
 
 > Alpaca allows **one** market-data WebSocket per account. Do not run `alerts` and
 > `trader-core` with the same Alpaca keys at the same time (use a second paper account, or
@@ -125,3 +122,17 @@ Not built yet. These change how alerts work, for this bot and for alerts sent by
   Set `feed: sip` if you pay for Alpaca's SIP data.
 - While muted, a one-shot rule that fires is still used up (it is logged, not sent).
 - Not financial advice; alerts are information, not trade signals.
+
+## Options line (optional, OP-14)
+
+With `options.enabled: true` in `config/alerts.yaml`, ORB, VWAP and HOD/LOD alerts get one
+extra line with a defined-risk options structure (the same A14 code trader-core uses):
+
+```
+Options: Call debit spread Oct 23 190C/193C · debit ~1.25 · max loss $125 x1 · OI not checked · indicative
+```
+
+- One snapshot call per alert, at most one every `min_interval_s` (10 s).
+- Sized to `fixed_risk_usd` (default $200). No IV history and no open-interest check in the
+  bot (one call only); trader-core's full options ideas have both (OPTIONS_REQUIREMENTS.md).
+- Advisory only: nothing is ordered.

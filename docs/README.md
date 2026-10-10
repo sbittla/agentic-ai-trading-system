@@ -37,8 +37,8 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | Document | What it covers |
 | --- | --- |
 | [REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md) | Gap review from a day trader's point of view: latency, data quality, alerts, learning speed; prioritized proposals |
-| [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) | Draft: options suggestions and alerts for bullish and bearish views (agents A13–A16), defined risk, advisory first |
-| [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Draft requirements for a local Owner Console: cockpit, any-stock lookup, plain-language Q&A, approvals, controls |
+| [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) | Options suggestions and alerts for bullish and bearish views (agents A13–A16), defined risk; advisory mode built |
+| [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Owner Console (built, http://localhost:8080): cockpit, any-stock lookup, plain-language Q&A, approvals, controls, options, journal |
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |

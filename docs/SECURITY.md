@@ -35,7 +35,7 @@ The system can move real money, so anything that can send it a command, feed it 
 | T13 | Broker-side compromise (someone logs into Alpaca web) | **SEC-13** Alpaca account 2FA; daily reconcile flags any order not placed by the system |
 | T14 | A compromised container (for example via a malicious news item) reaches the database or the broker | **SEC-17** one Postgres role per container with only the grants it needs; a trigger limits which outbox channels each role may publish to; `news-sentiment` and `notifier` hold no Alpaca keys |
 | T15 | One leaked env file exposes every secret | **SEC-18** each container reads only its own env file (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`); live keys in a separate `.env.live` |
-| T16 | Inbound internet connection to the home PC | **SEC-19** no inbound ports or tunnels: the notifier polls Twilio for replies (ADR-013); containers run read-only with `no-new-privileges` |
+| T16 | Inbound internet connection to the home PC | **SEC-19** no inbound ports or tunnels: the notifier polls Twilio for replies (ADR-013); containers run read-only with `no-new-privileges`. The only published ports are Grafana (`127.0.0.1:3000`) and the Owner Console (`127.0.0.1:8080`), both bound to localhost (UI-C1); the console adds a password, HttpOnly SameSite=Strict sessions, CSRF tokens and a strict CSP (UI-21), and its database role may publish only owner commands |
 
 ## 3. Key management
 
