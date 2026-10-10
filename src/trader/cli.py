@@ -85,6 +85,8 @@ def cmd_run(a: argparse.Namespace) -> int:
         from trader.services.news_main import main
     elif a.service == "alerts":
         return cmd_alerts(a)
+    elif a.service == "console":
+        from trader.console.main import main
     else:
         from trader.services.notifier_main import main
     main(a.config)
@@ -819,7 +821,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("--service", choices=["core", "news", "notifier", "alerts"], required=True)
+    r.add_argument("--service", choices=["core", "news", "notifier", "alerts", "console"],
+                   required=True)
     r.add_argument("--alerts-config", default=None)
     r.set_defaults(fn=cmd_run)
     al = sub.add_parser("alerts", help="lightweight Telegram price alerts (no LLM/Postgres)")

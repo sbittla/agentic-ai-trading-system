@@ -83,6 +83,7 @@ class OutboxMessage(BaseModel):
 CHANNELS = ("news_flags", "outbound_msg", "inbound_cmd", "heartbeat")
 ROLE_CHANNELS = {"news": ("news_flags", "heartbeat"),
                  "notifier": ("inbound_cmd", "heartbeat"),
+                 "console": ("inbound_cmd",),            # UI-C2: owner commands only
                  "core": CHANNELS}
 
 

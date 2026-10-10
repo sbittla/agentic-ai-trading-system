@@ -145,6 +145,10 @@ class CoreService:
             lambda: self._order_updates(broker)]
         if paper_broker is not None:
             loops.append(lambda: self._order_updates(paper_broker))
+        from trader.services.core_api import CoreApi  # owner console reads (UI_REQUIREMENTS)
+
+        api = CoreApi(engine, rest)
+        loops.append(lambda: api.serve(port=int(os.environ.get("CORE_API_PORT", "8081"))))
         await asyncio.gather(*(self._guard(fn) for fn in loops))
 
     async def _guard(self, fn: Callable[[], Awaitable[None]]) -> None:

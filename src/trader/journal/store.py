@@ -101,6 +101,7 @@ class SqlJournal:
         for t in s.CONSOLE_WRITES:
             stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {console}")
             stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {console}")
+        stmts.append(f"GRANT DELETE ON {s.SCHEMA}.console_chats TO {console}")   # UI-8d clear
         for t in s.NEWS_WRITES:
             stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {news}")
             stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {news}")

@@ -21,7 +21,7 @@ SERVICES = COMPOSE["services"]
 def test_six_always_on_services() -> None:
     always = {k for k, v in SERVICES.items() if "profiles" not in v}
     assert always == {"postgres", "ollama", "trader-core", "news-sentiment", "notifier",
-                      "backup"}
+                      "backup", "console"}   # console: ./run.sh --no-console skips it
 
 
 @pytest.mark.rule("SR-6")
@@ -44,7 +44,7 @@ def test_only_trader_core_has_broker_keys() -> None:
 @pytest.mark.rule("SEC-19")
 def test_no_inbound_ports_and_hardened_containers() -> None:
     for name, svc in SERVICES.items():
-        if name == "grafana-proxy":                       # Grafana's only door, localhost
+        if name in ("grafana-proxy", "console"):          # localhost only (UI-C1)
             assert all(p.startswith("127.0.0.1:") for p in svc["ports"])
             continue
         assert "ports" not in svc, name

@@ -1,0 +1,5 @@
+# Console image: base + a small ASGI stack (server-rendered pages, SSE; UI-23)
+starlette>=0.40
+uvicorn>=0.30
+python-multipart>=0.0.9
+-c base.lock

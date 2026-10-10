@@ -1926,16 +1926,35 @@ class TradingEngine:
                 f"{rs.halted or 'no'} · positions: {pos}")
 
     def status_dict(self) -> dict[str, Any]:
+        """Also the console's cockpit (UI-1, UI-2) and its fallback via status_snapshots."""
         rs = self.risk.state
-        return {"ts": self.now().isoformat(), "health": {k: v.level for k, v in
-                                                         self.sup.health.items()},
+        now = self.now()
+
+        def pos(p: ManagedPosition) -> dict[str, Any]:
+            last = self.md.state[p.ticker].last_price if p.ticker in self.md.state else None
+            entry = p.avg_entry
+            r = entry - p.initial_stop
+            unreal = (Decimal(str(last)) - entry) * p.qty_open if last is not None else None
+            return {"position_id": p.position_id, "ticker": p.ticker, "qty": p.qty_open,
+                    "style": p.style, "setup": p.setup, "route": p.route,
+                    "entry": str(entry), "stop": str(p.stop), "t1": str(p.t1),
+                    "last": last, "unrealized": str(unreal) if unreal is not None else None,
+                    "r": float((Decimal(str(last)) - entry) / r) if last is not None and r > 0
+                    else None, "opened_at": p.opened_at.isoformat()}
+        return {"ts": now.isoformat(), "environment": self.cfg.mode.environment,
+                "health": {k: v.level for k, v in self.sup.health.items()},
+                "health_detail": {k: v.detail for k, v in self.sup.health.items()},
                 "kill_switch": rs.kill_switch, "equity": str(self.equity),
+                "day_start_equity": str(rs.day_start_equity),
                 "day_pnl": str(rs.day_pnl), "trades_today": rs.trades_total_today,
+                "max_trades": self.cfg.risk.max_trades_per_day,
+                "loss_limit_pct": self.cfg.risk.daily_loss_limit_pct,
                 "halted": rs.halted, "paused": sorted(rs.paused_styles),
-                "positions": [{"ticker": p.ticker, "qty": p.qty_open, "stop": str(p.stop),
-                               "style": p.style} for p in self.pm.open_positions()],
+                "regime": self.regime, "window": self.windows.window_at(now),
+                "positions": [pos(p) for p in self.pm.open_positions()],
                 "locks": [{"ticker": x["ticker"], "type": x["type"]}
-                          for x in self.compliance.locked_list(self.now())]}
+                          for x in self.compliance.locked_list(now)],
+                "options_open": len(self.options.book.open) if self.options is not None else 0}
 
     # ===================================================================================
     # reconcile and helpers

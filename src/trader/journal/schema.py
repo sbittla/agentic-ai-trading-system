@@ -386,6 +386,13 @@ owner_notes = Table("owner_notes", metadata, _id(),               # UI-29 (conso
                     Column("tags", JSON), Column("note", Text),
                     Column("screenshot_b64", Text))
 
+console_chats = Table("console_chats", metadata, _id(),           # UI-8d (console writes)
+                      Column("ts", UtcDateTime, index=True),
+                      Column("day", Date, index=True),
+                      Column("question", Text), Column("answer", Text),
+                      Column("tool", String(32)), Column("rows_json", JSON),
+                      Column("model_used", Boolean))
+
 in_play = Table("in_play", metadata, _id(),                       # UN-1, UN-2
                 Column("date", Date, index=True),
                 Column("ticker", String(8)),
@@ -430,5 +437,5 @@ option_suggestions = Table("option_suggestions", metadata, _id(),  # A14, A16
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
 NEWS_WRITES = ("news_items", "event_flags", "llm_calls")
 NOTIFIER_WRITES = ("commands",)
-CONSOLE_WRITES = ("owner_notes",)
+CONSOLE_WRITES = ("owner_notes", "console_chats", "llm_calls")   # llm_calls: UI-8c log
 NEWS_READS = ("positions", "game_plans")   # NW-1: tickers with a position or a plan setup

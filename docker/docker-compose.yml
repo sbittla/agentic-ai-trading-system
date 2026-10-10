@@ -171,6 +171,34 @@ services:
       timeout: 15s
       retries: 3
 
+  console:                              # Owner Console (docs/UI_REQUIREMENTS.md), started by ./run.sh
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: console}
+    command: ["trader", "run", "--service", "console"]
+    env_file: [../.env.console]         # console_rw DB password, CORE_API_URL, OLLAMA_URL
+    environment:
+      TZ: America/New_York
+      TRADER_CONFIG: /app/config/config.yaml
+      CONSOLE_PASSWORD_FILE: /run/secrets/console_password
+      ALERTS_DB: /app/alerts/alerts.sqlite   # read-only view of the optional alerts bot
+    secrets: [console_password]
+    ports: ["127.0.0.1:8080:8080"]      # localhost only (UI-C1)
+    volumes:
+      - ../config:/app/config:ro
+      - ../reports:/app/reports:ro        # UI-16
+      - ../runs:/app/runs:ro              # UI-20
+      - alerts-data:/app/alerts:ro        # UI-14 (read-only)
+    mem_limit: 256m                     # UI-23: <= 200 MB steady
+    cpus: 0.5
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [internal, console-host]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   backup:
     <<: *app
     build: {context: .., dockerfile: docker/Dockerfile, target: tools}
@@ -304,6 +332,7 @@ networks:
     internal: true                      # no internet access
   egress: {}                            # outbound internet for core, news, notifier
   monitoring: {}                        # host port for grafana-proxy (an internal network cannot publish)
+  console-host: {}                      # host port 127.0.0.1:8080 for the console (same reason)
 
 volumes:
   pg-data: {}

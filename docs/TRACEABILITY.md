@@ -237,10 +237,10 @@ Advisory mode is built: suggestions, follow-ups and grading, no option orders. `
 | `OP-13` | OPT / CHAIN / IV / OPTS / OPTIONS ON|OFF (read-only) | options desk, commands | unit/test_options.py | — |
 | `OP-14` | Alerts bot options line (optional, rate-limited, fixed $ risk, same A14 code) | alerts bot | unit/test_options.py | — |
 | `OP-15` | One per ticker/direction/window; per-window cap; follow-ups grouped per minute | A15, options desk | unit/test_options.py | — |
-| `OP-16` | Options tab on the console stock page | console | Planned: console (Phase F) | — |
-| `OP-17` | Payoff view | console | Planned: console (Phase F) | — |
-| `OP-18` | Suggestions list on the console | console | Planned: console (Phase F) | — |
-| `OP-19` | Ask gains read-only options tools | console | Planned: console (Phase F) | — |
+| `OP-16` | Options tab on the console stock page | console | unit/test_console.py | — |
+| `OP-17` | Payoff view | console | unit/test_console.py | — |
+| `OP-18` | Suggestions list on the console | console | unit/test_console.py | — |
+| `OP-19` | Ask gains read-only options tools | console | unit/test_console.py | — |
 | `OP-20` | Prefetch the chain snapshot when a setup is pre-armed | A13, engine | unit/test_options.py | — |
 | `A15-1` | Wash sales both ways (options locked with the stock; option loss locks the stock) | A15, A12 | unit/test_options.py | NT_WASH_LOCK |
 | `A15-2` | Shared limits; one trade per suggestion; no stock entry and option idea on the same view | A15, A7 | unit/test_options.py | — |
@@ -251,6 +251,52 @@ Advisory mode is built: suggestions, follow-ups and grading, no option orders. `
 | `A16-2` | Result: $ and R, exit reason, view right vs option made money | A16 | unit/test_options.py | — |
 | `A16-3` | Report sections by structure, direction, IV regime and DTE | A16, A11 | unit/test_options.py | — |
 | `A16-4` | Promotion gate: ≥ 40 graded, ≥ +0.15R, PF ≥ 1.3, ≥ 20 sessions | A16 | unit/test_options.py | — |
+
+### Owner Console (UI_REQUIREMENTS.md)
+
+The console container reads with the `console_rw` role and trader-core's internal read-only API (port 8081, internal network only); every action is an `inbound_cmd` outbox message with source `console`.
+
+| ID | Requirement | Enforced by | Test | Journal reason code |
+| --- | --- | --- | --- | --- |
+| `UI-1` | Cockpit: mode banner, kill/halt/pause, equity, day P&L vs limit, trades used, health, window | console | unit/test_console.py | — |
+| `UI-2` | Open positions with $ and R and a link to the trade story | console, core API | unit/test_console.py | — |
+| `UI-3` | Today's game plan and next-day ideas | console | unit/test_console.py | — |
+| `UI-4` | Stock lookup for any US symbol: quote, charts with levels and markers, indicators, news, system status | console, core API | unit/test_console.py | — |
+| `UI-4a` | Service and model panel (heartbeats, Ollama model/VRAM/p95) | console | unit/test_console.py | — |
+| `UI-4b` | Open incidents with ACK | console | unit/test_console.py | — |
+| `UI-5` | Checklist dry-run now with measured values and thresholds | core API | unit/test_console.py | — |
+| `UI-6` | Buttons: price alert, ask, Grafana (plus options suggest) | console | unit/test_console.py | — |
+| `UI-6a` | Data limits stated on the page | console | unit/test_console.py | — |
+| `UI-7` | Ask: plain-language questions over the journal and market data | console (ask) | unit/test_console.py | — |
+| `UI-8` | Answers from read-only tools; numbers only from tool rows; never a prediction | console (ask) | unit/test_console.py | — |
+| `UI-8a` | Suggested commands open Controls; the model never sends them | console (ask) | unit/test_console.py | — |
+| `UI-8b` | Low priority: no model calls during entry windows or while busy | console (ask) | unit/test_console.py | — |
+| `UI-8c` | Validated tool arguments; calls logged to llm_calls | console (ask) | unit/test_console.py | — |
+| `UI-8d` | Per-day history, searchable, clearable | console (ask) | unit/test_console.py | — |
+| `UI-9` | Trade story per proposal from the journal, reason codes in words | console | unit/test_console.py | — |
+| `UI-10` | Approvals inbox: type the one-time code; code never shown | console, CommandAuthority | unit/test_console.py | — |
+| `UI-11` | Today's approvals with outcomes | console | unit/test_console.py | — |
+| `UI-12` | Controls; destructive ones preview and need the phone's confirmation code | console, CommandAuthority | unit/test_console.py | — |
+| `UI-13` | Commands journaled with source = console; audit list | console, commands | unit/test_console.py | — |
+| `UI-14` | Alerts: core alert log, ALERTS ON/OFF, bot rules (read-only) | console | unit/test_console.py | — |
+| `UI-15` | Next-day ideas page with track record | console | unit/test_console.py | — |
+| `UI-16` | Reports archive, readable and downloadable | console | unit/test_console.py | — |
+| `UI-17` | Compliance view: locks, tax lots, wash sales | console | unit/test_console.py | — |
+| `UI-18` | Config viewer (effective today vs file) | console | unit/test_console.py | — |
+| `UI-19` | Model and hardware page | console | unit/test_console.py | — |
+| `UI-20` | Replay/backtest runs list and compare | console | unit/test_console.py | — |
+| `UI-21` | Localhost, password secret, HttpOnly SameSite=Strict session, CSRF, idle timeout, CSP, rate-limited login | console | unit/test_console.py | — |
+| `UI-22` | Live home via SSE (≤ 5 s); quotes refresh every 5 s while visible | console | unit/test_console.py | — |
+| `UI-23` | One small container ≤ 200 MB; console_rw role publishes only inbound_cmd | console, Postgres guard | unit/test_console.py | — |
+| `UI-24` | Phone browser on the LAN later; v1 desktop localhost | — | Manual: v1 is desktop only | — |
+| `UI-25` | Colour never the only signal; keyboard shortcuts; light and dark themes | console | unit/test_console.py | — |
+| `UI-26` | Every page renders against a journal with no broker or GPU | tests | unit/test_console.py | — |
+| `UI-27` | Loads and shows what is missing when trader-core, Ollama or data are down | console | unit/test_console.py | — |
+| `UI-28` | Options tab, payoff view, suggestions list, options Q&A (OP-16..19) | console | unit/test_console.py | — |
+| `UI-29` | Owner journal: notes, tags, screenshot; tag statistics | console | unit/test_console.py | — |
+| `UI-30` | Live scanner with alert labels and in-play names | console, core API | unit/test_console.py | — |
+| `UI-31` | Latency and missed trades with shadow results | console | unit/test_console.py | — |
+| `UI-32` | Co-pilot ticket with I filled | console | unit/test_console.py | — |
 
 ## How to use
 
