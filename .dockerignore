@@ -20,3 +20,4 @@ llm_cache/
 config/config.yaml
 tests/
 docs/
+.venv-wsl

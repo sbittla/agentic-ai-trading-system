@@ -35,3 +35,6 @@ __pycache__/
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
+
+# WSL-side Linux venv created by run.sh (the repo .venv is the Windows one)
+.venv-wsl/

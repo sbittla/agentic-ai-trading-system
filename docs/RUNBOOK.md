@@ -8,6 +8,8 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 
 ## 1. One-time setup
 
+**One script does all of this from WSL** (repo root): `./run.sh setup` once (env files, passwords, model choice), fill in the keys it lists, then `./run.sh` to check everything and start every service. `./run.sh help` lists the rest (`status`, `logs`, `stop`, `alerts`, `replay`, `start --monitoring`). It refuses to start if git tracks any secret file. The steps below are what it automates.
+
 1. Install Docker Desktop (WSL2 backend) and the NVIDIA driver with WSL GPU support; confirm `docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi` works ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
 2. Create an Alpaca account; generate **paper** API keys. Keep live keys ungenerated until stage 5 of the test plan.
 3. Create a Finnhub key, a Reddit "script" app (optional), and a Twilio WhatsApp sandbox sender. Step-by-step instructions for every account, key and password are in [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
@@ -15,7 +17,7 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 5. Run `trader init-env --prefix <your prefix>` to create the env files (`.env.core`, `.env.news`, `.env.notifier`, `.env.backup`, `.env.replay`) from their `.example` templates and the five password files in `secrets/` (`pg_admin_password.txt`, `pg_core_password.txt`, `pg_news_password.txt`, `pg_notifier_password.txt`, `pg_readonly_password.txt`); optionally set the database and role names in `docker/.env`. Run `trader check-connections` to verify the keys ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §6, §8) ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#environment-variables-secrets)). Confirm `git status` shows none of them.
 6. `docker compose -f docker/docker-compose.yml up -d postgres ollama`, then `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull` to download the model set in `OLLAMA_MODEL` (default `qwen3:8b`; `trader select-model --apply` picks the right one for your GPU and sets `OLLAMA_MODEL` and `llm.model` together, [HARDWARE.md](HARDWARE.md)). The runtime `ollama` service has no internet access (SEC-9), so it cannot pull models itself. If Docker Desktop is unstable during large downloads, use `tools/fetch_ollama_model.py` and `tools/import_ollama_model.ps1` instead ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §0).
 7. `docker compose -f docker/docker-compose.yml run --rm trader-core trader migrate` to create the journal tables.
-8. `docker compose -f docker/docker-compose.yml up -d` to start all six services; `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
+8. `docker compose -f docker/docker-compose.yml up -d` to start every service (trader-core, news-sentiment, notifier, ollama, postgres, backup); `docker compose -f docker/docker-compose.yml ps` must show every service `healthy`.
 9. Check the 7:00 AM pre-flight message arrives on WhatsApp the next trading day, and reply `STATUS` to confirm inbound polling works. With the Twilio sandbox, WhatsApp delivers free-form messages only within 24 hours of your last message, so reply `STATUS` once a day ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) §5).
 10. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
 

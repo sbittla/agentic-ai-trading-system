@@ -27,6 +27,15 @@ Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIR
 
 Milestones M0–M7 are built and tested offline: 263 tests plus Postgres integration tests, with all 137 automated requirement IDs covered. Paper trading (M8) needs Alpaca and Finnhub keys, a Telegram bot (Reddit optional), and Qwen on the local NVIDIA GPU: follow [docs/ACCOUNT_SETUP.md](docs/ACCOUNT_SETUP.md). See [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
 
+## Run it (WSL, repo root)
+
+```bash
+./run.sh setup      # once: env files + passwords (git-ignored), model for your GPU
+./run.sh            # pre-flight checks, then start every agent; ./run.sh help for more
+```
+
+Full procedure: [docs/RUNBOOK.md](docs/RUNBOOK.md) §1.
+
 ## Quick start (development)
 
 ```powershell
