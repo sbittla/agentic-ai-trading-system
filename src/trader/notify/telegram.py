@@ -85,20 +85,23 @@ class TelegramNotifier:
         """Send ``text`` (split at 4000 characters) to ``chat_id`` or the owner chat.
         Returns False if every retry failed."""
         target = str(chat_id) if chat_id is not None else self.chat_id
-        for chunk in split_text(text):
-            if not await self._send_one(target, chunk):
+        chunks = split_text(text)
+        # HTML only when the message goes out whole: a tag cut between chunks is refused
+        html = kind in HTML_KINDS and len(chunks) == 1
+        for chunk in chunks:
+            if not await self._send_one(target, chunk, html=html):
                 return False
         return True
 
-    async def _send_one(self, chat_id: str, text: str) -> bool:
+    async def _send_one(self, chat_id: str, text: str, *, html: bool = False) -> bool:
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text,
+                                   "disable_web_page_preview": True}
+        if html:
+            payload["parse_mode"] = "HTML"
         for attempt in range(self.retries):
             try:
-                payload: dict[str, Any] = {"chat_id": self.chat_id, "text": text[:MAX_TEXT],
-                                           "disable_web_page_preview": True}
-                if kind in HTML_KINDS and len(text) <= MAX_TEXT:   # a cut tag would be refused
-                    payload["parse_mode"] = "HTML"
                 await self._call("sendMessage", payload)
-                return
+                return True
             except (httpx.HTTPError, TelegramError) as exc:
                 log.warning("telegram_send_failed", attempt=attempt, error=str(exc))
                 wait = 2 ** attempt
