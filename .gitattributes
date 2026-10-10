@@ -1,2 +1,9 @@
+# Store text with LF line endings in the repo (Windows checkouts may still use CRLF locally).
+# Without this, CRLF reaches .env/config files copied from the templates and every value
+# ends in a hidden \r.
+* text=auto eol=lf
 *.sh text eol=lf
 docker/postgres/*.sql text eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.lock text eol=lf
