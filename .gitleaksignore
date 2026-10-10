@@ -1,0 +1,3 @@
+# False positive: a made-up placeholder in the SEC-6 redaction test (since rewritten).
+# Fingerprint format: <commit>:<file>:<rule>:<line>
+635d71f71711e9c774e563b17660ab56e7af186d:tests/unit/test_security.py:generic-api-key:101
