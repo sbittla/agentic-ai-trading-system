@@ -1,7 +1,10 @@
 # Telegram Price Alerts (`trader alerts`)
 
 A standalone, lightweight day-trading alert bot. It watches up to 30 symbols on Alpaca's free
-IEX feed and sends alerts to your Telegram chat. It does **not** trade, and it does not need
+IEX feed and sends alerts to your Telegram chat. By default it watches the 20 largest S&P 500
+companies by market cap (NVDA, AAPL, GOOGL, MSFT, AMZN, META, AVGO, TSLA, MU, LLY, BRK.B, AMD,
+JPM, WMT, V, XOM, JNJ, INTC, MA, ABBV; October 2026 snapshot) plus SPY and QQQ, which leaves
+8 slots for your own picks (`/watch`). Rankings change: review the list each quarter. It does **not** trade, and it does not need
 Postgres, Ollama/Qwen, a GPU, FinBERT/PyTorch or Grafana.
 
 | | Full stack (`docker compose up`) | `alerts` only |

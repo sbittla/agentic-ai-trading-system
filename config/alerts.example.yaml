@@ -2,7 +2,11 @@
 # Every field is optional. The watchlist here is only the starting list: once you use
 # /watch or /unwatch in Telegram, the saved watchlist (SQLite) takes over.
 
-watchlist: [NVDA, AAPL, GOOGL, MSFT, AMZN, TSM, META, AVGO, TSLA, SPY, QQQ]   # max 30 (IEX)
+# Top 20 S&P 500 by market cap (October 2026 snapshot) + SPY/QQQ for market context.
+# 22 of the 30 symbols the free IEX feed allows; rankings drift, review quarterly.
+watchlist: [NVDA, AAPL, GOOGL, MSFT, AMZN, META, AVGO, TSLA, MU, LLY,
+            BRK.B, AMD, JPM, WMT, V, XOM, JNJ, INTC, MA, ABBV,
+            SPY, QQQ]
 feed: iex                       # iex (free) | sip (paid Alpaca plan)
 connect_before_open_min: 5      # open the WebSocket at 09:25 ET (pre-open price rules work)
 disconnect_after_close_min: 1
