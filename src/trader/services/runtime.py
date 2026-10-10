@@ -36,6 +36,10 @@ def _redact(_: Any, __: str, event: MutableMapping[str, Any]) -> MutableMapping[
 def configure_logging(level: str = "INFO", json_logs: bool | None = None) -> None:
     json_logs = (not sys.stderr.isatty()) if json_logs is None else json_logs
     logging.basicConfig(level=level, format="%(message)s", stream=sys.stderr)
+    # httpx/httpcore log every request URL at INFO; Telegram's URL carries the bot token
+    # (SEC-6), and the per-poll lines are noise. Warnings and errors still show.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     structlog.configure(
         processors=[structlog.contextvars.merge_contextvars, structlog.processors.add_log_level,
                     structlog.processors.TimeStamper(fmt="iso", utc=True), _redact,

@@ -141,6 +141,16 @@ class OllamaClient:
             self.server_error = err
         return ok
 
+    async def unload(self) -> bool:
+        """Free the model's VRAM and RAM now (``keep_alive: 0``); the next call reloads it."""
+        try:
+            async with self._client(30) as c:
+                r = await c.post("/api/generate", json={"model": self.model, "keep_alive": 0})
+            return r.status_code == 200
+        except httpx.HTTPError as exc:
+            log.warning("llm_unload_failed", error=str(exc))
+            return False
+
     async def gpu_status(self) -> dict[str, Any]:
         """Loaded models and how much of each is in GPU memory (Ollama ``/api/ps``)."""
         async with self._client(10) as c:

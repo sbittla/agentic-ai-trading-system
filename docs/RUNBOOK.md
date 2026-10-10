@@ -28,6 +28,7 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 | 9:35–10:30 | In approve mode, answer approvals within 90 seconds; no answer means no trade |
 | 10:30 | Read the morning summary |
 | 3:00–4:00 | Approvals as above |
+| 4:15 | Read the **next-day ideas** alert: up to 4 picks per window with trigger, stop and T1, built from today's close (code screen + Qwen review), plus how the previous ideas played out. Grafana **6. Next-day ideas** shows every ticker's screen. Ideas are refreshed at 9:00 and 2:45 with gap and pre-market data; they mark trades as planned (full size), they never place orders |
 | 4:30 | Read the daily review; note any rule breach or incident |
 | Friday | Read the weekly review; decide on any setup returned to paper |
 
@@ -38,6 +39,7 @@ Commands are accepted only from allow-listed senders (`TELEGRAM_ALLOWED_CHAT_IDS
 | Action | Telegram / WhatsApp | Local |
 | --- | --- | --- |
 | Status | `STATUS` | `docker compose -f docker/docker-compose.yml exec trader-core trader status` |
+| Rebuild next-day ideas (outside market hours) | `PLAN` | `docker compose -f docker/docker-compose.yml exec trader-core trader plan` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
 | Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `trader resume` |
 | Flatten everything now | `FLATTEN`, then the confirmation code | `trader flatten --confirm` |

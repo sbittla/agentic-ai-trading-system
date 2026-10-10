@@ -55,6 +55,70 @@ def compute_levels(ticker: str, day: date, daily: list[Bar], pm_high: float | No
                   low5d=min(lows[-5:]), pullback_to_ema=pullback, history_days=len(prior))
 
 
+def session_screen(daily: list[Bar], lv: Levels) -> dict[str, Any]:
+    """Next-session screen from the latest completed session (A5-1 preview plan).
+
+    ``lv`` must come from ``compute_levels`` for the session being planned, so its prior_*
+    fields describe the latest completed session. Every number the plan may use as a trigger,
+    stop or target is computed here, so the plan passes the PR-4 numbers check. Morning
+    triggers are only reference levels: the live ORB/GAP triggers come from the opening range.
+    """
+    prior = [b for b in daily if to_et(b.ts).date() < lv.day]
+    last = prior[-1]
+    prev_close = prior[-2].c if len(prior) > 1 else last.c
+    atr = lv.atr14d or 0.0
+    rng = last.h - last.l
+    range_pos = (last.c - last.l) / rng if rng > 0 else 0.5
+    change = (last.c / prev_close - 1) * 100 if prev_close else 0.0
+    vol_ratio = last.v / lv.avg_vol50d if lv.avg_vol50d else None
+    trend_up = bool(lv.ema20d and lv.ema50d and last.c > lv.ema20d > lv.ema50d)
+    # the 20-day closing high before the latest session: the base the breakout must clear
+    base = max(b.c for b in prior[-21:-1]) if len(prior) > 1 else last.c
+
+    def dist(level: float | None) -> float | None:
+        return round((level - last.c) / atr, 2) if level is not None and atr else None
+
+    def _up(v: float) -> float:
+        return float(cents(v))
+
+    def _down(v: float) -> float:
+        return float(cents_down(v))
+
+    cands: list[dict[str, Any]] = []
+    if atr:
+        if trend_up and range_pos >= 0.5:
+            stop = max(last.l, last.h - 0.5 * atr)
+            cands.append({"setup": "ORB", "trigger": _up(last.h), "stop": _down(stop),
+                          "target_1": _up(2 * last.h - stop),
+                          "basis": "uptrend, strong close: reference trigger = prior day high "
+                                   "(live ORB trigger comes from the opening range)"})
+        if trend_up and lv.pullback_to_ema:
+            swing_stop = lv.low5d - 0.1 * atr if lv.low5d is not None else None
+            if swing_stop is not None and last.h - swing_stop <= 1.5 * atr:
+                cands.append({"setup": "SWING_CLOSE_NEAR_HIGH", "trigger": _up(last.h),
+                              "stop": _down(swing_stop),
+                              "target_1": _up(last.h + 1.5 * (last.h - swing_stop)),
+                              "basis": "uptrend with a pullback to the 20/50-day EMA in the "
+                                       "last 5 sessions; needs a close near the high"})
+        if (trend_up and 0 <= base - last.c <= 1.0 * atr) or last.c > base:
+            level = max(base, lv.close_high20d or base) if last.c <= base else last.h
+            stop = level - 0.5 * atr
+            cands.append({"setup": "SWING_BASE_BREAKOUT", "trigger": _up(level),
+                          "stop": _down(stop), "target_1": _up(level + 0.75 * atr),
+                          "basis": "closed above the 20-day closing high" if last.c > base
+                          else "within 1 ATR of the 20-day closing high"})
+    score = (30 * trend_up + 20 * (range_pos >= 0.75 and change >= 0)
+             + 15 * bool(vol_ratio and vol_ratio >= 1.0) + 15 * bool(lv.pullback_to_ema)
+             + 20 * bool(cands))
+    return {"session_date": to_et(last.ts).date().isoformat(), "close": last.c,
+            "change_pct": round(change, 2), "range_pos": round(range_pos, 2),
+            "volume_vs_50d_avg": round(vol_ratio, 2) if vol_ratio else None,
+            "trend_up": trend_up, "atr_to_prior_high": dist(last.h),
+            "atr_to_20d_closing_high": dist(base), "atr_to_20d_high": dist(lv.high20d),
+            "atr_to_ema20d": dist(lv.ema20d), "readiness_score": score,
+            "candidates": cands}
+
+
 @dataclass
 class Armed:
     """A setup whose trigger is a break of a level by a later 1-min trade."""

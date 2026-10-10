@@ -40,7 +40,8 @@ class Board:
             thresholds: list[tuple[str, float | None]] | None = None,
             mappings: list[dict[str, Any]] | None = None, color_cells: bool = False,
             options: dict[str, Any] | None = None, decimals: int | None = None,
-            min_max: tuple[float, float] | None = None) -> None:
+            min_max: tuple[float, float] | None = None,
+            overrides: list[dict[str, Any]] | None = None) -> None:
         if self.x + w > 24:
             self.x, self.y, self.row_h = 0, self.y + self.row_h, 0
         defaults: dict[str, Any] = {}
@@ -62,7 +63,7 @@ class Board:
             "datasource": DS, "gridPos": {"x": self.x, "y": self.y, "w": w, "h": h},
             "targets": [{"refId": "A", "datasource": DS, "editorMode": "code",
                          "format": fmt, "rawQuery": True, "rawSql": sql.strip()}],
-            "fieldConfig": {"defaults": defaults, "overrides": []},
+            "fieldConfig": {"defaults": defaults, "overrides": overrides or []},
             "options": options or {},
         }
         if kind == "stat":
@@ -124,13 +125,17 @@ def today() -> Board:
     b.add("Today's decisions",
           f"SELECT ts, ticker, setup, \"window\", result, reason_code, qty, risk_usd, detail "
           f"FROM {J}.decisions WHERE ts >= {TODAY} ORDER BY ts DESC", w=24, h=10)
-    b.add("Game plan (today)",
-          f"SELECT \"window\", ticker, setup, trigger, stop, target, notes, source "
-          f"FROM {J}.game_plans g WHERE date = (now() AT TIME ZONE 'America/New_York')::date "
-          # a fallback (LLM down) is replaced by the retried LLM plan for the same window
-          f"AND NOT (source = 'fallback' AND EXISTS (SELECT 1 FROM {J}.game_plans x "
-          f"WHERE x.date = g.date AND x.\"window\" = g.\"window\" AND x.source = 'llm')) "
-          f"ORDER BY \"window\", ticker", w=12, h=8)
+    b.add("Game plans (today and next session)", f"""
+WITH k AS (SELECT date, "window", max(id) AS mx FROM {J}.game_plans
+           WHERE date >= (now() AT TIME ZONE 'America/New_York')::date GROUP BY 1, 2),
+-- one plan run = one contiguous block of ids; keep only the latest run per date and window
+b AS (SELECT k.*, (SELECT coalesce(max(o.id), 0) FROM {J}.game_plans o WHERE o.id < k.mx
+                   AND (o.date, o."window") <> (k.date, k."window")) AS lo FROM k)
+SELECT g.date, g."window", g.ticker, g.setup, g.trigger, g.stop, g.target, g.notes, g.source
+FROM {J}.game_plans g JOIN b ON g.date = b.date AND g."window" = b."window" AND g.id > b.lo
+ORDER BY g.date, g."window" DESC, g.id""", w=12, h=8,
+          desc="preview = built after the previous close (trader plan / 4:15 PM ET); "
+               "llm = the 9:00 AM or 2:45 PM refresh with gap and pre-market data.")
     b.add("Open incidents",
           f"SELECT ts, type, detail FROM {J}.incidents WHERE resolved_at IS NULL ORDER BY ts DESC",
           w=12, h=8)
@@ -324,9 +329,99 @@ WHERE $__timeFilter(ts) ORDER BY ts DESC""", w=24, h=8)
     return b
 
 
+# Latest after-close ideas run for the latest planned session (A5-1 preview).
+IDEAS = (f"{J}.next_day_ideas WHERE run_at = (SELECT max(run_at) FROM {J}.next_day_ideas "
+         f"WHERE plan_for = (SELECT max(plan_for) FROM {J}.next_day_ideas))")
+STATUS_COLORS = {"type": "value", "options": {
+    "pick": {"color": "green", "index": 0, "text": "PICK"},
+    "watch": {"color": "blue", "index": 1, "text": "watch"},
+    "skip": {"color": "orange", "index": 2, "text": "passed (Qwen)"},
+    "off": {"color": "red", "index": 3, "text": "OFF-LIMITS"}}}
+OUTCOME_COLORS = {"type": "value", "options": {
+    "t1": {"color": "green", "index": 0, "text": "reached T1"},
+    "open": {"color": "blue", "index": 1, "text": "triggered, open"},
+    "both": {"color": "orange", "index": 2, "text": "T1 and stop"},
+    "stopped": {"color": "red", "index": 3, "text": "stopped"},
+    "not_triggered": {"color": "text", "index": 4, "text": "not triggered"}}}
+
+
+def _cell(name: str, cell: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    props = [{"id": "custom.cellOptions", "value": cell}]
+    props += [{"id": k, "value": v} for k, v in extra.items()]
+    return {"matcher": {"id": "byName", "options": name}, "properties": props}
+
+
+def ideas() -> Board:
+    b = Board("trader-ideas", "6. Next-day ideas", time_from="now-30d", refresh="1m")
+    b.add("Ideas for", f"SELECT to_char(max(plan_for), 'Dy Mon DD') AS session FROM {IDEAS}",
+          kind="stat", w=5, h=4, thresholds=[("blue", None)],
+          options={"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/session/",
+                                     "values": False}},
+          desc="Built after the close (4:15 PM ET) or by `trader plan` / PLAN; the 9:00 and "
+               "2:45 plans refresh it with gap and pre-market data.")
+    b.add("Picks", f"SELECT count(*) FILTER (WHERE status = 'pick') AS picks FROM {IDEAS}",
+          kind="stat", w=3, h=4, thresholds=[("text", None), ("green", 1)])
+    b.add("Built", f"SELECT max(run_at) AS built FROM {IDEAS}", kind="stat", w=4, h=4,
+          unit="dateTimeFromNow", thresholds=[("blue", None)])
+    graded = (f"FROM {J}.next_day_ideas WHERE outcome IS NOT NULL AND outcome <> 'no_pick' "
+              f"AND $__timeFilter(run_at)")
+    b.add("Ideas triggered", f"SELECT 100.0 * avg(triggered::int) AS pct {graded}",
+          kind="stat", w=4, h=4, unit="percent", decimals=0, thresholds=[("blue", None)],
+          desc="Picks whose trigger traded on the planned session (daily high).")
+    b.add("Reached T1 (of triggered)",
+          f"SELECT 100.0 * avg((outcome = 't1')::int) FILTER (WHERE triggered) AS pct {graded}",
+          kind="stat", w=4, h=4, unit="percent", decimals=0,
+          thresholds=[("red", None), ("orange", 35), ("green", 50)])
+    b.add("Stopped (of triggered)",
+          f"SELECT 100.0 * avg((outcome = 'stopped')::int) FILTER (WHERE triggered) AS pct "
+          f"{graded}", kind="stat", w=4, h=4, unit="percent", decimals=0,
+          thresholds=[("green", None), ("orange", 35), ("red", 50)])
+    b.add("Next-day ideas (latest run)", f"""
+SELECT rank AS "#", ticker, status, score, close, change_pct AS "day %",
+       range_pos AS "close in range", volume_ratio AS "vol vs 50d", trend_up AS uptrend,
+       atr_to_prior_high AS "ATR to prior high", atr_to_20d_closing_high AS "ATR to 20d close high",
+       morning_setup || ' ' || morning_trigger || ' / ' || morning_stop || ' / ' || morning_target
+         AS "morning: trigger / stop / T1",
+       afternoon_setup || ' ' || afternoon_trigger || ' / ' || afternoon_stop || ' / '
+         || afternoon_target AS "afternoon: trigger / stop / T1",
+       news_tone AS news, note
+FROM {IDEAS} ORDER BY rank""", w=24, h=11,
+          desc="score: 30 uptrend + 20 strong close + 15 volume >= avg + 15 pullback to EMA "
+               "+ 20 has a candidate setup. ATR distances: negative = already above.",
+          overrides=[_cell("status", {"type": "color-background"},
+                           mappings=[STATUS_COLORS]),
+                     _cell("score", {"type": "gauge", "mode": "basic"}, min=0, max=100,
+                           thresholds={"mode": "absolute", "steps": [
+                               {"color": "red", "value": None}, {"color": "orange", "value": 50},
+                               {"color": "green", "value": 70}]}),
+                     _cell("day %", {"type": "color-text"}, decimals=2, thresholds={
+                         "mode": "absolute", "steps": [{"color": "red", "value": None},
+                                                       {"color": "green", "value": 0}]})])
+    b.add("Readiness score", f"SELECT ticker, score FROM {IDEAS} ORDER BY score DESC",
+          kind="bargauge", w=10, h=10, min_max=(0, 100),
+          thresholds=[("red", None), ("orange", 50), ("green", 70)],
+          options={"orientation": "horizontal", "displayMode": "gradient",
+                   "reduceOptions": {"calcs": ["lastNotNull"], "values": True,
+                                     "fields": "/score/"}})
+    b.add("Track record (graded on the planned session)", f"""
+SELECT plan_for AS session, ticker,
+       coalesce(morning_setup, afternoon_setup) AS setup,
+       coalesce(morning_trigger, afternoon_trigger) AS trigger,
+       coalesce(morning_stop, afternoon_stop) AS stop,
+       coalesce(morning_target, afternoon_target) AS t1,
+       day_high, day_low, day_close, outcome
+FROM {J}.next_day_ideas
+WHERE status = 'pick' AND outcome IS NOT NULL AND $__timeFilter(run_at)
+ORDER BY plan_for DESC, rank""", w=14, h=10,
+          desc="Daily bars cannot tell whether T1 or the stop came first: 'T1 and stop'.",
+          overrides=[_cell("outcome", {"type": "color-background"},
+                           mappings=[OUTCOME_COLORS])])
+    return b
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    for build in (today, pipeline, performance, llm, data_quality):
+    for build in (today, pipeline, performance, llm, data_quality, ideas):
         print(build().write().relative_to(OUT.parents[2]))
 
 

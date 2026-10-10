@@ -32,6 +32,7 @@ from trader.models.messages import (
 from trader.timeutil import et_datetime, to_et
 
 log = structlog.get_logger(__name__)
+PREVIEW_MIN_SCORE = 70   # session_screen readiness needed to fill a preview plan slot
 NAMESPACE = uuid.UUID("6f1c2a47-6e1b-4d0e-9a0b-2c7d3f9e8a11")
 
 
@@ -73,21 +74,32 @@ class StrategyAgent:
 
     # -- A5-1 game plan ----------------------------------------------------------------------
     async def game_plan(self, d: date, window: str, data: dict[str, Any],
-                        locks: list[dict[str, Any]]) -> GamePlan:
-        version = self.cfg.llm.prompt_versions.get("a05_plan", "v1")
+                        locks: list[dict[str, Any]], preview: bool = False) -> GamePlan:
+        """``preview``: the plan for session ``d`` built after the previous close from the
+        latest completed session (no gap or pre-market yet). The 9:00 / 2:45 plans replace it."""
+        agent = "a05_preview" if preview else "a05_plan"
+        version = self.cfg.llm.prompt_versions.get(agent, "v1")
         setups = MORNING_SETUPS if window == "morning" else AFTERNOON_SETUPS
-        system = load_prompt("a05_plan", version).replace("{window}", window).replace(
-            "{setup_list}", ", ".join(setups))
+        system = load_prompt(agent, version).replace("{window}", window).replace(
+            "{setup_list}", ", ".join(setups)).replace("{plan_for}", d.isoformat())
         payload = {**data, "window": window, "locks": locks}
-        res = await self.llm.structured(agent="a05_plan", prompt_version=version,
+        off = [(x["ticker"], x.get("reason", "locked")) for x in locks]
+        if preview and not data.get("tickers"):   # no candidate for this window: no LLM call
+            return self._store(d, window, GamePlan(
+                day=d, window="morning" if window == "morning" else "afternoon",
+                off_limits=tuple(off), source="preview"))
+        res = await self.llm.structured(agent=agent, prompt_version=version,
                                         system=system, data=payload, schema=GamePlanOut,
                                         timeout_s=self.cfg.llm.timeout_sec)
-        off = [(x["ticker"], x.get("reason", "locked")) for x in locks]
         if not res.ok or not isinstance(res.value, GamePlanOut):
-            if (d, window) in self.plans:   # a failed retry: keep the plan already journaled
+            if (d, window) in self.plans:   # failed retry or preview: keep the journaled plan
                 return self.plans[(d, window)]
+            # preview: Qwen down still leaves the code screen's picks (no veto available)
+            watch = tuple(self._screen_fill(data, [], {t for t, _ in off}, setups)) \
+                if preview else ()
             plan = GamePlan(day=d, window="morning" if window == "morning" else "afternoon",
-                            watch=(), off_limits=tuple(off), source="fallback")
+                            watch=watch, off_limits=tuple(off),
+                            source="preview" if preview else "fallback")
         else:
             out = res.value
             nums = numbers_in(data)
@@ -105,9 +117,14 @@ class StrategyAgent:
             for o in out.off_limits:
                 if o.ticker in self.cfg.universe.tickers and o.ticker not in {t for t, _ in off}:
                     off.append((o.ticker, o.reason))
+            if preview:
+                items += self._screen_fill(data, items, {t for t, _ in off}, setups)
             plan = GamePlan(day=d, window="morning" if window == "morning" else "afternoon",
                             market_bias=out.market_bias, watch=tuple(items),
-                            off_limits=tuple(off), source="llm")
+                            off_limits=tuple(off), source="preview" if preview else "llm")
+        return self._store(d, window, plan)
+
+    def _store(self, d: date, window: str, plan: GamePlan) -> GamePlan:
         self.plans[(d, window)] = plan
         if self.journal is not None:
             rows: list[dict[str, Any]] = [
@@ -122,6 +139,31 @@ class StrategyAgent:
                          "source": plan.source}]
             self.journal.insert_many(s.game_plans, rows)
         return plan
+
+    def _screen_fill(self, data: dict[str, Any], items: list[GamePlanItem], excluded: set[str],
+                     setups: tuple[str, ...]) -> list[GamePlanItem]:
+        """Preview plans: fill open slots (max 4) from the code screen, best readiness first.
+        The model's picks come first and its off-limits list is a veto. A plan item only marks
+        a later live trigger as planned (full size, DR-7); every entry still needs the live
+        trigger, the checklist, A6 review and A7 risk."""
+        have = {i.ticker for i in items}
+        ranked = sorted(((t, v.get("session") or {}) for t, v in data.get("tickers", {}).items()),
+                        key=lambda x: -int(x[1].get("readiness_score", 0)))
+        out: list[GamePlanItem] = []
+        for t, scr in ranked:
+            if len(items) + len(out) >= 4:
+                break
+            score = int(scr.get("readiness_score", 0))
+            if (score < PREVIEW_MIN_SCORE or t in have or t in excluded
+                    or t not in self.cfg.universe.tickers):
+                continue
+            c = next((c for c in scr.get("candidates", []) if c.get("setup") in setups), None)
+            if c is None:
+                continue
+            out.append(GamePlanItem(ticker=t, setup=c["setup"], trigger=c["trigger"],
+                                    stop=c["stop"], target_1=c["target_1"],
+                                    why=f"screen {score}/100: {c.get('basis', '')}"[:200]))
+        return out
 
     def planned(self, ticker: str, setup: str, d: date, window: str) -> bool:
         """CK-4 / DR-7: was this ticker+setup on today's plan for the window?"""

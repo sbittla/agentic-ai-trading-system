@@ -543,8 +543,8 @@
     {
       "id": 11,
       "type": "table",
-      "title": "Game plan (today)",
-      "description": "",
+      "title": "Game plans (today and next session)",
+      "description": "preview = built after the previous close (trader plan / 4:15 PM ET); llm = the 9:00 AM or 2:45 PM refresh with gap and pre-market data.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "journal"
@@ -565,7 +565,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \"window\", ticker, setup, trigger, stop, target, notes, source FROM journal.game_plans g WHERE date = (now() AT TIME ZONE 'America/New_York')::date AND NOT (source = 'fallback' AND EXISTS (SELECT 1 FROM journal.game_plans x WHERE x.date = g.date AND x.\"window\" = g.\"window\" AND x.source = 'llm')) ORDER BY \"window\", ticker"
+          "rawSql": "WITH k AS (SELECT date, \"window\", max(id) AS mx FROM journal.game_plans\n           WHERE date >= (now() AT TIME ZONE 'America/New_York')::date GROUP BY 1, 2),\n-- one plan run = one contiguous block of ids; keep only the latest run per date and window\nb AS (SELECT k.*, (SELECT coalesce(max(o.id), 0) FROM journal.game_plans o WHERE o.id < k.mx\n                   AND (o.date, o.\"window\") <> (k.date, k.\"window\")) AS lo FROM k)\nSELECT g.date, g.\"window\", g.ticker, g.setup, g.trigger, g.stop, g.target, g.notes, g.source\nFROM journal.game_plans g JOIN b ON g.date = b.date AND g.\"window\" = b.\"window\" AND g.id > b.lo\nORDER BY g.date, g.\"window\" DESC, g.id"
         }
       ],
       "fieldConfig": {

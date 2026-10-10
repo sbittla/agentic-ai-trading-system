@@ -22,7 +22,8 @@ import structlog
 
 from trader.agents.a01_universe import UniverseAgent
 from trader.agents.a02_market_data import MarketDataAgent
-from trader.agents.a04_technicals import TechnicalAgent, compute_levels
+from trader.agents.a04_technicals import TechnicalAgent, compute_levels, session_screen
+from trader.agents.a05_ideas import alert_text, grade, grade_summary, idea_rows
 from trader.agents.a05_strategy import StrategyAgent, proposal_id_for
 from trader.agents.a06_review import ReviewAgent
 from trader.agents.a07_risk import ClosedTrade, DecisionContext, OpenPositionView, RiskManager
@@ -45,12 +46,15 @@ from trader.interfaces import Broker, BrokerRejected, BrokerUnavailable, Histori
 from trader.journal import schema as s
 from trader.journal.store import JournalUnavailable, SqlJournal
 from trader.models.messages import (
+    AFTERNOON_SETUPS,
+    MORNING_SETUPS,
     ApprovalResponse,
     Bar,
     ChecklistItem,
     Command,
     Decision,
     EventFlags,
+    GamePlan,
     KillSwitch,
     LimitHit,
     NoTrade,
@@ -68,6 +72,7 @@ from trader.notify.commands import CommandAuthority
 from trader.timeutil import ET, et_date, et_datetime, to_et
 
 log = structlog.get_logger(__name__)
+LLM_UNLOAD_AT = time(17, 45)   # after the daily/weekly/monthly reports
 D0 = Decimal(0)
 
 
@@ -132,6 +137,7 @@ class TradingEngine:
         self.bus = EventBus(journal, now)
         self.auth = CommandAuthority(now, journal)
         self.scheduler = Scheduler(calendar)
+        self._plan_attempts: set[tuple[date, str]] = set()   # (day, window) 9:00/2:45 runs
         self.stats = EngineStats()
         self.day: date | None = None
         self.equity: Decimal = D0
@@ -172,6 +178,14 @@ class TradingEngine:
         sch.add("afternoon_no_trade_log", time(15, 51), lambda now: self.job_window_end(
             now, "afternoon"))
         sch.add("end_of_day", time(16, 0), self.job_end_of_day, until=time(23, 59))
+        # A5-1 preview: next session's plan from the day just closed (daily bar is final).
+        # Live only: replays and backtests keep their recorded plan schedule (RP-2).
+        if not self.sim_mode:
+            sch.add("next_session_plan", time(16, 15), self.job_next_plan, until=time(23, 59))
+            # after the 4:30-5:30 reports: free the GPU and ~3 GB RAM overnight; QW-4 reloads
+            # the model at 8:55 and the news service loads it on its first call from 7:15
+            sch.add("llm_unload", LLM_UNLOAD_AT, self._unload_llm, when="daily",
+                    until=time(23, 59))
         sch.add("daily_review", time(16, 30), lambda now: self.job_report(now, "daily"))
         sch.add("weekly_review", time(17, 0), self.job_weekly, when="friday")
         sch.add("monthly_review", time(17, 30), self.job_monthly, when="month_end")
@@ -318,7 +332,8 @@ class TradingEngine:
         d = et_date(now)
         if window == "afternoon" and not self.windows.afternoon_open(d):
             return True
-        retry = (d, window) in self.strategy.plans
+        retry = (d, window) in self._plan_attempts   # a preview plan is not an attempt
+        self._plan_attempts.add((d, window))
         locks = [{"ticker": x["ticker"],
                   "reason": f"{x['type']} until {x['until'].astimezone(ET):%Y-%m-%d}"}
                  for x in self.compliance.locked_list(now)]
@@ -341,7 +356,7 @@ class TradingEngine:
             data["market"][c] = {"last": st.last_price, "prior_close": st.prior_close,
                                  "above_vwap": st.above_vwap()}
         plan = await self.strategy.game_plan(d, window, data, locks)
-        if plan.source == "fallback" and retry:
+        if plan.source != "llm" and retry:
             return False   # the first fallback was already sent; say again only on success
         self.bus.publish(plan)
         rs = self.risk.state
@@ -360,7 +375,128 @@ class TradingEngine:
         left = self.cfg.risk.max_trades_per_day - rs.trades_total_today
         lines.append(f"Trades left today: {left} · Daily loss budget: ${budget:,.0f}")
         await self.say("\n".join(lines), "game_plan")
-        return plan.source != "fallback"
+        return plan.source == "llm"   # a fallback or kept preview is retried every 5 minutes
+
+    def _locks(self, now: datetime) -> list[dict[str, Any]]:
+        locks = [{"ticker": x["ticker"],
+                  "reason": f"{x['type']} until {x['until'].astimezone(ET):%Y-%m-%d}"}
+                 for x in self.compliance.locked_list(now)]
+        return locks + [{"ticker": t, "reason": why} for t, why in self.universe.blocked.items()]
+
+    def next_session_day(self, now: datetime) -> date | None:
+        """The session a preview plan is for: today before the open, else the next trading
+        day after the close. None while the market is open."""
+        d = et_date(now)
+        if self.cal.is_trading_day(d):
+            sess = self.cal.session(d)
+            if to_et(now) < sess.open:
+                return d
+            if to_et(now) < sess.close:
+                return None
+        return self.cal.next_trading_day(d)
+
+    async def job_next_plan(self, now: datetime) -> bool:
+        """A5-1 preview (4:15 PM, or the PLAN command outside market hours): next-day ideas
+        from the latest completed session. Code screens every ticker (session_screen), Qwen
+        reviews only the tickers with a candidate for each window, open slots are filled from
+        the screen. Journals ``next_day_ideas`` (Grafana), grades the previous ideas on the
+        session just closed, sends the owner alert. The 9:00 and 2:45 plans refresh it."""
+        nd = self.next_session_day(now)
+        if nd is None or self.history is None:
+            return True
+        tickers = list(self.cfg.universe.tickers)
+        screens: dict[str, dict[str, Any]] = {}
+        market: dict[str, dict[str, Any]] = {}
+        last_bar: dict[str, Bar] = {}
+        compact: dict[str, dict[str, Any]] = {}
+        news: dict[str, dict[str, Any] | None] = {}
+        for t in tickers + list(self.cfg.universe.context_symbols):
+            try:
+                daily = await self.history.daily_bars(t, nd - timedelta(days=120), nd)
+            except Exception as exc:   # noqa: BLE001
+                log.warning("preview_history_failed", ticker=t, error=str(exc))
+                continue
+            lv = compute_levels(t, nd, daily)
+            if lv is None:
+                continue
+            scr = session_screen(daily, lv)
+            if t not in tickers:
+                market[t] = {k: scr[k] for k in ("close", "change_pct", "range_pos",
+                                                 "trend_up")}
+                continue
+            screens[t], last_bar[t] = scr, [b for b in daily if et_date(b.ts) < nd][-1]
+            nf = self.ta.news.get(t)
+            news[t] = {"summary": nf.summary[:300], "catalyst": nf.catalyst[:150],
+                       "tone": nf.tone, "flags": list(nf.flags),
+                       "earnings_date": nf.earnings_date.isoformat()
+                       if nf.earnings_date else None} if nf else None
+            # LLM payload: only what the plan needs (smaller prompt, faster on the 8B model)
+            compact[t] = {"session": {k: v for k, v in scr.items() if k != "session_date"},
+                          "levels": {k: getattr(lv, k) for k in (
+                              "prior_high", "prior_low", "ema20d", "ema50d", "atr14d",
+                              "high20d", "close_high20d")},
+                          "news": news[t]}
+        if not screens:
+            log.warning("preview_no_data", plan_for=nd.isoformat())
+            return False
+        session_date = max(date.fromisoformat(x["session_date"]) for x in screens.values())
+        last_result = self._grade_ideas(session_date, last_bar)
+        locks = self._locks(now)
+        plans: dict[str, GamePlan] = {}
+        for window in ("morning", "afternoon"):
+            if window == "afternoon" and not self.windows.afternoon_open(nd):
+                continue
+            allowed = MORNING_SETUPS if window == "morning" else AFTERNOON_SETUPS
+            wt = {}
+            for t, v in compact.items():
+                cands = [c for c in v["session"]["candidates"] if c["setup"] in allowed]
+                if cands:
+                    wt[t] = {**v, "session": {**v["session"], "candidates": cands}}
+            wdata = {"plan_for": nd.isoformat(), "market": market, "tickers": wt}
+            plans[window] = await self.strategy.game_plan(nd, window, wdata, locks,
+                                                          preview=True)
+        # hard exclusions vs Qwen's vetoes; a ticker picked in one window is not "passed"
+        off = {x["ticker"]: x["reason"] for x in locks}
+        picked = {i.ticker for p in plans.values() for i in p.watch}
+        passed = {t: why for p in plans.values() for t, why in p.off_limits
+                  if t not in off and t not in picked}
+        rows = idea_rows(now, nd, screens, news, plans, off, passed)
+        try:
+            self.journal.insert_many(s.next_day_ideas, rows)
+        except Exception as exc:   # noqa: BLE001 - the alert still goes out
+            log.warning("ideas_journal_failed", error=str(exc))
+        await self.say(alert_text(nd, session_date, market, plans, rows, off, last_result,
+                                  passed), "next_day_ideas")
+        if to_et(now).time() >= LLM_UNLOAD_AT or not self.cal.is_trading_day(et_date(now)):
+            await self._unload_llm(now)   # evening/weekend run: free VRAM and RAM again
+        return True
+
+    def _grade_ideas(self, session_date: date, bars: dict[str, Bar]) -> str | None:
+        """Grade the latest ideas run for ``session_date`` on that session's daily bars."""
+        try:
+            rows = self.journal.rows(s.next_day_ideas, {"plan_for": session_date})
+        except Exception as exc:   # noqa: BLE001
+            log.warning("ideas_grade_failed", error=str(exc))
+            return None
+        if not rows:
+            return None
+        latest = max(r["run_at"] for r in rows)
+        graded = []
+        for r in rows:
+            b = bars.get(r["ticker"])
+            if r["run_at"] != latest or b is None or et_date(b.ts) != session_date:
+                continue
+            g = r if r.get("outcome") else {**r, **grade(r, b)}
+            if not r.get("outcome"):
+                self.journal.update(s.next_day_ideas, {"id": r["id"]}, grade(r, b))
+            graded.append(g)
+        return grade_summary(graded)
+
+    async def _unload_llm(self, now: datetime) -> None:
+        unload = getattr(self.llm, "unload", None)
+        if callable(unload):
+            ok = await unload()
+            log.info("llm_unloaded", ok=ok, at=to_et(now).isoformat())
 
     async def job_window_end(self, now: datetime, window: str) -> None:
         """NT-1: no order in the window -> log 'no qualifying setup' with the closest
@@ -1029,7 +1165,15 @@ class TradingEngine:
             self.risk.state.paused_styles.discard(style)
         elif action == "STATUS":
             reply = self.status_text()
-        if cmd.source != "local" or action in ("NEED_CONFIRM", "STATUS"):
+        elif action == "PLAN":
+            if self.next_session_day(self.now()) is None:
+                reply = "PLAN runs outside market hours; the 9:00/2:45 plans cover the session"
+            else:
+                async def _plan() -> None:
+                    await self.job_next_plan(self.now())
+                self._spawn(_plan())
+                reply = "PLAN started: preview plans follow shortly"
+        if cmd.source != "local" or action in ("NEED_CONFIRM", "STATUS", "PLAN"):
             await self.say(reply, "command_reply")
         return reply
 

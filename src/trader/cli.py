@@ -582,6 +582,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status").set_defaults(fn=cmd_status)
     sub.add_parser("kill").set_defaults(fn=lambda a: _local_command("KILL"))
     sub.add_parser("resume").set_defaults(fn=lambda a: _local_command("RESUME"))
+    sub.add_parser("plan", help="build the next session's preview game plans now "
+                   "(outside market hours)").set_defaults(fn=lambda a: _local_command("PLAN"))
     f = sub.add_parser("flatten")
     f.add_argument("--confirm", action="store_true")
     f.set_defaults(fn=cmd_flatten)

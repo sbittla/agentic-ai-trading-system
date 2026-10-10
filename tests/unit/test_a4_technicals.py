@@ -338,3 +338,31 @@ def test_mf5_halt_stale(sc: Scenario) -> None:
     sc.md.on_status(TradingStatus(symbol="AAPL", ts=now, kind="luld"))
     assert sc.ta.filters("AAPL", now + timedelta(minutes=5), "ORB", 60)["MF-5"] is False
     assert sc.ta.filters("AAPL", now + timedelta(minutes=11), "ORB", 60)["MF-5"] is False  # stale
+
+
+@pytest.mark.rule("A5-1")
+def test_session_screen_candidates_from_latest_session() -> None:
+    """Preview plan screen: uptrend closing at its high near the 20-day closing high gives
+    candidates whose numbers are all in the output (PR-4); a downtrend gives none."""
+    from trader.agents.a04_technicals import session_screen
+
+    up = [bar("AAPL", et(PLAIN_DAY - timedelta(days=60 - i), "09:30"), 100 + i, 101.5 + i,
+              99 + i, 101 + i, 1000, tf="1Day") for i in range(60)]
+    lv = compute_levels("AAPL", PLAIN_DAY, up)
+    assert lv is not None
+    scr = session_screen(up, lv)
+    assert scr["trend_up"] and scr["close"] == 160 and scr["range_pos"] == 0.8
+    assert scr["change_pct"] == pytest.approx(0.63, abs=0.01)
+    setups = {c["setup"]: c for c in scr["candidates"]}
+    assert {"ORB", "SWING_BASE_BREAKOUT"} <= set(setups)
+    orb = setups["ORB"]
+    assert orb["trigger"] == 160.5 and orb["stop"] < orb["trigger"] < orb["target_1"]
+    assert all(isinstance(orb[k], float) for k in ("trigger", "stop", "target_1"))
+    assert scr["readiness_score"] >= 50
+
+    down = [bar("AAPL", et(PLAIN_DAY - timedelta(days=60 - i), "09:30"), 200 - i, 201 - i,
+                198.5 - i, 199 - i, 1000, tf="1Day") for i in range(60)]
+    lv = compute_levels("AAPL", PLAIN_DAY, down)
+    assert lv is not None
+    scr = session_screen(down, lv)
+    assert not scr["trend_up"] and scr["candidates"] == []

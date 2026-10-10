@@ -21,7 +21,7 @@ from trader.journal.store import SqlJournal
 from trader.models.messages import Command
 
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no 0/O, 1/I/L
-SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP"}
+SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP", "PLAN"}
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 APPROVAL = {"YES", "NO"}
 KNOWN = SAFE | DESTRUCTIVE | APPROVAL | {"CONFIRM"}

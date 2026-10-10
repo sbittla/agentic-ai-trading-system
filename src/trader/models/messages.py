@@ -241,7 +241,7 @@ class GamePlan(Msg):
     market_bias: Literal["with_us", "against_us", "mixed"] = "mixed"
     watch: tuple[GamePlanItem, ...] = ()
     off_limits: tuple[tuple[str, str], ...] = ()
-    source: Literal["llm", "fallback"] = "llm"
+    source: Literal["llm", "preview", "fallback"] = "llm"   # preview: built after the close
 
 
 class TradeProposal(Msg):

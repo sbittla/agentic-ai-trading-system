@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -19,6 +21,7 @@ from typing import Any
 import structlog
 
 from trader.models.messages import ApprovalResponse
+from trader.notify.telegram import HTML_KINDS
 
 log = structlog.get_logger(__name__)
 
@@ -102,6 +105,8 @@ class WhatsAppNotifier:
         return {"body": text[:1500]}
 
     async def send(self, text: str, *, kind: str) -> None:
+        if kind in HTML_KINDS:   # composed for Telegram HTML: WhatsApp shows plain text
+            text = html.unescape(re.sub(r"</?[bi]>", "", text))
         for attempt in range(self.retries):
             try:
                 await asyncio.to_thread(self.client.messages.create, from_=self.from_,

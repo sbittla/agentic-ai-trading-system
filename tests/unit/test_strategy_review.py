@@ -165,3 +165,42 @@ async def test_review_uses_a_separate_prompt(cfg: Config) -> None:
     assert p is not None
     await ReviewAgent(cfg, llm, None, lambda: NOW).review(p, data_for(st))
     assert llm.calls == ["a05_proposal", "a06"]
+
+
+@pytest.mark.rule("A5-1")
+async def test_preview_plan_uses_its_prompt_and_is_kept_on_failure(cfg: Config,
+                                                                   journal: SqlJournal) -> None:
+    plan = {"window": "morning", "market_bias": "with_us", "watch": [
+        {"ticker": "NVDA", "setup": "ORB", "trigger": 190.4, "stop": 189.61, "target_1": 191.37,
+         "why": "uptrend, strong close"}], "off_limits": []}
+    llm = ScriptedLLM({"a05_preview": [json.dumps(plan)], "a05_plan": ["bad", "bad"]})
+    a5 = StrategyAgent(cfg, llm, journal, lambda: NOW)
+    data = {"tickers": {"NVDA": {"session": {"candidates": [
+        {"setup": "ORB", "trigger": 190.4, "stop": 189.61, "target_1": 191.37}]}}}}
+    gp = await a5.game_plan(PLAIN_DAY, "morning", data, [], preview=True)
+    assert gp.source == "preview" and [w.ticker for w in gp.watch] == ["NVDA"]
+    assert journal.rows(s.game_plans)[0]["source"] == "preview"
+    # the 9:00 refresh fails: the preview stays the plan (planned trades keep full size)
+    gp2 = await a5.game_plan(PLAIN_DAY, "morning", data, [])
+    assert gp2 is gp and a5.planned("NVDA", "ORB", PLAIN_DAY, "morning")
+
+
+@pytest.mark.rule("A5-1")
+async def test_preview_fills_open_slots_from_screen_and_respects_veto(cfg: Config) -> None:
+    """The model picks nothing and vetoes TSLA: the plan holds the best screened candidates
+    for the window's setups, score >= 70, not vetoed or locked."""
+    out = {"window": "morning", "market_bias": "with_us", "watch": [],
+           "off_limits": [{"ticker": "TSLA", "reason": "negative news"}]}
+    a5 = StrategyAgent(cfg, ScriptedLLM({"a05_preview": [json.dumps(out)]}), None,
+                       lambda: NOW)
+
+    def t(score: int, setup: str = "ORB", px: float = 100.0) -> dict:  # type: ignore[type-arg]
+        return {"session": {"readiness_score": score, "candidates": [
+            {"setup": setup, "trigger": px, "stop": px - 1, "target_1": px + 1, "basis": "b"}]}}
+
+    data = {"tickers": {"AAPL": t(85), "TSLA": t(95), "NVDA": t(65), "META": t(90),
+                        "MSFT": t(100, "SWING_BASE_BREAKOUT"), "TSM": t(80)}}
+    gp = await a5.game_plan(PLAIN_DAY, "morning", data, [{"ticker": "META", "reason": "WASH"}],
+                            preview=True)
+    assert [w.ticker for w in gp.watch] == ["AAPL", "TSM"]
+    assert gp.watch[0].why.startswith("screen 85/100")

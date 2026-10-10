@@ -289,10 +289,12 @@ class CoreService:
         return os.environ["ALPACA_PAPER_KEY"], os.environ["ALPACA_PAPER_SECRET"]
 
     async def _restore_news(self) -> None:
-        """News state is in memory: after a restart, reload today's latest flags per ticker so
-        a plan run right after the restart still sees the catalysts (A5-1)."""
+        """News state is in memory: after a restart, reload the latest flags per ticker since
+        7:00 of the previous trading day, so a plan run after the restart (the morning plan,
+        or the after-close / weekend ideas run) still sees the catalysts (A5-1)."""
         now = datetime.now(UTC)
-        since = et_datetime(et_date(now), dtime(0, 0)).astimezone(UTC)
+        since = et_datetime(self.engine.cal.prev_trading_day(et_date(now)),
+                            dtime(7, 0)).astimezone(UTC)
         try:
             msgs = await asyncio.to_thread(self.outbox.recent, "news_flags", since)
         except Exception as exc:   # noqa: BLE001

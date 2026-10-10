@@ -19,6 +19,7 @@ import structlog
 log = structlog.get_logger(__name__)
 API = "https://api.telegram.org"
 MAX_TEXT = 4000   # Telegram limit is 4096 characters
+HTML_KINDS = {"next_day_ideas"}   # composed with escaped HTML (parse_mode=HTML)
 
 
 class TelegramError(Exception):
@@ -56,9 +57,11 @@ class TelegramNotifier:
     async def send(self, text: str, *, kind: str) -> None:
         for attempt in range(self.retries):
             try:
-                await self._call("sendMessage", {"chat_id": self.chat_id,
-                                                 "text": text[:MAX_TEXT],
-                                                 "disable_web_page_preview": True})
+                payload: dict[str, Any] = {"chat_id": self.chat_id, "text": text[:MAX_TEXT],
+                                           "disable_web_page_preview": True}
+                if kind in HTML_KINDS and len(text) <= MAX_TEXT:   # a cut tag would be refused
+                    payload["parse_mode"] = "HTML"
+                await self._call("sendMessage", payload)
                 return
             except (httpx.HTTPError, TelegramError) as exc:
                 log.warning("telegram_send_failed", attempt=attempt, error=str(exc))

@@ -146,6 +146,28 @@ game_plans = Table("game_plans", metadata, _id(),
                    Column("off_limits", JSON),
                    Column("source", String(10)))
 
+# A5-1 preview: after-close screen + picks for the next session, graded after that session
+next_day_ideas = Table(
+    "next_day_ideas", metadata, _id(),
+    Column("run_at", UtcDateTime, nullable=False),
+    Column("plan_for", Date, nullable=False, index=True),
+    Column("session_date", Date, nullable=False),
+    Column("ticker", String(12), nullable=False),
+    Column("rank", Integer), Column("status", String(8)),   # pick / watch / off
+    Column("score", Integer), Column("close", Float), Column("change_pct", Float),
+    Column("range_pos", Float), Column("volume_ratio", Float), Column("trend_up", Boolean),
+    Column("atr_to_prior_high", Float), Column("atr_to_20d_closing_high", Float),
+    Column("atr_to_ema20d", Float),
+    Column("news_tone", String(12)), Column("news_catalyst", Text),
+    Column("morning_setup", String(32)), Column("morning_trigger", Float),
+    Column("morning_stop", Float), Column("morning_target", Float),
+    Column("afternoon_setup", String(32)), Column("afternoon_trigger", Float),
+    Column("afternoon_stop", Float), Column("afternoon_target", Float),
+    Column("note", Text),
+    Column("day_high", Float), Column("day_low", Float), Column("day_close", Float),
+    Column("triggered", Boolean), Column("reached_t1", Boolean), Column("hit_stop", Boolean),
+    Column("outcome", String(16)))
+
 setups = Table("setups", metadata,
                Column("id", String(64), primary_key=True),
                Column("ts", UtcDateTime, nullable=False, index=True),

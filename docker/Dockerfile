@@ -30,6 +30,8 @@ FROM base AS news
 USER root
 COPY requirements/news.lock requirements/news.lock
 RUN pip install --require-hashes -r requirements/news.lock   # CPU-only torch wheels
+# hf-cache volume mount point must exist and belong to trader: a new named volume copies this owner
+RUN mkdir -p /app/.cache/huggingface && chown -R trader:trader /app/.cache
 USER trader
 
 FROM base AS notifier

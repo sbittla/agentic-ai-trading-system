@@ -66,6 +66,7 @@ How it is wired (SEC-9, SEC-17):
 | **3. Performance** | Win rate, expectancy (R), profit factor, P&L, drawdown; equity curve; expectancy by setup, ticker, window and weekday; daily metrics; closed trades |
 | **4. LLM (Qwen)** | Calls, JSON validity, p50/p95 latency by agent, disagree rate, tokens, errors, per prompt version, recent calls with output |
 | **5. Data quality** | Last bar age per ticker, stream gaps, non-green health history, bars and news per hour, service heartbeats, incidents |
+| **6. Next-day ideas** | Latest after-close run: every ticker's readiness score, day change, close-in-range, volume vs 50-day, ATR distance to key levels, picks per window, news tone, Qwen's reason; hit rates and a track record graded on the planned session's daily bar |
 
 Thresholds on the panels match the tables in §1 and §2. Panels stay empty until the system has traded or replayed a day. The 4:30 PM static HTML report is still produced.
 
