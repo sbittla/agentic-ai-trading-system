@@ -1,0 +1,4 @@
+# Alerts image: base + the WebSocket client (no alpaca-py, pandas usage, torch or twilio)
+websockets>=13
+-c base.lock
+-c core.lock

@@ -1,6 +1,7 @@
 """`trader` command line (ARCHITECTURE §2, RUNBOOK §3).
 
-    trader run --service core|news|notifier
+    trader run --service core|news|notifier|alerts
+    trader alerts [--alerts-config config/alerts.yaml]   (lightweight Telegram price alerts)
     trader replay --day 2026-10-15 | --synthetic 20 --start 2026-10-05 [--llm rules|ollama]
     trader backtest --synthetic 120 [--walk-forward]
     trader status | kill | resume | flatten --confirm | pause day|swing | unpause day|swing
@@ -81,9 +82,20 @@ def cmd_run(a: argparse.Namespace) -> int:
         from trader.services.core_main import main
     elif a.service == "news":
         from trader.services.news_main import main
+    elif a.service == "alerts":
+        return cmd_alerts(a)
     else:
         from trader.services.notifier_main import main
     main(a.config)
+    return 0
+
+
+def cmd_alerts(a: argparse.Namespace) -> int:
+    """Standalone price-alert bot: Alpaca + Telegram only (no Postgres, Ollama or torch)."""
+    configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+    from trader.alerts.service import main
+
+    main(getattr(a, "alerts_config", None))
     return 0
 
 
@@ -505,7 +517,10 @@ def cmd_init_env(a: argparse.Namespace) -> int:
                   "".join(pysecrets.choice(alphabet) for _ in range(28)))
 
     # env files with the database URL filled in
-    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay"):
+    for name in (".env.core", ".env.news", ".env.notifier", ".env.backup", ".env.replay",
+                 ".env.alerts"):
+        if name == ".env.alerts" and not (root / f"{name}.example").exists():
+            continue   # optional: standalone price alerts
         t = (root / f"{name}.example").read_text(encoding="utf-8")
         if name in ENV_ROLES:
             role, user = ENV_ROLES[name]
@@ -518,6 +533,9 @@ def cmd_init_env(a: argparse.Namespace) -> int:
     # config.yaml
     write_new(root / "config" / "config.yaml",
               (root / "config" / "config.example.yaml").read_text(encoding="utf-8"))
+    if (root / "config" / "alerts.example.yaml").exists():
+        write_new(root / "config" / "alerts.yaml",
+                  (root / "config" / "alerts.example.yaml").read_text(encoding="utf-8"))
 
     print("created: " + (", ".join(created) or "nothing"))
     if kept:
@@ -570,8 +588,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("--service", choices=["core", "news", "notifier"], required=True)
+    r.add_argument("--service", choices=["core", "news", "notifier", "alerts"], required=True)
+    r.add_argument("--alerts-config", default=None)
     r.set_defaults(fn=cmd_run)
+    al = sub.add_parser("alerts", help="lightweight Telegram price alerts (no LLM/Postgres)")
+    al.add_argument("--alerts-config", default=None, help="default: $ALERTS_CONFIG or "
+                    "config/alerts.yaml")
+    al.set_defaults(fn=cmd_alerts)
     v = sub.add_parser("validate-config")
     v.add_argument("--config", dest="config")
     v.set_defaults(fn=cmd_validate_config)

@@ -1,6 +1,8 @@
 # Agentic AI Trading System runtime (see docs/ARCHITECTURE.md §1)
 #   Start:           docker compose -f docker/docker-compose.yml up -d
 #   Replay a day:    docker compose -f docker/docker-compose.yml --profile replay run --rm replay replay --day 2026-10-15
+#   Price alerts only (light: no Postgres/Ollama/GPU), see docs/ALERTS.md:
+#                    docker compose -f docker/docker-compose.yml --profile alerts up -d alerts
 #   Dashboards:      docker compose -f docker/docker-compose.yml --profile monitoring up -d grafana grafana-proxy
 #                    then http://localhost:3000 (admin / secrets/grafana_admin_password.txt)
 # Pin every image to a version tag or digest before paper trading (SEC-10).
@@ -137,6 +139,29 @@ services:
       timeout: 10s
       retries: 3
 
+  alerts:                               # standalone Telegram price alerts (docs/ALERTS.md)
+    <<: *app
+    build: {context: .., dockerfile: docker/Dockerfile, target: alerts}
+    profiles: [alerts]
+    command: ["trader", "alerts"]
+    env_file: [../.env.alerts]          # Alpaca data keys + Telegram bot token/chat id only
+    environment:
+      TZ: America/New_York
+      ALERTS_CONFIG: /app/config/alerts.yaml   # optional; built-in defaults if missing
+      ALERTS_DB: /app/data/alerts.sqlite
+      LOG_LEVEL: ${ALERTS_LOG_LEVEL:-INFO}
+    volumes:
+      - ../config:/app/config:ro
+      - alerts-data:/app/data           # rules, watchlist and alert log survive restarts
+    mem_limit: 160m                     # uses ~40-60 MB; the cap guards the host
+    cpus: 0.5
+    networks: [egress]                  # outbound only: Alpaca + Telegram, no ports
+    healthcheck:
+      test: ["CMD", "trader", "health", "--service", "alerts"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+
   backup:
     <<: *app
     build: {context: .., dockerfile: docker/Dockerfile, target: tools}
@@ -236,6 +261,7 @@ volumes:
   bars: {}
   hf-cache: {}
   grafana-data: {}
+  alerts-data: {}
 
 secrets:                                # git-ignored files, one password per line
   pg_admin_password:
