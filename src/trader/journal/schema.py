@@ -386,6 +386,21 @@ owner_notes = Table("owner_notes", metadata, _id(),               # UI-29 (conso
                     Column("tags", JSON), Column("note", Text),
                     Column("screenshot_b64", Text))
 
+analyst_actions = Table("analyst_actions", metadata, _id(),       # UI-33 (news writes)
+                        Column("ts", UtcDateTime, index=True),
+                        Column("ticker", String(12), index=True),
+                        Column("firm", String(64)), Column("action", String(12)),
+                        Column("from_rating", String(32)), Column("to_rating", String(32)),
+                        Column("pt_old", Float), Column("pt_new", Float),
+                        Column("headline", Text), Column("source", String(16)),
+                        Column("url", Text), Column("action_hash", String(40), unique=True))
+
+market_recap = Table("market_recap", metadata, _id(),             # UI-34 (core writes)
+                     Column("run_at", UtcDateTime, index=True),
+                     Column("as_of", Date, index=True),
+                     Column("ticker", String(12)),
+                     Column("metrics_json", JSON))
+
 console_chats = Table("console_chats", metadata, _id(),           # UI-8d (console writes)
                       Column("ts", UtcDateTime, index=True),
                       Column("day", Date, index=True),
@@ -435,7 +450,7 @@ option_suggestions = Table("option_suggestions", metadata, _id(),  # A14, A16
                            Column("stock_view_right", Boolean))
 
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
-NEWS_WRITES = ("news_items", "event_flags", "llm_calls")
+NEWS_WRITES = ("news_items", "event_flags", "llm_calls", "analyst_actions")
 NOTIFIER_WRITES = ("commands",)
 CONSOLE_WRITES = ("owner_notes", "console_chats", "llm_calls")   # llm_calls: UI-8c log
 NEWS_READS = ("positions", "game_plans")   # NW-1: tickers with a position or a plan setup

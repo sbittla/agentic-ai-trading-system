@@ -297,6 +297,10 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `UI-30` | Live scanner with alert labels and in-play names | console, core API | unit/test_console.py | — |
 | `UI-31` | Latency and missed trades with shadow results | console | unit/test_console.py | — |
 | `UI-32` | Co-pilot ticket with I filled | console | unit/test_console.py | — |
+| `UI-33` | Analyst ratings collected (Finnhub, RSS headlines) and shown per ticker | news, console | unit/test_ratings_recap.py, unit/test_console.py | — |
+| `UI-34` | Recap of the last N sessions, next-session watchlist, ./run.sh backfill | trader-core, news, console | unit/test_ratings_recap.py, unit/test_console.py | — |
+| `UI-35` | Empty sections say why and what to do | console | unit/test_console.py | — |
+| `UI-36` | Options board (IV, IV rank, expected move, structures) and side-effect-free preview | options desk, core API, console | unit/test_options.py, unit/test_console.py | — |
 
 ## How to use
 

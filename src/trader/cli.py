@@ -457,6 +457,78 @@ def cmd_eval(a: argparse.Namespace) -> int:
     return 0 if res["pass"] else 1
 
 
+def _data_keys() -> tuple[str, str]:
+    for k, s_ in (("ALPACA_PAPER_KEY", "ALPACA_PAPER_SECRET"),
+                  ("ALPACA_LIVE_KEY", "ALPACA_LIVE_SECRET"), ("ALPACA_KEY", "ALPACA_SECRET")):
+        if os.environ.get(k) and os.environ.get(s_):
+            return os.environ[k], os.environ[s_]
+    raise SystemExit("no Alpaca data keys in the environment (.env.core)")
+
+
+def cmd_recap(a: argparse.Namespace) -> int:
+    """UI-34: the last N sessions per ticker into ``market_recap``, and the next-session
+    watchlist to Telegram (``--no-send`` prints only). Read-only on the broker."""
+    from trader.agents.recap import run_recap
+    from trader.bus import SqlOutbox
+    from trader.calendar import MacroCalendar, MarketCalendar
+    from trader.data.alpaca_data import AlpacaHistory
+    from trader.notify.whatsapp import OutboxNotifier
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"))
+    cfg = _cfg(a.config)
+    j = _journal(create=False)
+    now = datetime.now(UTC)
+    base = Path(a.config or os.environ.get("TRADER_CONFIG") or "config/config.yaml"
+                ).resolve().parent.parent
+    try:
+        macro = MacroCalendar.load(base / cfg.windows.macro_calendar_file)
+    except Exception as exc:   # noqa: BLE001
+        print(f"  macro calendar unavailable: {exc}")
+        macro = None
+    rows, text = asyncio.run(run_recap(cfg, j, AlpacaHistory(*_data_keys(),
+                                                             feed=cfg.data.alpaca_feed),
+                                       MarketCalendar(), macro, a.days, now))
+    if not rows:
+        print("no daily bars returned: check the Alpaca keys (./run.sh connections)")
+        return 1
+    print(text)
+    if not a.no_send:
+        asyncio.run(OutboxNotifier(SqlOutbox(j, "core"), lambda: now).send(text, kind="recap"))
+        print("\nsent to Telegram via the notifier")
+    return 0
+
+
+def cmd_backfill_news(a: argparse.Namespace) -> int:
+    """Last N days of news, filings and analyst actions into the journal (news container)."""
+    from trader.agents.a03_news import NewsAgent, make_scorer
+    from trader.calendar import MacroCalendar, MarketCalendar
+    from trader.news.ratings import RatingsFeed
+    from trader.news.sources import EdgarFilings, FinnhubNews
+    from trader.services.news_main import cfg_company_names
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"))
+    cfg = _cfg(a.config)
+    j = _journal(create=False)
+    sources: list[Any] = []
+    if os.environ.get("FINNHUB_TOKEN"):
+        sources.append(FinnhubNews(os.environ["FINNHUB_TOKEN"]))
+    else:
+        print("  FINNHUB_TOKEN not set: company news skipped (RSS ratings still run)")
+    sources.append(EdgarFilings(os.environ.get("SEC_USER_AGENT") or cfg.data.sec_user_agent))
+    sources.append(RatingsFeed(j, os.environ.get("FINNHUB_TOKEN"),
+                               names=cfg_company_names(cfg)))
+    base = Path(a.config or os.environ.get("TRADER_CONFIG") or "config/config.yaml"
+                ).resolve().parent.parent
+    agent = NewsAgent(cfg, sources, make_scorer(), None, j, MarketCalendar(),
+                      MacroCalendar.load(base / cfg.windows.macro_calendar_file),
+                      lambda: datetime.now(UTC))
+    counts = asyncio.run(agent.backfill(a.days))
+    print(f"backfilled {a.days} days: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    for name, err in agent.source_errors.items():
+        print(f"  {name} failed: {err[:200]}")
+    return 0
+
+
 def cmd_fetch_history(a: argparse.Namespace) -> int:
     from trader.data.alpaca_data import AlpacaHistory
     from trader.data.store import BarStore, resolve_bars_path
@@ -860,6 +932,13 @@ def build_parser() -> argparse.ArgumentParser:
         pp.add_argument("style", choices=["day", "swing"])
         pp.set_defaults(fn=lambda a, n=name: _local_command(n.upper(), a.style.upper()))
     sub.add_parser("migrate").set_defaults(fn=cmd_migrate)
+    rc = sub.add_parser("recap", help="last N sessions per ticker + next-session watchlist")
+    rc.add_argument("--days", type=int, default=5)
+    rc.add_argument("--no-send", action="store_true", help="print only, no Telegram")
+    rc.set_defaults(fn=cmd_recap)
+    bn = sub.add_parser("backfill-news", help="last N days of news and analyst actions")
+    bn.add_argument("--days", type=int, default=30)
+    bn.set_defaults(fn=cmd_backfill_news)
     g = sub.add_parser("gate")
     g.add_argument("--record", required=True,
                    help="e.g. replay, backtest, paper, live, auto_day, auto_swing")

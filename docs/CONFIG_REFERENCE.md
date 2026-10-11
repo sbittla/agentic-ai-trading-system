@@ -69,4 +69,6 @@ Each container reads only its own env file (SECURITY.md SEC-18). Templates are t
 | `secrets/pg_<role>_password.txt` | postgres | Admin and the role passwords (core, news, notifier, readonly, console), read at initialisation; the console role is also created or updated by `upgrade.sql` on every start |
 | `docker/.env` | Compose | `PG_DATABASE`, `PG_ADMIN_USER`, `DB_ROLE_PREFIX`, `OLLAMA_MODEL` (template: `docker/.env.example`) |
 
+The analyst-ratings feed (UI-33) uses `FINNHUB_TOKEN` for `stock/upgrade-downgrade` when the plan includes it (it switches itself off on 401/403) and needs no key for the Yahoo Finance and Google News RSS headlines. Add a company name for a new universe ticker in `src/trader/news/names.py` so headlines that use the name rather than the symbol match.
+
 All of these are git-ignored. Live keys are loaded only when `mode.environment` is `live`.

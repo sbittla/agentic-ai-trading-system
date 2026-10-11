@@ -166,6 +166,13 @@ Grafana stays: it is the right tool for time-series analytics. The console links
 - **UI-31 Latency and missed trades:** a panel with today's trigger-to-order times (LAT-1), the missed triggers by reason (LAT-4), and the shadow result of each (SH-1).
 - **UI-32 Co-pilot ticket:** in co-pilot mode (CP-1), the plan is shown as a ticket. "I filled" records the fill (CP-2), and exit alerts follow.
 
+### 3.6c Research: ratings, recap, empty states, options board
+
+- **UI-33 Analyst ratings:** upgrades, downgrades, initiations, reiterations and price-target raises/cuts per universe ticker, collected by the news service every 30 minutes from Finnhub's `/stock/upgrade-downgrade` (when the plan allows it) and from Yahoo Finance and Google News RSS headlines (parsed with rules; the headline must name the ticker or company as the subject). Stored in `analyst_actions`. Shown on an Analyst ratings page (filters, counts, net actions per ticker, table with links to the source), on Today, and on each stock page.
+- **UI-34 Recap and backfill:** `trader recap --days N` (Telegram `RECAP N`, console buttons) builds per-ticker metrics over the last N sessions from daily bars (returns, strength against QQQ, ATR %, distance to the 20-session high, EMA position, volume, levels for the next session and tags) and sends the next-session watchlist. `./run.sh backfill [days]` pulls the past `days` of news, filings and rating actions, builds the recap and runs `trader plan`, so a fresh install has a week or month of data. The Market recap page shows the latest recap.
+- **UI-35 Empty states:** every section with no data says why (for example, "the news service polls from 7:15 AM ET") and what to do (a button or the command), never a blank table.
+- **UI-36 Options board and preview:** the Options page shows, per universe ticker, ATM IV, IV rank, the expected move to the nearest weekly and the OP-1 structure for a bullish and a bearish view, plus the ideas the rules dropped and why. "Preview" shows what A14 would suggest now for a 1-ATR owner view, with the A15 verdict; nothing is sent or journaled until the owner presses "Send this idea to Telegram" (`OPT`).
+
 ### 3.7 System and settings (read-mostly)
 
 - **UI-18** Config viewer: the effective config for today (from `config_snapshots`) and any edits waiting for tomorrow (SR-5), as a diff. Config is still edited in `config/config.yaml`; the console does not write it (DV-3).
