@@ -421,7 +421,7 @@ Planned (draft): A13 Options data, A14 Options strategist, A15 Options risk & co
 
 ### A3 News and sentiment agent
 
-- **A3-1:** Pull company news (Finnhub), 8-K filings (SEC EDGAR), finance subreddit posts (Reddit), the earnings calendar and the macro calendar for the 10 tickers.
+- **A3-1:** Pull company news (Finnhub), 8-K filings (SEC EDGAR), finance subreddit posts (Reddit), the earnings calendar and the macro calendar for the 10 tickers. Analyst rating actions come from Finnhub and Yahoo Finance / Google News RSS headlines (UI_REQUIREMENTS UI-33).
 - **A3-2:** Score each item with FinBERT; use Qwen only to summarize the top items per ticker in 3 sentences or fewer.
 - **A3-3:** Flag: earnings within 3 trading days, earnings today, new 8-K, analyst rating change, unusual post volume, FOMC or CPI day.
 - **A3-4:** Treat fetched text as untrusted data; strip links and instructions; never pass raw text to the execution path.

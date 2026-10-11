@@ -1,6 +1,6 @@
 # Owner Console: UI Requirements
 
-**Version:** 0.2 (October 10, 2026) · Status: **built** (`src/trader/console/`, container `console` on http://localhost:8080, started by `./run.sh`); UI-24 (phone/LAN) stays a later phase
+**Version:** 0.3 (October 11, 2026) · Status: **built** (`src/trader/console/`, container `console` on http://localhost:8080, started by `./run.sh`); UI-24 (phone/LAN) stays a later phase
 
 The owner already has three ways to see and control the system:
 
@@ -62,6 +62,7 @@ Grafana stays: it is the right tool for time-series analytics. The console links
   - Ollama: model tag, whether it is loaded, VRAM used of total, p95 latency today, current queue length
   - links to the matching Grafana dashboards
 - **UI-4b** Open incidents and unacknowledged critical alerts, with an **ACK** button (sends `ACK` through UI-C2).
+- Home also shows the SPY/QQQ/SMH tiles and a day-change heatmap of the universe, the latest analyst actions (UI-33) and news, and upcoming earnings and macro days for the next 7 days. Navigation is grouped: Overview (Today, Market recap, Scanner), Research (Stock lookup, Analyst ratings, News, Next-day ideas, Options, Ask), Trading, Review and System.
 
 ### 3.2 Stock lookup: "check any stock"
 
@@ -132,7 +133,7 @@ Grafana stays: it is the right tool for time-series analytics. The console links
 
 ### 3.5 Controls
 
-- **UI-12** Buttons for STATUS, PLAN, KILL, PAUSE DAY / SWING, ACK, and FLATTEN, RESUME, UNPAUSE.
+- **UI-12** Buttons for STATUS, PLAN, RECAP 5 / 21, KILL, PAUSE DAY / SWING, ACK, and FLATTEN, RESUME, UNPAUSE.
   - Destructive ones show what will happen ("close 2 positions: NVDA 40 sh, MSFT 15 sh, ~$X at market") and require the confirmation code that trader-core returns (UI-C3).
   - KILL needs no confirmation: it is the safe direction, as on Telegram.
 - **UI-13** Every control action is written to the `commands` journal table with `source = console` and shown in an audit list (SEC-14).

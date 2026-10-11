@@ -1,6 +1,6 @@
 # Build Status
 
-**As of:** October 10, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
+**As of:** October 11, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
 
 Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (small live) need the owner's accounts, keys and the local model, and real trading days.
 
@@ -18,7 +18,8 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 | M7 Supervisor, notifications, reports | Done (offline) | `agents/a10_supervisor.py`, `a11_reporter.py`, `notify/`, `services/*_main.py`, `cli.py` |
 | REQUIREMENTS 1.3 (day-trader review) | Done (offline) | Latency and pre-arming (`agents/speed.py`), shadow trades, regime, slippage feedback, settled cash/account type, news shock, core alerts (`agents/alerts_core.py`), approval charts and buttons (`notify/chart.py`), co-pilot mode, notifier-down fallback (`notify/fallback.py`), in-play scan, tax set-aside, other-broker import (`agents/external_trades.py`), IEX-vs-SIP gate, strict paper fills, restore test and drill (`agents/ops.py`) |
 | Options layer (OPTIONS_REQUIREMENTS.md) | Done, advisory | `agents/a04_bearish.py` (BR-1..4), `options/` (A13 data, A14 strategist, A15 risk, A16 monitor, desk), OP-14 line in the alerts bot, Grafana **7. Options** dashboard. Option order placement (§9 paper/live) is not built |
-| Owner Console (UI_REQUIREMENTS.md) | Done | `console/` (Starlette app, Ask tools, SVG charts), `services/core_api.py` (trader-core internal read-only API), `console` container on 127.0.0.1:8080 |
+| Owner Console (UI_REQUIREMENTS.md) | Done | `console/` (Starlette app; `render.py` components, `pages.py` page layouts, Ask tools, SVG charts), `services/core_api.py` (trader-core internal read-only API, incl. options board and preview), `console` container on 127.0.0.1:8080 |
+| Analyst ratings, recap, backfill (UI-33..36) | Done (offline) | `news/ratings.py` (Finnhub upgrade-downgrade + Yahoo/Google News RSS headline rules, `analyst_actions`), `agents/recap.py` (`trader recap`, `RECAP N`, `market_recap`), `NewsAgent.backfill` (`trader backfill-news`), `./run.sh backfill [days]`, console Market recap / Analyst ratings / News pages, options board and preview |
 | M8 Backtest + paper | Ready to start | Needs keys, history download, and 20+ paper days |
 | M9 Small live | Not started | After the M8 gates |
 
@@ -26,10 +27,10 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 
 | Check | Result |
 | --- | --- |
-| `pytest` | 436 passed, including the Postgres integration tests against a real Postgres 16 initialised with `init.sql` + `upgrade.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not downloaded in CI) |
-| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 248 of 248 automated requirement IDs covered |
+| `pytest` | 451 passed, including the Postgres integration tests against a real Postgres 16 initialised with `init.sql` + `upgrade.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not downloaded in CI) |
+| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 252 of 252 automated requirement IDs covered |
 | `ruff check src tests` (incl. bandit `S` rules) | Clean |
-| `mypy` (strict) | Clean, 101 files |
+| `mypy` (strict) | Clean, 105 files |
 | Console role on real Postgres | Every page renders as `console_rw`; it may publish only `inbound_cmd` (source forced to `console`), insert notes/chats/LLM logs, and is refused on every other write |
 | Restore test (OPS-1) on real Postgres | `pg_dump` as the read-only role, restore into a scratch cluster, counts compared: PASS |
 | Replay determinism (RP-2) | Same days twice give byte-identical decision logs |
@@ -49,6 +50,8 @@ Synthetic results only prove the plumbing; they say nothing about whether the st
 | After a restart, reconcile flagged the system's own bracket legs as foreign orders | Reconcile also recognises orders from the journal and the restored legs |
 | QW-1: this machine has an 8 GB GPU (RTX 4060 Laptop) | Local `config/config.yaml` uses `qwen3:8b` |
 | The restore test (OPS-1) found the nightly `pg_dump` failing: the read-only backup role could not read sequences, and `trader backup` did not notice | Sequence grants for `readonly` (in `trader migrate` and `upgrade.sql`); `trader backup` checks the exit code, prints BACKUP FAILED, retries and leaves the health file stale so Grafana and the supervisor flag it |
+| Rule-parsed rating headlines attributed "Bank of America raises Amazon target" to BAC | A headline counts only when its subject company (symbol or name in `news/names.py`) is the ticker; firm names are matched case-sensitively |
+| Console sections were blank on a fresh install (no ratings, news or recap yet) | Every section has an empty state that says why and what to do (UI-35); `./run.sh backfill` loads the past week or month |
 | A console needs live values that the journal does not hold (bars, quotes, checklist) | trader-core serves a GET-only JSON API on the internal network; the console holds no broker keys |
 
 ## What the owner needs to provide (M8)
@@ -60,7 +63,7 @@ Step-by-step instructions for every item: [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md).
 3. **Telegram bot** token and your chat id in `.env.notifier` (default channel, ADR-014), or Twilio WhatsApp.
 4. Postgres passwords in `secrets/pg_<role>_password.txt` and each `.env.*` file; database/role names in `docker/.env`.
 5. The model: `docker compose -f docker/docker-compose.yml --profile setup run --rm model-pull`.
-6. Then: `./run.sh connections`, `./run.sh` (starts everything), `./run.sh backtest`, and 20+ days of paper trading in approve mode (RUNBOOK §1, TEST_PLAN stage 4).
+6. Then: `./run.sh connections`, `./run.sh` (starts everything), `./run.sh backfill 30` (last month's news, ratings, recap and ideas), `./run.sh backtest`, and 20+ days of paper trading in approve mode (RUNBOOK §1, TEST_PLAN stage 4).
 
 ## Quick commands
 
@@ -71,5 +74,6 @@ All from WSL at the repo root; everything runs in containers.
 ./run.sh replay 10             # full system on synthetic days
 ./run.sh backtest 500          # playbook on real minute bars (BT-6)
 ./run.sh restore-test          # OPS-1: newest backup into a scratch database
+./run.sh backfill 30           # past month: news, analyst ratings, recap + watchlist, next-day ideas
 docker compose -f docker/docker-compose.yml exec trader-core trader eval-prompts --llm ollama
 ```

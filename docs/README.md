@@ -38,12 +38,12 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | --- | --- |
 | [REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md) | Gap review from a day trader's point of view: latency, data quality, alerts, learning speed; prioritized proposals |
 | [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) | Options suggestions and alerts for bullish and bearish views (agents A13–A16), defined risk; advisory mode built |
-| [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Owner Console (built, http://localhost:8080): cockpit, any-stock lookup, plain-language Q&A, approvals, controls, options, journal |
+| [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Owner Console (built, http://localhost:8080): cockpit, market recap, analyst ratings, news, any-stock lookup, plain-language Q&A, approvals, controls, options board, journal |
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |
 | [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |
-| [RUNBOOK.md](RUNBOOK.md) | Setup, daily routine, commands, incident playbooks, go-live checklist |
+| [RUNBOOK.md](RUNBOOK.md) | Setup (including `./run.sh backfill`), daily routine, commands (including `RECAP`), incident playbooks, go-live checklist |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Recovery sequence for Docker/WSL crashes and model loading; known problems with symptom, cause and fix |
 | [MONITORING.md](MONITORING.md) | Health score, trading metrics, dashboards, alert routing |
 | [REPORT_TEMPLATES.md](REPORT_TEMPLATES.md) | Pre-flight, game plan, approvals, trade events, daily/weekly/monthly reports |

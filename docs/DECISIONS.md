@@ -1,6 +1,6 @@
 # Decision Log
 
-**Version:** 1.1 (September 30, 2026)
+**Version:** 1.2 (October 11, 2026)
 
 Short records of the main design decisions, so later changes can see why things are the way they are. New decisions are appended; superseded ones are marked, not deleted.
 
@@ -21,6 +21,7 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-013 | 2026-09-30 | Outbound-only notifications: poll Twilio for replies, no inbound endpoint | Accepted |
 | ADR-014 | 2026-10-01 | Telegram bot as the default notifier channel; WhatsApp kept as an option | Accepted |
 | ADR-015 | 2026-10-10 | Options: advisory first, defined risk only, bearish views via puts (no stock shorting) | Proposed |
+| ADR-016 | 2026-10-11 | Analyst ratings from public RSS headlines parsed by rules, not by the model | Accepted |
 
 ---
 
@@ -106,3 +107,8 @@ Short records of the main design decisions, so later changes can see why things 
 **Consequences:** Useful bearish ideas without borrow or margin rules; no undefined-loss positions; no extra GPU load in market hours (code templates, Qwen only after the close). Costs: an options data dependency (indicative free feed; OPRA paid), more config and tests, and tax-lot handling for exercise and assignment once orders are enabled.
 **Implementation (October 10, 2026):** the advisory mode is built (`src/trader/options/`, `agents/a04_bearish.py`, Grafana **7. Options**, console Options page) and tested (`tests/unit/test_options.py`). The status stays *proposed* until the owner accepts it; `options.mode: off` disables the layer.
 
+### ADR-016 Analyst ratings from RSS headlines, parsed by rules
+
+**Context:** The owner wants upgrades and downgrades per stock. Finnhub's `stock/upgrade-downgrade` endpoint is not in every free plan, and paid ratings feeds conflict with ADR-003.
+**Decision:** Use Finnhub when the key allows it (switch it off for the session on 401/403) and otherwise Yahoo Finance and Google News RSS headlines, parsed by regular expressions in `news/ratings.py`. A headline counts only when the ticker or company is its subject. Qwen is not used: headlines are untrusted text (A3-4) and the rules are testable.
+**Consequences:** Free and deterministic, with links to the source. Coverage depends on headline wording, so some actions are missed and price targets appear only when the headline states them. Every action is stored once (`action_hash`) in `analyst_actions` and raises the A3-3 rating-change flag.
