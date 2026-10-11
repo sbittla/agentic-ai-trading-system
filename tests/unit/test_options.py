@@ -699,3 +699,30 @@ async def test_alerts_bot_options_line() -> None:
     assert await line.line("orb_down", "NVDA", 100.0, St()) is None       # 10-s rate limit
     off = OptionsLine(OptionsLineSettings(), fake, lambda: NOW)
     assert await off.line("orb_up", "NVDA", 100.8, St()) is None
+
+
+@pytest.mark.rule("UI-36")
+async def test_board_preview_and_status_have_no_side_effects(tmp_path: Path) -> None:
+    from trader.services.core_api import CoreApi
+
+    h, desk, _ = desk_for(tmp_path)
+    view = desk.owner_view("NVDA", "bear")
+    assert view is not None and view.direction == "bear" and view.invalidation > 100
+    assert desk.owner_view("ZZZZ", "bull") is None                       # no price
+    owner = await desk.preview(view)                    # a 1-ATR view: dropped, with the reason
+    assert owner["suggestions"] == [] and "reward/risk" in owner["notes"][0]
+    res = await desk.preview(bear_view(t1=98.0))
+    assert [ok for _, ok, _ in res["suggestions"]] == [True]
+    assert h.journal.rows(s.option_suggestions) == []                     # nothing journaled
+    assert not any("OPTIONS IDEA" in m for _, m in h.notifier.sent)       # nothing sent
+    board = {r["ticker"]: r for r in await desk.board()}
+    nv = board["NVDA"]
+    assert nv["spot"] == 100.0 and nv["atm_iv_30d"] and nv["bull"] and nv["bear"]
+    assert desk.status()["mode"] == desk.ocfg.mode
+    api = CoreApi(h.engine)
+    code, p = await api.handle("/options/preview", {"symbol": "NVDA", "direction": "bear"})
+    assert code == 200 and p["view"]["direction"] == "bear" and p["notes"]
+    assert (await api.handle("/options/preview", {"symbol": "ZZZZ"}))[0] == 404
+    code, b = await api.handle("/options/board", {})
+    assert code == 200 and b["rows"] and "dropped" in b["status"]
+    assert (await api.handle("/options/status", {}))[1]["enabled"] == desk.enabled

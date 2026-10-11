@@ -15,6 +15,8 @@ Defines every external data source, how often it is called, the internal tables 
 | Alpaca Trading API | Account, positions, orders, calendar, clock | REST `/v2/account`, `/v2/positions`, `/v2/orders`, `/v2/calendar`, `/v2/clock` | Reconcile every minute | Low |
 | Finnhub | Company news, earnings calendar, company profile (market cap) | REST `company-news`, `calendar/earnings`, `stock/profile2` | News every 15 min; calendar daily; profile weekly | ~10 calls per cycle; under 60/min |
 | SEC EDGAR | Recent filings (8-K), shares outstanding | `data.sec.gov/submissions/CIK##########.json`, `companyfacts` | Every 15 min (filings); weekly (facts) | Fair-access; set User-Agent to name + email |
+| Finnhub | Analyst upgrades/downgrades (UI-33) | REST `stock/upgrade-downgrade` (premium on some plans; turned off for the session on 401/403) | Every 30 min per ticker | 10 calls per 30 min |
+| Yahoo Finance / Google News RSS | Rating-action headlines (UI-33), parsed by rules; the headline must name the ticker or company as the subject | `feeds.finance.yahoo.com/rss/2.0/headline?s=<T>`, `news.google.com/rss/search?q=...` | Every 30 min per ticker; `./run.sh backfill` once | 20 requests per 30 min, User-Agent set |
 | Reddit (PRAW) | Posts and comment counts mentioning the tickers | r/stocks, r/investing, r/wallstreetbets, r/StockMarket search | Every 15 min | Under 100 queries/min; non-commercial |
 | Macro calendar | CPI, jobs report, FOMC dates | Published BLS and Federal Reserve schedules, entered in config yearly | Yearly, checked monthly | — |
 
@@ -55,7 +57,7 @@ The existing alert-bot indicators (RSI, MACD, Bollinger, Keltner, OBV, CMF) are 
 
 Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared by the containers with one role each (`docker/postgres/init.sql`). Replay and backtest runs write a per-run SQLite file with the same schema, so runs are self-contained. Times stored in UTC; reports shown in ET.
 
-**Writers by container:** `trader-core` writes every table except `news_items` and `event_flags` (written by `news-sentiment`), inbound commands (written by `notifier` and `console` into `outbox`), and `owner_notes` / `console_chats` (written by `console`, which also logs its Ask calls to `llm_calls`). The `console_rw` role reads every table and is refused every other write (`trader migrate` grants, `upgrade.sql`). Backups and Grafana use the read-only role, which also reads every sequence so `pg_dump` works (found by the OPS-1 restore test).
+**Writers by container:** `trader-core` writes every table except `news_items`, `event_flags` and `analyst_actions` (written by `news-sentiment`), inbound commands (written by `notifier` and `console` into `outbox`), and `owner_notes` / `console_chats` (written by `console`, which also logs its Ask calls to `llm_calls`). The `console_rw` role reads every table and is refused every other write (`trader migrate` grants, `upgrade.sql`). Backups and Grafana use the read-only role, which also reads every sequence so `pg_dump` works (found by the OPS-1 restore test).
 
 **Outbox bus (cross-container):** table `journal.outbox` (id, created_at, source, channel, payload JSONB, consumed_at). Channels: `news_flags` (news → core), `outbound_msg` (core → notifier), `inbound_cmd` (notifier and console → core; the trigger forces `source = console` for the console role), `heartbeat` (all). A trigger enforces which role may publish on which channel and issues `NOTIFY`.
 
@@ -66,6 +68,8 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | `bars_1m`, `bars_1d` | ticker, ts, o, h, l, c, v, vwap, source | A2 (Parquet for history) |
 | `levels` | date, ticker, prior_high, prior_low, prior_close, pm_high, pm_low, ema20d, ema50d, atr14d | A4 |
 | `news_items` | id, ticker, source, published_at, headline, cleaned_text, finbert_score | A3 |
+| `analyst_actions` | ts, ticker, firm, action (upgrade, downgrade, initiate, reiterate, pt_raise, pt_cut), from_rating, to_rating, pt_old, pt_new, headline, source, url, action_hash (unique) | A3 ratings feed (UI-33) |
+| `market_recap` | run_at, as_of, ticker, metrics_json (returns, strength against QQQ, ATR, levels, tags) | `trader recap` / `RECAP` (UI-34) |
 | `event_flags` | date, ticker, flag (EARNINGS_TODAY, EARNINGS_3D, NEW_8K, RATING_CHANGE, SOCIAL_SPIKE, FOMC, CPI), detail | A3 |
 | `game_plans` | id, date, window, ticker, setup, trigger, stop, target, notes, off_limits[] | A5 |
 | `setups` | id, ts, ticker, style, window, setup_name, trigger, stop, t1, t2, score, filters_json | A4 |

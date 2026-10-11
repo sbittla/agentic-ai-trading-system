@@ -11,6 +11,7 @@ import contextlib
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -51,6 +52,10 @@ class NewsService:
                                            os.environ["REDDIT_CLIENT_SECRET"],
                                            os.environ.get("REDDIT_USER_AGENT", ua),
                                            cfg.data.reddit_subreddits))
+        from trader.news.ratings import RatingsFeed  # UI-33: upgrades and downgrades
+
+        sources.append(RatingsFeed(journal, os.environ.get("FINNHUB_TOKEN"),
+                                   names=cfg_company_names(cfg)))
         base = Path(loaded.path).resolve().parent.parent
         cal = MarketCalendar()
         macro = MacroCalendar.load(base / cfg.windows.macro_calendar_file)
@@ -132,6 +137,13 @@ class NewsService:
                                                 else 300))
 
         await asyncio.gather(heartbeat(), poll(), hot_poll())
+
+
+def cfg_company_names(cfg: Any) -> dict[str, tuple[str, ...]]:
+    """Company names per ticker so RSS headlines that say "Nvidia" match NVDA."""
+    from trader.news.names import COMPANY_NAMES
+
+    return {t: COMPANY_NAMES.get(t, ()) for t in cfg.universe.tickers}
 
 
 def _until_next(now: datetime, seconds: int) -> float:

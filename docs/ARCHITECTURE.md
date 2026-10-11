@@ -26,7 +26,7 @@ flowchart LR
         BK[backup<br/>nightly]
     end
     ALP[Alpaca APIs]
-    EXT[Finnhub · EDGAR · Reddit]
+    EXT[Finnhub · EDGAR · Reddit · Yahoo/Google News RSS]
     TW[Twilio WhatsApp]
 
     A2 <--> BUS
@@ -54,7 +54,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 1 | `ollama` | `ollama/ollama` (pinned digest) | Always | internal only | GPU, large model, no internet needed |
 | 2 | `trader-core` | `docker/Dockerfile` target `core` | Always | internal + egress to Alpaca | The only container that can trade. Holds A1, A2, A4–A12 so the risk manager always sees exact positions, live quotes and limits in memory |
-| 3 | `news-sentiment` | target `news` (adds PyTorch + FinBERT) | Always in market days | internal + egress to Finnhub, EDGAR, Reddit | Heavy image; reads untrusted text, so it is kept away from order code and holds no Alpaca keys |
+| 3 | `news-sentiment` | target `news` (adds PyTorch + FinBERT) | Always in market days | internal + egress to Finnhub, EDGAR, Reddit, Yahoo Finance and Google News RSS (analyst rating headlines, UI-33) | Heavy image; reads untrusted text, so it is kept away from order code and holds no Alpaca keys. Rating actions go to `analyst_actions`; company names for headline matching are in `src/trader/news/names.py` |
 | 4 | `notifier` | target `notifier` | Always | internal + egress to Telegram (default, ADR-014) or Twilio | Holds the channel keys; sends messages and **polls** for replies (Telegram `getUpdates` long polling or Twilio's Messages API), so nothing on the host is reachable from the internet |
 | 5 | `postgres` | `postgres:16` (pinned) | Always | internal only | Journal, tax lots and the cross-container outbox bus |
 | 6 | `backup` | target `tools` | Always (sleeps; runs nightly) | internal + local backup folder | Nightly `pg_dump` and Parquet copy |

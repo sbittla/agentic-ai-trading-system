@@ -18,6 +18,8 @@ How to set up, run, watch and recover the system. Times are US Eastern (6:30 AM 
 6. Check the 7:00 AM pre-flight message arrives on Telegram the next trading day, and send `STATUS` to confirm inbound polling works.
 7. Windows: set active hours 6 AM–5 PM ET, disable sleep on AC power, enable automatic login recovery after power loss, and set the PC to sync time automatically.
 
+8. **Load the past week or month** so the console and the first plans have data: `./run.sh backfill 30` (or `7`). It pulls the last 30 days of Finnhub news, SEC filings and analyst rating actions (Finnhub plus Yahoo Finance and Google News RSS headlines) and scores them with FinBERT, builds the recap of the last ~21 sessions and sends the next-session watchlist to Telegram, then runs `trader plan` for the next-day ideas when trader-core is running. It is safe to re-run: items already in the journal are skipped. It needs outbound access to finnhub.io, efts.sec.gov, feeds.finance.yahoo.com, news.google.com and the Alpaca data API.
+
 Optional: `./run.sh alerts` starts the standalone price-alert bot when it has its own Alpaca account ([ALERTS.md](ALERTS.md)); otherwise trader-core sends the alerts itself (AL-1).
 
 ## 2. Daily routine for the owner
@@ -30,6 +32,7 @@ Optional: `./run.sh alerts` starts the standalone price-alert bot when it has it
 | 10:30 | Read the morning summary |
 | 3:00–4:00 | Approvals as above |
 | 4:15 | Read the **next-day ideas** alert: up to 4 picks per window with trigger, stop and T1, built from today's close (code screen + Qwen review), plus how the previous ideas played out. Grafana **6. Next-day ideas** shows every ticker's screen. Ideas are refreshed at 9:00 and 2:45 with gap and pre-market data; they mark trades as planned (full size), they never place orders |
+| Evening / weekend | `RECAP 5` (week) or `RECAP 21` (month) on Telegram, or the buttons on the console's Market recap page: leaders and laggards against QQQ, analyst actions, events, and a watchlist with levels for the next session. Levels to watch, not orders |
 | 4:15 | Options ideas (advisory, OPTIONS_REQUIREMENTS.md) arrive with the next-day ideas; follow-ups for open ideas come during the windows |
 | 4:30 | Read the daily review (now with latency, slippage, strict paper fills and the options section); note any rule breach or incident |
 | Any time | Owner Console http://localhost:8080: cockpit, stock lookup with the live checklist ("why isn't it buying NVDA?"), Ask, trade stories, journal notes and tags |
@@ -44,6 +47,7 @@ The Owner Console sends the same commands through the same checks (Controls page
 | Action | Telegram / WhatsApp | Local |
 | --- | --- | --- |
 | Status | `STATUS` | `./run.sh status` |
+| Recap of the last N sessions and next-session watchlist | `RECAP 5` / `RECAP 21` | `./run.sh backfill [days]` (news, ratings, recap and plan) or `docker compose -f docker/docker-compose.yml exec trader-core trader recap --days 5 [--no-send]` |
 | Rebuild next-day ideas (outside market hours) | `PLAN` | `docker compose -f docker/docker-compose.yml exec trader-core trader plan` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
 | Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `docker compose -f docker/docker-compose.yml exec trader-core trader resume` |

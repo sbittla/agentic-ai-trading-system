@@ -103,10 +103,72 @@ class OptionsDesk:
         return float(self.engine.risk.state.equity or 0)
 
     # -- OP-10 ---------------------------------------------------------------------------------
-    async def on_view(self, view: View) -> list[OptionSuggestion]:
-        """Build, gate (A15) and send suggestions for one view."""
-        if not self.enabled:
-            return []
+    async def preview(self, view: View) -> dict[str, Any]:
+        """Console preview (UI-36): the suggestions A14 would build for ``view`` right now
+        and why any were dropped or blocked. Nothing is sent, journaled or counted."""
+        sugs, notes = await self._build(view)
+        now = self.now()
+        out = []
+        for sg in sugs:
+            ok, why = self.risk.check(sg, now)
+            out.append((sg, ok, why))
+        return {"suggestions": out, "notes": notes}
+
+    def owner_view(self, t: str, direction: str | None, style: str = "day",
+                   allow_earnings: bool = False) -> View | None:
+        """The view behind ``OPT <T>`` and the console's preview: invalidation 1 ATR away
+        (ATR 5-min for day, ATR 14-day for swing), T1 at 1.5R, T2 at 3R."""
+        sp = self.spot(t)
+        if sp is None:
+            return None
+        st = self.engine.md.state.get(t)
+        if direction not in ("bull", "bear"):
+            direction = "bear" if st is not None and st.above_vwap() is False else "bull"
+        lv = self.engine.ta.levels.get(t)
+        if style == "day":
+            r = float(st.atr5.value) if st is not None and st.atr5.value else sp * 0.005
+        else:
+            r = float(lv.atr14d) if lv is not None and lv.atr14d else sp * 0.02
+        sign = 1 if direction == "bull" else -1
+        return View(t, direction, sp, sp - sign * r, sp + sign * 1.5 * r, sp + sign * 3 * r,
+                    style, 0, "owner", "owner view", True, True, allow_earnings)
+
+    async def board(self) -> list[dict[str, Any]]:
+        """UI-36: IV, IV rank, expected move and the OP-1 structure per universe ticker
+        (cached by the snapshot cache; one context call per ticker)."""
+        from trader.options.strategist import structures_for
+
+        today = to_et(self.now()).date()
+        rows: list[dict[str, Any]] = []
+        for t in self.cfg.universe.tickers:
+            sp = self.spot(t)
+            if sp is None:
+                rows.append({"ticker": t, "error": "no price"})
+                continue
+            try:
+                ctx, _ = await self.data.context(t, sp, today)
+            except Exception as exc:   # noqa: BLE001 - one ticker must not stop the board
+                rows.append({"ticker": t, "spot": sp, "error": str(exc)[:120]})
+                continue
+            front = min(ctx.expected_moves.items(), key=lambda kv: kv[0]) \
+                if ctx.expected_moves else None
+            rows.append({"ticker": t, "spot": sp, "atm_iv_30d": ctx.atm_iv_30d,
+                         "iv_rank": ctx.iv_rank, "iv_pct": ctx.iv_pct,
+                         "history": ctx.history_label or "full", "skew": ctx.skew,
+                         "em_expiry": front[0].isoformat() if front else None,
+                         "em": front[1] if front else None,
+                         "em_pct": front[1] / sp * 100 if front else None,
+                         "bull": structures_for("bull", ctx.iv_rank, self.ocfg),
+                         "bear": structures_for("bear", ctx.iv_rank, self.ocfg),
+                         "earnings": e.isoformat() if (e := self.earnings(t)) else None})
+        return rows
+
+    def status(self) -> dict[str, Any]:
+        return {"enabled": self.enabled, "mode": self.ocfg.mode,
+                "account_level": self.ocfg.account_level, "open": len(self.book.open),
+                "dropped": [{"ticker": t, "why": w} for t, w in self.dropped[-25:]][::-1]}
+
+    async def _build(self, view: View) -> tuple[list[OptionSuggestion], list[str]]:
         now = self.now()
         today = to_et(now).date()
         dte = (0 if self.ocfg.allow_0dte else self.ocfg.day_dte[0], self.ocfg.day_dte[1]) \
@@ -116,17 +178,23 @@ class OptionsDesk:
             quotes = await self.data.quotes(view.ticker, view.spot, today, dte)
         except Exception as exc:   # noqa: BLE001 - no data is a valid "no suggestion"
             log.warning("options_data_failed", ticker=view.ticker, error=str(exc))
-            self.dropped.append((view.ticker, f"data: {exc}"))
-            return []
+            return [], [f"options data unavailable: {exc}"]
         moves = {e: m for e in expiries(quotes)
                  if (m := _em(quotes, view.spot, e)) is not None} | ctx.expected_moves
-        sugs, notes = suggest(view, quotes, cfg=self.ocfg, now=now, equity=self.equity(),
-                              risk_pct=self.risk_pct(not view.signal_only),
-                              iv_rank=ctx.iv_rank, expected_moves=moves,
-                              events_for=self.events_for(view.ticker, today),
-                              earnings=self.earnings(view.ticker),
-                              indicative=self.data.client is None
-                              or getattr(self.data.client, "feed", "indicative") != "opra")
+        return suggest(view, quotes, cfg=self.ocfg, now=now, equity=self.equity(),
+                       risk_pct=self.risk_pct(not view.signal_only),
+                       iv_rank=ctx.iv_rank, expected_moves=moves,
+                       events_for=self.events_for(view.ticker, today),
+                       earnings=self.earnings(view.ticker),
+                       indicative=self.data.client is None
+                       or getattr(self.data.client, "feed", "indicative") != "opra")
+
+    async def on_view(self, view: View) -> list[OptionSuggestion]:
+        """Build, gate (A15) and send suggestions for one view."""
+        if not self.enabled:
+            return []
+        now = self.now()
+        sugs, notes = await self._build(view)
         for n in notes:
             self.dropped.append((view.ticker, n))
             log.info("option_dropped", ticker=view.ticker, why=n)
@@ -355,18 +423,12 @@ class OptionsDesk:
         return f"unknown options command {action}"
 
     async def opt_command(self, t: str, sp: float, opts: list[str]) -> str:
-        st = self.engine.md.state.get(t)
-        direction = "bear" if "BEAR" in opts else "bull" if "BULL" in opts else (
-            "bear" if st is not None and st.above_vwap() is False else "bull")
+        direction = "bear" if "BEAR" in opts else "bull" if "BULL" in opts else None
         style = "swing" if "SWING" in opts else "day"
-        lv = self.engine.ta.levels.get(t)
-        if style == "day":
-            r = float(st.atr5.value) if st is not None and st.atr5.value else sp * 0.005
-        else:
-            r = float(lv.atr14d) if lv is not None and lv.atr14d else sp * 0.02
-        sign = 1 if direction == "bull" else -1
-        view = View(t, direction, sp, sp - sign * r, sp + sign * 1.5 * r, sp + sign * 3 * r,
-                    style, 0, "owner", "owner view", True, True, "EARNINGS" in opts)
+        view = self.owner_view(t, direction, style, "EARNINGS" in opts)
+        if view is None:
+            return f"{t}: no price yet"
+        direction = view.direction
         before = len(self.dropped)
         sent = await self.on_view(view)
         if sent:

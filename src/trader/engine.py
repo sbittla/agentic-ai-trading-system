@@ -1880,6 +1880,23 @@ class TradingEngine:
         elif action in ("OPT", "CHAIN", "IV", "OPTS", "OPTIONS"):                # OP-13
             reply = (await self.options.command(action, arg) if self.options is not None
                      else "options module is not running (options.mode off)")
+        elif action == "RECAP":                                                 # UI-34
+            days = int(arg) if arg.strip().isdigit() and 1 <= int(arg) <= 250 else 5
+            if self.history is None:
+                reply = "RECAP needs the market-data history client"
+            else:
+                async def _recap() -> None:
+                    from trader.agents.recap import run_recap
+
+                    try:
+                        rows, text = await run_recap(self.cfg, self.journal, self.history,
+                                                     self.cal, self.macro, days, self.now())
+                    except Exception as exc:   # noqa: BLE001
+                        log.warning("recap_failed", error=str(exc))
+                        text = f"RECAP failed: {exc}"
+                    await self.say(text, "recap")
+                self._spawn(_recap())
+                reply = f"RECAP of the last {days} sessions started: the watchlist follows"
         elif action == "PLAN":
             if self.next_session_day(self.now()) is None:
                 reply = "PLAN runs outside market hours; the 9:00/2:45 plans cover the session"

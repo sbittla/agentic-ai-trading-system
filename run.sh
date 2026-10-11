@@ -19,6 +19,8 @@
 #   ./run.sh replay [days]   offline trial on synthetic days (no broker keys, no GPU)
 #   ./run.sh backtest [days] playbook on real minute bars from the journal store (BT-6)
 #   ./run.sh test            lint, type check, tests and traceability in the dev container
+#   ./run.sh backfill [days] last N days (default 30) of news + analyst ratings, a recap and
+#                            watchlist to Telegram, then next-session ideas (PLAN)
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -255,6 +257,37 @@ cmd_ui() {   # cmd_ui SERVICE... : start one UI service and print where it is
   fi
 }
 
+svc_exec() {   # svc_exec SERVICE ARGS...: in the running container, else a one-off one
+  if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx "$1"; then
+    "${COMPOSE[@]}" exec -T "$@"
+  else
+    local s="$1"; shift
+    "${COMPOSE[@]}" run --rm -T --no-deps "$s" "$@"
+  fi
+}
+
+cmd_backfill() {   # cmd_backfill [days]: data for the past week/month, then ideas (UI-33/34)
+  local days="${1:-30}"
+  [[ "$days" =~ ^[0-9]+$ ]] && [ "$days" -ge 1 ] && [ "$days" -le 365 ] \
+    || die "usage: ./run.sh backfill [days 1-365]"
+  local sessions=$(( days * 5 / 7 )); [ "$sessions" -lt 1 ] && sessions=1
+  check_docker
+  "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+  step "News, filings and analyst ratings: last $days days (news-sentiment)"
+  svc_exec news-sentiment trader backfill-news --days "$days" \
+    || warn "news backfill failed: ./run.sh logs news-sentiment (FINNHUB_TOKEN in .env.news?)"
+  step "Recap of the last $sessions sessions and the next-session watchlist (Telegram)"
+  svc_exec trader-core trader recap --days "$sessions" \
+    || die "recap failed (Alpaca keys in .env.core? ./run.sh connections)"
+  step "Next-session ideas"
+  if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx trader-core; then
+    "${COMPOSE[@]}" exec -T trader-core trader plan
+    ok "ideas and options ideas arrive on Telegram in a minute or two; console: http://localhost:8080/ideas"
+  else
+    warn "trader-core is not running: ./run.sh, then ./run.sh backfill again (or send PLAN)"
+  fi
+}
+
 cmd="${1:-start}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   start)   cmd_start "$@" ;;
@@ -300,6 +333,7 @@ case "$cmd" in
   backtest) check_docker
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
+  backfill) cmd_backfill "$@" ;;
   test)    check_docker   # developers too: nothing runs from a host venv
            "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
            "${COMPOSE[@]}" --profile dev run --rm -T --user "$HOST_UID:$HOST_GID" \
@@ -307,6 +341,6 @@ case "$cmd" in
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
-  help|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac

@@ -43,6 +43,7 @@ ALLOWED = {
     "SOLD",
     "OPT",
     "OPTIONS",
+    "RECAP",
 }
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 ARG_RE = re.compile(r"^[A-Za-z0-9 .@:_-]{0,40}$")
@@ -519,3 +520,70 @@ class ConsoleData:
         from datetime import time as _t
 
         return _t(9, 35) <= t < _t(10, 30) or _t(15, 0) <= t < _t(15, 55)
+
+
+# --- UI-33..UI-35: ratings, news, recap, events ------------------------------------------------
+
+def ratings(data: ConsoleData, days: int = 30, ticker: str | None = None,
+            action: str | None = None) -> list[dict[str, Any]]:
+    rows = data._since(s.analyst_actions, "ts", data.now() - timedelta(days=days), 1000)
+    if ticker:
+        rows = [r for r in rows if r["ticker"] == ticker]
+    if action:
+        rows = [r for r in rows if r["action"] == action]
+    return rows
+
+
+def news(data: ConsoleData, days: int = 7, ticker: str | None = None, limit: int = 200
+         ) -> list[dict[str, Any]]:
+    rows = data._since(s.news_items, "published_at", data.now() - timedelta(days=days), 2000)
+    if ticker:
+        rows = [r for r in rows if r["ticker"] == ticker]
+    return rows[:limit]
+
+
+def recap_latest(data: ConsoleData) -> tuple[datetime | None, list[dict[str, Any]]]:
+    """The newest ``trader recap`` / RECAP run: (run_at, rows)."""
+    last = data.rows(s.market_recap, order_by="run_at", descending=True, limit=1)
+    if not last:
+        return None, []
+    run_at = last[0]["run_at"]
+    rows = [r["metrics_json"] for r in data.rows(s.market_recap, {"run_at": run_at})]
+    return run_at, rows
+
+
+def upcoming_events(data: ConsoleData, days: int = 7) -> list[dict[str, Any]]:
+    """Earnings flags from the news service and macro days from the calendar file."""
+    out: list[dict[str, Any]] = []
+    today = data.today()
+    for r in data.rows(s.event_flags, order_by="date", descending=True, limit=300):
+        if r["date"] >= today - timedelta(days=1) and r["flag"] in ("EARNINGS_TODAY",
+                                                                     "EARNINGS_3D"):
+            out.append({"date": r["date"], "ticker": r["ticker"], "event": "Earnings",
+                        "detail": r["flag"].replace("_", " ").lower()})
+    try:
+        from trader.calendar import MacroCalendar
+
+        mc = MacroCalendar.load(data.paths.config / data.cfg.windows.macro_calendar_file.split(
+            "/")[-1])
+        for i in range(days + 1):
+            d = today + timedelta(days=i)
+            if mc.is_fomc(d):
+                out.append({"date": d, "ticker": "", "event": "FOMC",
+                            "detail": "afternoon entries off"})
+            if mc.is_cpi_or_jobs(d):
+                out.append({"date": d, "ticker": "", "event": "CPI / jobs 8:30",
+                            "detail": "later morning entries"})
+            if mc.is_release_1000(d):
+                out.append({"date": d, "ticker": "", "event": "10:00 release",
+                            "detail": "entries paused 9:57-10:05"})
+    except Exception as exc:   # noqa: BLE001 - the page shows what it has
+        log.info("console_macro_unavailable", error=str(exc))
+    seen: set[tuple[Any, ...]] = set()
+    uniq = []
+    for e in sorted(out, key=lambda e: (e["date"], e["ticker"])):
+        k = (e["date"], e["ticker"], e["event"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(e)
+    return uniq

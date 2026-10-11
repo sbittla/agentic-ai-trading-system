@@ -81,6 +81,89 @@ CORE = {
 }
 
 
+UNIVERSE = ("NVDA", "AAPL", "GOOGL", "MSFT", "AMZN", "TSM", "SPCX", "META", "AVGO", "TSLA")
+MOVES = (1.28, -0.64, 0.31, 2.71, -1.85, 0.12, -3.4, 0.9, 1.6, -0.2)
+CORE["/scanner"] = {"rows": [
+    {"ticker": t_, "last": 100 + i * 20, "change_pct": m, "rvol": 1 + i / 10,
+     "rs_qqq": m - 0.4, "vwap_dist_pct": m / 3, "in_play": False}
+    for i, (t_, m) in enumerate(zip(UNIVERSE, MOVES, strict=True))]}
+CORE["/options/board"] = {"status": {"enabled": True, "mode": "advisory", "account_level": 3,
+                                     "open": 0, "dropped": [
+                                         {"ticker": "AAPL", "why": "call_debit: reward/risk at "
+                                          "T1 1.20 < 1.5"}]},
+                          "rows": [{"ticker": t_, "spot": 100 + i * 20, "atm_iv_30d": 0.3 + i / 50,
+                                    "iv_rank": 20 + i * 7, "iv_pct": 30 + i * 6,
+                                    "history": "short history: 40 days", "skew": 0.03,
+                                    "em_expiry": "2026-10-23", "em": 3 + i / 2,
+                                    "em_pct": (3 + i / 2) / (100 + i * 20) * 100,
+                                    "bull": ["call_debit"] if 20 + i * 7 >= 30 else
+                                    ["long_call", "call_debit"],
+                                    "bear": ["put_debit"], "earnings": "2026-10-28"
+                                    if t_ == "TSLA" else None}
+                                   for i, t_ in enumerate(UNIVERSE[:6])]}
+CORE["/options/preview"] = {
+    "symbol": "NVDA", "view": {"direction": "bull", "spot": 190.4, "invalidation": 189.5,
+                               "t1": 191.75, "style": "day"},
+    "notes": ["long_call: size 0 at the risk budget (OP-5)"],
+    "suggestions": [{"structure": "call_debit", "label": "Call debit spread",
+                     "expiry": "2026-10-23", "contracts": 3,
+                     "legs": [{"strike": 190.0, "kind": "C", "side": 1},
+                              {"strike": 192.5, "kind": "C", "side": -1}],
+                     "net_mid": 1.12, "est_fill": 1.17, "max_loss": 117.0, "max_gain": 133.0,
+                     "breakeven": 191.17, "pnl_t1": 41.0, "pnl_inv": -26.0, "pop": 0.46,
+                     "risk_usd": 351.0, "iv_rank": 45.0, "expected_move": 6.1, "events": [],
+                     "allowed": True, "blocked_by": "", "text": "", "detail": {}}]}
+
+
+def seed_extra(j: SqlJournal) -> None:
+    """Ratings, news, a recap and events: what ./run.sh backfill fills in."""
+    acts = [("NVDA", "Morgan Stanley", "upgrade", "Equal Weight", "Overweight", None, None),
+            ("AAPL", "Goldman Sachs", "downgrade", "Buy", "Neutral", None, None),
+            ("AMZN", "Bank of America", "pt_raise", None, None, 230.0, 250.0),
+            ("META", "Barclays", "pt_cut", None, None, 640.0, 600.0),
+            ("MSFT", "Jefferies", "initiate", None, "Buy", None, None),
+            ("AVGO", "UBS", "reiterate", None, "Buy", None, None),
+            ("NVDA", "Citi", "pt_raise", None, None, 210.0, 230.0)]
+    for i, (t_, firm, act, frm, to, old, new) in enumerate(acts):
+        j.insert(s.analyst_actions, {
+            "ts": NOW - timedelta(hours=5 + i * 9), "ticker": t_, "firm": firm, "action": act,
+            "from_rating": frm, "to_rating": to, "pt_old": old, "pt_new": new,
+            "headline": f"{firm} {act.replace('_', ' ')} {t_}", "source": "yahoo",
+            "url": "https://example.com/a", "action_hash": f"h{i}"})
+    heads = [("NVDA", "Nvidia unveils new data-center chips", 0.62),
+             ("AAPL", "Apple faces iPhone demand questions in China", -0.48),
+             ("TSLA", "Tesla deliveries beat estimates", 0.41),
+             ("MSFT", "Microsoft expands cloud AI capacity", 0.22)]
+    for i, (t_, h, sc) in enumerate(heads):
+        j.insert(s.news_items, {"item_id": f"n{i}", "ticker": t_, "source": "finnhub",
+                                "published_at": NOW - timedelta(hours=2 + i * 6),
+                                "received_at": NOW, "headline": h, "finbert_score": sc})
+    j.insert(s.event_flags, {"date": PLAIN_DAY, "ticker": "TSLA", "flag": "EARNINGS_3D",
+                             "detail": "earnings 10-20"})
+    rows = []
+    for i, t_ in enumerate(("SPY", "QQQ", "SMH") + UNIVERSE):
+        kind = "index" if i < 3 else "stock"
+        m = MOVES[(i - 3) % len(MOVES)] if kind == "stock" else 0.3 * (i + 1)
+        rows.append({"ticker": t_, "kind": kind, "close": 100 + i * 15, "ret_1d": m,
+                     "ret_5d": m * 2.1, "ret_21d": m * 4 - 1, "rs_qqq": m * 3 - 2 if kind ==
+                     "stock" else None, "atr14": 3 + i / 3, "atr_pct": 2.1, "atr_to_high20":
+                     0.3 if t_ in ("NVDA", "MSFT") else 1.8, "volume_ratio": 1.2,
+                     "range_pos": 0.7, "levels": {"prior_high": 101 + i * 15,
+                                                  "prior_low": 98 + i * 15,
+                                                  "prior_close": 100 + i * 15,
+                                                  "pivot": 99.7 + i * 15, "r1": 101.4 + i * 15,
+                                                  "s1": 98.4 + i * 15, "high20": 105 + i * 15,
+                                                  "low20": 92 + i * 15},
+                     "tags": (["leader", "near 20d high", "upgraded"] if t_ == "NVDA" else
+                              ["laggard", "downgraded"] if t_ == "AAPL" else
+                              ["earnings soon"] if t_ == "TSLA" else []) if kind == "stock"
+                     else [], "ratings": {"upgrade": 1} if t_ == "NVDA" else {},
+                     "latest_rating": "Morgan Stanley: upgrade to Overweight" if t_ == "NVDA"
+                     else None, "news_count": 3, "news_tone": 0.2})
+    j.insert_many(s.market_recap, [{"run_at": NOW - timedelta(hours=1), "as_of": PLAIN_DAY,
+                                    "ticker": r_["ticker"], "metrics_json": r_} for r_ in rows])
+
+
 def core_transport(up: bool = True) -> httpx.MockTransport:
     def handler(req: httpx.Request) -> httpx.Response:
         if not up:
@@ -233,12 +316,12 @@ def test_home_cockpit(env: dict[str, Any]) -> None:
     t = c.get("/").text
     assert 'class="mode paper"' in t and "PAPER" in t
     assert "$25,012.50" in t and "$12.50" in t and "-$375.00" in t and "of\n3" not in t
-    assert "alpaca: green" in t and "slow" in t and "TRADING OK" in t
+    assert "<i>✓</i>alpaca</span>" in t and "slow" in t and "Trading allowed" in t
     assert 'href="/story/pid-1"' in t and "+0.50" in t                      # UI-2
     assert "ORB" in t and "AMD" in t                                         # UI-3
     assert "core" in t and "qwen3:8b" in t and "6.0 GB" in t                 # UI-4a
     assert "NOTIFIER_DOWN" in t and "ACK alerts" in t                        # UI-4b
-    assert "1 pending approval" in t
+    assert "Approvals waiting" in t and 'href="/approvals">open inbox' in t
 
 
 @pytest.mark.rule("UI-22")
@@ -261,9 +344,9 @@ def test_core_down_still_loads(env: dict[str, Any]) -> None:
     c = client(env)
     login(c)
     t = c.get("/").text
-    assert "showing the last snapshot" in t and "$25,012.50" in t
+    assert "showing its last snapshot" in t and "$25,012.50" in t
     s_ = c.get("/stock?symbol=NVDA")
-    assert s_.status_code == 200 and "Quote unavailable" in s_.text
+    assert s_.status_code == 200 and "quote unavailable" in s_.text
     assert c.get("/scanner").status_code == 200
 
 
@@ -281,12 +364,14 @@ def test_stock_page(env: dict[str, Any]) -> None:
     t = c.get("/stock?symbol=nvda").text
     assert 'data-symbol="NVDA"' in t and "190.40" in t and "+1.28%" in t
     assert t.count("<svg") >= 2 and "prior high 103.00" in t and "polygon" in t   # fill marker
-    assert "RSI(14, 1m)" in t and "MACD" in t and "Bollinger" in t
-    assert "Checklist dry-run now (UI-5)" in t and "PASS" in t and "FAIL" in t
-    assert "Suggest bull (options)" in t and "Ask</a>" in t and "Grafana" in t   # UI-6
+    assert "RSI 14 (1-min / daily)" in t and "MACD" in t and "Bollinger" in t
+    assert "Entry checklist now" in t and "PASS" in t and "FAIL" in t
+    assert "Options idea: bull" in t and "Ask</a>" in t and "Grafana</a>" in t   # UI-6
+    assert "Price alert</a>" in t
     assert "2–3% of volume" in t                                                  # UI-6a
-    assert "IV rank 55" in t and "liquid" in t and "OI 100 &lt; 500" in t         # OP-16
-    assert "Universe: <span class=\"badge ok\">YES" in t
+    assert 'IV rank</div><div class="value">55' in t and "liquid" in t          # OP-16
+    assert "OI 100 &lt; 500" in t
+    assert 'Universe <span class="chip ok"><i>✓</i>yes' in t
     assert "not a valid symbol" in c.get("/stock?symbol=%3Cscript%3E").text
 
 
@@ -450,9 +535,9 @@ def test_alerts_ideas_reports_compliance(env: dict[str, Any]) -> None:
     login(c)
     t = c.get("/alerts").text
     assert "orb_up" in t and "qualified" in t and "TSLA" in t and "watchlist: TSLA" in t
-    assert "Signal alerts OFF" in t
+    assert "Mute signal alerts" in t
     t = c.get("/ideas").text
-    assert "AMD" in t and "pick" in t
+    assert "AMD" in t and "Picks for" in t
     t = c.get("/reports").text
     assert "daily_2026-10-16.md" in t
     v = c.get("/reports?name=daily_2026-10-16.md")
@@ -533,9 +618,59 @@ async def test_options_list_and_payoff(env: dict[str, Any]) -> None:
     c = client(env)
     login(c)
     t = c.get("/options").text
-    assert "put_debit" in t and "payoff" in t and "Promotion gate" in t
+    assert "put debit" in t and ">payoff<" in t and "Promotion gate" in t
     p = c.get(f"/options/{sug[0].suggestion_id}").text
     assert "<svg" in p and "invalidation 101.00" in p and "at the planned exit" in p
+
+
+@pytest.mark.rule("UI-35")
+def test_empty_states_say_why_and_what_to_do(env: dict[str, Any]) -> None:
+    c = client(env)
+    login(c)
+    t = c.get("/market").text
+    assert "No recap yet" in t and "RECAP 21" in t and "./run.sh backfill" in t
+    t = c.get("/ratings").text
+    assert "No analyst actions" in t and "./run.sh backfill" in t
+    assert "No news" in c.get("/news").text
+
+
+@pytest.mark.rule("UI-33")
+@pytest.mark.rule("UI-34")
+def test_ratings_news_and_market_pages(env: dict[str, Any]) -> None:
+    seed_extra(env["j"])
+    c = client(env)
+    login(c)
+    t = c.get("/ratings").text
+    assert "7 actions" in t and "Morgan Stanley" in t and "Equal Weight → Overweight" in t
+    assert "$230 → $250" in t and "Net actions per ticker" in t
+    t = c.get("/ratings?ticker=NVDA&action=upgrade").text
+    assert "1 action" in t
+    assert "Goldman Sachs" not in t.split("Net actions")[-1]
+    assert c.get("/ratings?ticker=%3Cx%3E").status_code == 200                  # ignored
+    t = c.get("/news?ticker=AAPL").text
+    assert "iPhone demand" in t and "Nvidia unveils" not in t
+    t = c.get("/market").text
+    assert "Strength against QQQ" in t and "Watchlist for the next session" in t
+    assert "near 20d high" in t and "Morgan Stanley: upgrade to Overweight" in t
+    t = c.get("/").text                                                          # home cards
+    assert "Latest analyst actions" in t and "Latest news" in t and "Upcoming events" in t
+    assert "Target raised" in t and "earnings 3d" in t
+    t = c.get("/stock?symbol=NVDA").text
+    assert "Levels for the next session" in t and "Citi" in t
+
+
+@pytest.mark.rule("UI-36")
+def test_options_board_and_preview(env: dict[str, Any]) -> None:
+    c = client(env)
+    login(c)
+    t = c.get("/options").text
+    assert "Options board" in t and "long call, call debit" in t
+    assert 'href="/options?preview=NVDA&amp;dir=bull"' in t
+    assert "Recently dropped" in t and "reward/risk at T1 1.20" in t
+    t = c.get("/options?preview=NVDA&dir=bull").text
+    assert "Preview: NVDA bull" in t and "Call debit spread" in t and "would be sent" in t
+    assert "Nothing is sent or journaled" in t and "Send this idea to Telegram" in t
+    assert "Preview:" not in c.get("/options?preview=%3Cx%3E").text
 
 
 # --- UI-23, UI-25, UI-26, compose -----------------------------------------------------------------
@@ -565,14 +700,15 @@ def test_accessibility_theme_and_shortcuts(env: dict[str, Any]) -> None:
     c = client(env)
     login(c)
     t = c.get("/").text
-    assert re.search(r'<span class="badge ok">alpaca: green</span>', t)   # text, not colour
+    assert re.search(r'<span class="chip ok"><i>✓</i>alpaca</span>', t)   # icon + word
 
 
 @pytest.mark.rule("UI-26")
 def test_every_page_renders(env: dict[str, Any]) -> None:
     c = client(env)
     login(c)
-    for path in ("/", "/scanner", "/stock", "/stock?symbol=NVDA", "/ask", "/approvals",
+    for path in ("/", "/market", "/ratings", "/news", "/scanner", "/stock",
+                 "/stock?symbol=NVDA", "/ask", "/approvals",
                  "/controls", "/stories", "/story/pid-1", "/copilot", "/options", "/alerts",
                  "/ideas", "/latency", "/notes", "/compliance", "/reports", "/config",
                  "/model", "/runs", "/healthz", "/static/app.css", "/static/app.js"):

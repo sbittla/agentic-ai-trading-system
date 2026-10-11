@@ -33,6 +33,7 @@ SYMBOL = re.compile(r"^[A-Z][A-Z.]{0,5}$")
 QUOTE_TTL_S = 5
 BARS_TTL_S = 30
 DAILY_TTL_S = 600
+BOARD_TTL_S = 300
 
 
 def _bar(b: Any) -> dict[str, Any]:
@@ -83,6 +84,10 @@ class CoreApi:
             "/latency": lambda: self._latency(),
             "/options/iv": lambda: self.options_iv(sym),
             "/options/chain": lambda: self.options_chain(sym, params.get("expiry")),
+            "/options/board": lambda: self.options_board(),
+            "/options/status": lambda: self.options_status(),
+            "/options/preview": lambda: self.options_preview(
+                sym, params.get("direction"), params.get("style", "day")),
         }
         fn = routes.get(path)
         if fn is None:
@@ -428,6 +433,49 @@ class CoreApi:
             "expiries": [e.isoformat() for e in exps],
             "rows": rows,
         }
+
+    async def options_board(self) -> dict[str, Any]:
+        desk = self._desk()
+
+        async def fetch() -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = await desk.board()
+            return rows
+        rows = await self._cached(("options", "board"), BOARD_TTL_S, fetch)
+        return {"rows": rows, "status": desk.status()}
+
+    async def options_status(self) -> dict[str, Any]:
+        st: dict[str, Any] = self._desk().status()
+        return st
+
+    async def options_preview(self, sym: str, direction: str | None, style: str
+                              ) -> dict[str, Any]:
+        """UI-36: what A14 would suggest now; nothing is sent or journaled."""
+        from trader.options.monitor import detail_of
+        from trader.options.strategist import LABEL, format_suggestion
+
+        desk = self._desk()
+        view = desk.owner_view(sym, direction if direction in ("bull", "bear") else None,
+                               "swing" if style == "swing" else "day")
+        if view is None:
+            raise LookupError(f"{sym}: no price")
+        res = await desk.preview(view)
+        out = []
+        for sg, ok, why in res["suggestions"]:
+            d = detail_of(sg)
+            out.append({"structure": sg.structure, "label": LABEL[sg.structure],
+                        "expiry": sg.expiry.isoformat(), "contracts": sg.contracts,
+                        "legs": [lg.as_dict() for lg in sg.legs], "net_mid": sg.net_mid,
+                        "est_fill": sg.est_fill, "max_loss": sg.max_loss,
+                        "max_gain": sg.max_gain, "breakeven": sg.breakeven,
+                        "pnl_t1": sg.pnl_t1, "pnl_inv": sg.pnl_inv, "pop": sg.pop,
+                        "risk_usd": sg.risk_usd, "iv_rank": sg.iv_rank,
+                        "expected_move": sg.expected_move, "events": sg.events,
+                        "allowed": ok, "blocked_by": why, "text": format_suggestion(sg),
+                        "detail": d})
+        return {"symbol": sym, "view": {"direction": view.direction, "spot": view.spot,
+                                        "invalidation": view.invalidation, "t1": view.t1,
+                                        "style": view.style},
+                "suggestions": out, "notes": res["notes"]}
 
     # -- HTTP --------------------------------------------------------------------------------------
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

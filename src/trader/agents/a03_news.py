@@ -195,6 +195,37 @@ class NewsAgent:
         self.ingest(items, now)
         return await self.flags_all(now)
 
+    async def backfill(self, days: int) -> dict[str, int]:
+        """Pull the last ``days`` of news, filings and rating actions once (``trader
+        backfill-news``), score them with FinBERT and journal them. Items already in the
+        journal are skipped, so it is safe to re-run. Reddit is skipped (no history API)."""
+        from sqlalchemy import select
+
+        now = self.now()
+        since = now - timedelta(days=days)
+        have: set[str] = set()
+        if self.journal is not None:
+            have = {r["item_id"] for r in self.journal.query(
+                select(s.news_items.c.item_id).where(s.news_items.c.published_at >= since))}
+        items: list[NewsItem] = []
+        counts: dict[str, int] = {}
+        for src in self.sources:
+            if src.name == "reddit":
+                continue
+            if hasattr(src, "last"):
+                src.last.clear()          # ratings feed: ignore its polling interval
+            try:
+                got = await src.fetch(list(self.cfg.universe.tickers), since)
+            except Exception as exc:   # noqa: BLE001 - report and continue with the rest
+                self.source_errors[src.name] = str(exc)
+                log.warning("news_backfill_source_failed", source=src.name, error=str(exc))
+                got = []
+            counts[src.name] = len(got)
+            items += [it for it in got if it.id not in have]
+        self.ingest(items, now)
+        counts["new_items"] = sum(1 for it in items if it.kind != "earnings")
+        return counts
+
     def ingest(self, items: Sequence[NewsItem], now: datetime) -> None:
         fresh: list[tuple[NewsItem, str, bool]] = []
         for it in items:

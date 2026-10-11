@@ -1,6 +1,11 @@
-"""Server-rendered HTML for the Owner Console. Everything dynamic is escaped; no inline
-scripts or styles (CSP), colour is never the only signal (UI-25), times in US Eastern and
-money in dollars and cents (UI-C7)."""
+"""Server-rendered HTML for the Owner Console: a small component system (sidebar layout,
+KPI tiles, cards, chips, heatmap, bar chart, empty states) and the pages built from it.
+
+Rules: everything dynamic is escaped; no inline scripts or styles (CSP); colour is never the
+only signal (UI-25: chips carry an icon and a word, deltas carry an arrow and a sign); times
+in US Eastern and money in dollars and cents (UI-C7). Chart colours come from the validated
+palette in app.css (dataviz reference palette: blue/red diverging pair, gray midpoint).
+"""
 
 from __future__ import annotations
 
@@ -13,27 +18,23 @@ from urllib.parse import quote
 
 from trader.timeutil import to_et
 
-NAV = (
-    ("/", "Home"),
-    ("/scanner", "Scanner"),
-    ("/stock", "Stock"),
-    ("/ask", "Ask"),
-    ("/approvals", "Approvals"),
-    ("/controls", "Controls"),
-    ("/stories", "Trades"),
-    ("/copilot", "Co-pilot"),
-    ("/options", "Options"),
-    ("/alerts", "Alerts"),
-    ("/ideas", "Ideas"),
-    ("/latency", "Latency"),
-    ("/notes", "Journal"),
-    ("/compliance", "Compliance"),
-    ("/reports", "Reports"),
-    ("/config", "Config"),
-    ("/model", "Model"),
-    ("/runs", "Runs"),
+# (group, [(href, label)]) - the sidebar
+NAV: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    ("Overview", (("/", "Today"), ("/market", "Market recap"), ("/scanner", "Scanner"))),
+    ("Research", (("/stock", "Stock lookup"), ("/ratings", "Analyst ratings"),
+                  ("/news", "News"), ("/ideas", "Next-day ideas"), ("/options", "Options"),
+                  ("/ask", "Ask"))),
+    ("Trading", (("/approvals", "Approvals"), ("/controls", "Controls"),
+                 ("/copilot", "Co-pilot"), ("/stories", "Trades"))),
+    ("Review", (("/notes", "Journal"), ("/latency", "Latency"), ("/alerts", "Alerts"),
+                ("/compliance", "Compliance"), ("/reports", "Reports"), ("/runs", "Runs"))),
+    ("System", (("/config", "Config"), ("/model", "Model"))),
 )
+TAGS = ("followed the plan", "FOMO", "hesitated", "early exit", "late entry", "moved stop")
+ICON = {"ok": "✓", "warn": "!", "bad": "✕", "info": "•", "neutral": "•"}
 
+
+# --- formatting --------------------------------------------------------------------------------
 
 def e(x: Any) -> str:
     return escape("" if x is None else str(x))
@@ -44,7 +45,7 @@ def money(x: Any) -> str:
         return "—"
     try:
         v = Decimal(str(x))
-    except Exception:  # noqa: BLE001
+    except Exception:   # noqa: BLE001
         return e(x)
     return f"${v:,.2f}" if v >= 0 else f"-${-v:,.2f}"
 
@@ -70,55 +71,69 @@ def ts(x: Any, fmt: str = "%H:%M:%S") -> str:
     if isinstance(x, datetime):
         return e(f"{to_et(x):{fmt}}")
     if isinstance(x, date):
-        return e(x.isoformat())
+        return e(f"{x:{fmt}}" if "%" in fmt and "H" not in fmt else x.isoformat())
     return e(x)
+
+
+def delta(v: Any, suffix: str = "%", nd: int = 2) -> str:
+    """Signed change with an arrow (direction is never colour alone)."""
+    if v is None or v == "":
+        return '<span class="muted">—</span>'
+    f = float(v)
+    cls, arrow = ("up", "▲") if f > 0 else ("down", "▼") if f < 0 else ("flat", "■")
+    return f'<span class="delta {cls}">{arrow} {f:+,.{nd}f}{e(suffix)}</span>'
+
+
+def chip(text: Any, tone: str = "neutral") -> str:
+    return f'<span class="chip {tone}"><i>{ICON.get(tone, "•")}</i>{e(text)}</span>'
 
 
 def badge(level: str | None, text: str | None = None) -> str:
     lv = (level or "unknown").lower()
-    cls = {
-        "green": "ok",
-        "amber": "warn",
-        "yellow": "warn",
-        "red": "bad",
-        "ok": "ok",
-        "pass": "ok",
-        "fail": "bad",
-    }.get(lv, "muted")
-    return f'<span class="badge {cls}">{e(text or lv.upper())}</span>'
+    tone = {"green": "ok", "amber": "warn", "yellow": "warn", "red": "bad", "ok": "ok",
+            "pass": "ok", "fail": "bad"}.get(lv, "neutral")
+    return chip(text or lv.upper(), tone)
 
 
 def passfail(ok: bool | None) -> str:
     if ok is None:
-        return badge(None, "n/a")
-    return badge("pass", "PASS") if ok else badge("fail", "FAIL")
+        return chip("n/a")
+    return chip("PASS", "ok") if ok else chip("FAIL", "bad")
 
 
-def table(
-    rows: Sequence[dict[str, Any]],
-    cols: Sequence[tuple[str, str]] | None = None,
-    empty: str = "nothing yet",
-    fmt: dict[str, Any] | None = None,
-) -> str:
-    if not rows:
-        return f'<p class="muted">{e(empty)}</p>'
-    cols = list(cols or [(k, k) for k in rows[0].keys()])
-    fmt = fmt or {}
-    head = "".join(f"<th>{e(h)}</th>" for _, h in cols)
-    body = []
-    for r in rows:
-        cells = []
-        for k, _ in cols:
-            v = r.get(k)
-            cells.append(f"<td>{fmt[k](v, r) if k in fmt else e(_short(v))}</td>")
-        body.append("<tr>" + "".join(cells) + "</tr>")
-    return (
-        f'<div class="tbl"><table><thead><tr>{head}</tr></thead><tbody>'
-        f"{''.join(body)}</tbody></table></div>"
-    )
+def link(href: str, text: Any, cls: str = "") -> str:
+    c = f' class="{cls}"' if cls else ""
+    return f'<a href="{e(href)}"{c}>{e(text)}</a>'
 
 
-def _short(v: Any) -> Any:
+def ext_link(href: str, text: Any, cls: str = "") -> str:
+    if not href.startswith(("https://", "http://")):
+        return e(text)
+    c = f' class="{cls}"' if cls else ""
+    return f'<a href="{e(href)}"{c} rel="noopener noreferrer" target="_blank">{e(text)}</a>'
+
+
+def stock_link(sym: Any) -> str:
+    return link(f"/stock?symbol={quote(str(sym))}", sym, "sym")
+
+
+def csrf_field(csrf: str) -> str:
+    return f'<input type="hidden" name="csrf" value="{e(csrf)}">'
+
+
+def cmd_button(csrf: str, name: str, arg: str = "", label: str | None = None,
+               danger: bool = False, confirm: str = "", primary: bool = False) -> str:
+    conf = f' data-confirm="{e(confirm)}"' if confirm else ""
+    cls = "danger" if danger else "primary" if primary else ""
+    return (f'<form method="post" action="/cmd" class="inline"{conf}>{csrf_field(csrf)}'
+            f'<input type="hidden" name="name" value="{e(name)}">'
+            f'<input type="hidden" name="arg" value="{e(arg)}">'
+            f'<button class="{cls}">{e(label or (name + " " + arg).strip())}</button></form>')
+
+
+# --- components ----------------------------------------------------------------------------------
+
+def _cell_value(v: Any) -> Any:
     if isinstance(v, datetime):
         return f"{to_et(v):%m-%d %H:%M}"
     if isinstance(v, float):
@@ -129,225 +144,234 @@ def _short(v: Any) -> Any:
     return v
 
 
-def link(href: str, text: Any) -> str:
-    return f'<a href="{e(href)}">{e(text)}</a>'
+def _is_num(v: Any) -> bool:
+    return isinstance(v, int | float | Decimal) and not isinstance(v, bool)
 
 
-def csrf_field(csrf: str) -> str:
-    return f'<input type="hidden" name="csrf" value="{e(csrf)}">'
+def table(rows: Sequence[dict[str, Any]], cols: Sequence[tuple[str, str]] | None = None,
+          empty: str = "nothing yet", fmt: dict[str, Any] | None = None,
+          compact: bool = False) -> str:
+    if not rows:
+        return f'<p class="muted small">{e(empty)}</p>'
+    cols = list(cols or [(k, k.replace("_", " ")) for k in rows[0].keys()])
+    fmt = fmt or {}
+    numeric = {k for k, _ in cols if any(_is_num(r.get(k)) for r in rows)}
+    head = "".join(f'<th class="{"num" if k in numeric else ""}">{e(h)}</th>' for k, h in cols)
+    body = []
+    for row in rows:
+        cells = []
+        for k, _ in cols:
+            v = row.get(k)
+            html_v = fmt[k](v, row) if k in fmt else e(_cell_value(v))
+            cells.append(f'<td class="{"num" if k in numeric else ""}">{html_v}</td>')
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    return (f'<div class="tbl"><table class="{"compact" if compact else ""}"><thead><tr>{head}'
+            f'</tr></thead><tbody>{"".join(body)}</tbody></table></div>')
 
 
-def cmd_button(
-    csrf: str,
-    name: str,
-    arg: str = "",
-    label: str | None = None,
-    danger: bool = False,
-    confirm: str = "",
-) -> str:
-    conf = f' data-confirm="{e(confirm)}"' if confirm else ""
-    return (
-        f'<form method="post" action="/cmd" class="inline"{conf}>{csrf_field(csrf)}'
-        f'<input type="hidden" name="name" value="{e(name)}">'
-        f'<input type="hidden" name="arg" value="{e(arg)}">'
-        f'<button class="{"danger" if danger else ""}">{e(label or (name + " " + arg))}'
-        f"</button></form>"
-    )
+def card(title: str, body: str, *, sub: str = "", actions: str = "", cls: str = "") -> str:
+    head = (f'<div class="card-head"><div><h3>{e(title)}</h3>'
+            + (f'<p class="sub">{e(sub)}</p>' if sub else "") + "</div>"
+            + (f'<div class="actions">{actions}</div>' if actions else "") + "</div>")
+    return f'<section class="card {cls}">{head}{body}</section>'
 
 
-def layout(
-    title: str,
-    body: str,
-    *,
-    path: str = "/",
-    env: str | None = None,
-    csrf: str = "",
-    flash: str = "",
-    logged_in: bool = True,
-) -> str:
+def tile(label: str, value: str, sub: str = "", key: str = "", tone: str = "") -> str:
+    k = f' data-k="{e(key)}"' if key else ""
+    return (f'<div class="tile {tone}"><div class="label">{e(label)}</div>'
+            f'<div class="value"{k}>{value}</div>'
+            + (f'<div class="tsub">{sub}</div>' if sub else "") + "</div>")
+
+
+def tiles(items: Iterable[str]) -> str:
+    return f'<div class="tiles">{"".join(items)}</div>'
+
+
+def meter(frac: float | None, tone: str = "") -> str:
+    f = 0.0 if frac is None else max(0.0, min(1.0, frac))
+    return (f'<div class="meter {tone}" role="meter" aria-valuenow="{f * 100:.0f}" '
+            f'aria-valuemin="0" aria-valuemax="100"><svg viewBox="0 0 100 6" '
+            f'preserveAspectRatio="none"><rect class="track" x="0" y="0" width="100" '
+            f'height="6" rx="3"/><rect class="fill" x="0" y="0" width="{f * 100:.1f}" '
+            f'height="6" rx="3"/></svg></div>')
+
+
+def empty(title: str, why: str, actions: str = "", icon: str = "◌") -> str:
+    """A section with nothing to show says why and what fills it (UI-35)."""
+    return (f'<div class="empty"><div class="icon">{icon}</div><div><h4>{e(title)}</h4>'
+            f'<p>{why}</p>' + (f'<div class="actions">{actions}</div>' if actions else "")
+            + "</div></div>")
+
+
+def code(text: str) -> str:
+    return f"<code>{e(text)}</code>"
+
+
+def page_head(title: str, sub: str = "", actions: str = "") -> str:
+    return (f'<div class="page-head"><div><h1>{e(title)}</h1>'
+            + (f'<p class="sub">{sub}</p>' if sub else "") + "</div>"
+            + (f'<div class="actions">{actions}</div>' if actions else "") + "</div>")
+
+
+def _hm_class(v: float | None) -> str:
+    if v is None:
+        return "hm-na"
+    a = abs(v)
+    lvl = 0 if a < 0.25 else 1 if a < 1 else 2 if a < 2.5 else 3
+    if lvl == 0:
+        return "hm-0"
+    return f"hm-{'up' if v > 0 else 'dn'}{lvl}"
+
+
+def heatmap(items: Sequence[dict[str, Any]], legend: str = "day % change") -> str:
+    """Tiles coloured by a diverging blue (up) / red (down) scale with a gray midpoint;
+    every tile also prints its signed value (colour never alone)."""
+    if not items:
+        return ""
+    cells = []
+    for it in items:
+        v = it.get("value")
+        sub = it.get("sub", "")
+        title = f"{it['ticker']}: {num(v, 2, True)}%" + (f" · {sub}" if sub else "")
+        cells.append(f'<a class="hm {_hm_class(v)}" href="{e(it.get("href", "#"))}" '
+                     f'title="{e(title)}"><b>{e(it["ticker"])}</b>'
+                     f'<span>{num(v, 2, True) if v is not None else "—"}%</span>'
+                     + (f'<small>{e(sub)}</small>' if sub else "") + "</a>")
+    scale = "".join(f'<i class="hm {c}"></i>' for c in
+                    ("hm-dn3", "hm-dn2", "hm-dn1", "hm-0", "hm-up1", "hm-up2", "hm-up3"))
+    return (f'<div class="heat">{"".join(cells)}</div><div class="scale"><span>down</span>'
+            f'{scale}<span>up</span><span class="muted">· {e(legend)}: ±0.25 / 1 / 2.5%'
+            f'</span></div>')
+
+
+def hbars(rows: Sequence[tuple[str, float | None, str]], unit: str = "%", title: str = "",
+          w: int = 560) -> str:
+    """Horizontal bars from a zero baseline (polarity: blue up, red down). Labels and values
+    are HTML; each bar is a stretch-only SVG so text never scales with the chart. The value is
+    printed on every row and each bar carries a native tooltip. ``rows``: (label, value, href).
+    """
+    del w
+    data = [(lab, v, h) for lab, v, h in rows if v is not None]
+    if not data:
+        return ""
+    lim = max(abs(v) for _, v, _ in data) or 1.0
+    out = [f'<div class="hbars" role="img" aria-label="{e(title or "bar chart")}">']
+    for lab, v, href in data:
+        half = abs(v) / lim * 100
+        x = 100 if v >= 0 else 100 - half
+        cls = "bar-up" if v >= 0 else "bar-dn"
+        out.append(
+            f'<a class="brow" href="{e(href)}"><span class="blab">{e(lab)}</span>'
+            f'<svg viewBox="0 0 200 10" preserveAspectRatio="none"><line class="axis" x1="100" '
+            f'x2="100" y1="0" y2="10"/><rect class="{cls}" x="{x:.2f}" y="1" '
+            f'width="{max(half, 0.6):.2f}" height="8"><title>{e(lab)}: {v:+.2f}{e(unit)}'
+            f'</title></rect></svg><span class="bval">{v:+.1f}{e(unit)}</span></a>')
+    out.append("</div>")
+    return "".join(out)
+
+
+def rating_list_html(rows: Sequence[dict[str, Any]], limit: int = 8, show_ticker: bool = True
+                     ) -> str:
+    """Compact one-line-per-action list for narrow cards."""
+    items = []
+    for r in rows[:limit]:
+        change = (f"{r['from_rating']} → {r['to_rating']}" if r.get("from_rating")
+                  and r.get("to_rating") else r.get("to_rating") or "")
+        pt = (f"PT ${r['pt_old']:g} → ${r['pt_new']:g}" if r.get("pt_old") and r.get("pt_new")
+              else f"PT ${r['pt_new']:g}" if r.get("pt_new") else "")
+        what = " · ".join(x for x in (change, pt) if x)
+        items.append(
+            f'<li><span class="muted small">{ts(r["ts"], "%b %d")}</span> '
+            + (stock_link(r["ticker"]) + " " if show_ticker else "")
+            + chip(ACTION_LABEL.get(r["action"], r["action"]),
+                   ACTION_TONE.get(r["action"], "neutral"))
+            + f' <b>{e(r["firm"])}</b> <span>{e(what)}</span></li>')
+    return f'<ul class="plain news">{"".join(items)}</ul>'
+
+
+def tag_chips(tags: Iterable[str]) -> str:
+    tone = {"leader": "info", "near 20d high": "info", "upgraded": "ok", "laggard": "neutral",
+            "oversold": "warn", "downgraded": "bad", "earnings soon": "warn"}
+    return " ".join(chip(t, tone.get(t, "neutral")) for t in tags)
+
+
+ACTION_TONE = {"upgrade": "ok", "downgrade": "bad", "initiate": "info", "reiterate": "neutral",
+               "pt_raise": "ok", "pt_cut": "bad"}
+ACTION_LABEL = {"upgrade": "Upgrade", "downgrade": "Downgrade", "initiate": "Initiated",
+                "reiterate": "Reiterated", "pt_raise": "Target raised", "pt_cut": "Target cut"}
+
+
+def rating_rows_html(rows: Sequence[dict[str, Any]], limit: int = 200, show_ticker: bool = True
+                     ) -> str:
+    cols = ([("ts", "When")] + ([("ticker", "Ticker")] if show_ticker else [])
+            + [("action", "Action"), ("firm", "Firm"), ("change", "Rating"),
+               ("pt", "Price target"), ("headline", "Headline")])
+    data = []
+    for r in rows[:limit]:
+        change = (f"{r['from_rating']} → {r['to_rating']}" if r.get("from_rating")
+                  and r.get("to_rating") else r.get("to_rating") or "")
+        pt = (f"${r['pt_old']:g} → ${r['pt_new']:g}" if r.get("pt_old") and r.get("pt_new")
+              else f"${r['pt_new']:g}" if r.get("pt_new") else "")
+        data.append({**r, "change": change, "pt": pt})
+    return table(data, cols, "no analyst actions", {
+        "ts": lambda v, row: ts(v, "%b %d %H:%M"),
+        "ticker": lambda v, row: stock_link(v),
+        "action": lambda v, row: chip(ACTION_LABEL.get(v, v), ACTION_TONE.get(v, "neutral")),
+        "headline": lambda v, row: ext_link(row.get("url") or "", (v or "")[:140])})
+
+
+# --- layout ----------------------------------------------------------------------------------
+
+def layout(title: str, body: str, *, path: str = "/", env: str | None = None,
+           csrf: str = "", flash: str = "", logged_in: bool = True) -> str:
     live = env == "live"
-    banner = (
-        (
-            f'<div class="mode {"live" if live else "paper"}" data-k="environment">'
-            f"{'LIVE' if live else 'PAPER'}</div>"
-        )
-        if env
-        else ""
-    )
-    nav = (
-        "".join(f'<a href="{h}" class="{"on" if h == path else ""}">{e(t)}</a>' for h, t in NAV)
-        if logged_in
-        else ""
-    )
-    tools = (
-        (
-            f'<form method="get" action="/stock" class="search"><input id="search" '
-            f'name="symbol" placeholder="Symbol ( / )" maxlength="6" autocomplete="off">'
-            f'</form><button id="theme" type="button" title="light/dark">◐</button>'
-            f'<form method="post" action="/logout" class="inline">{csrf_field(csrf)}'
-            f"<button>Log out</button></form>"
-        )
-        if logged_in
-        else ""
-    )
+    mode = (f'<span class="mode {"live" if live else "paper"}" data-k="environment">'
+            f'{"LIVE" if live else "PAPER"}</span>') if env else ""
+    nav = ""
+    if logged_in:
+        groups = []
+        for g, items in NAV:
+            links = "".join(f'<a href="{h}" class="{"on" if h == path else ""}">{e(t)}</a>'
+                            for h, t in items)
+            groups.append(f'<div class="group"><div class="gname">{e(g)}</div>{links}</div>')
+        nav = f'<nav class="side">{"".join(groups)}</nav>'
+    tools = (f'<form method="get" action="/stock" class="search"><input id="search" '
+             f'name="symbol" placeholder="Any symbol  ( / )" maxlength="6" autocomplete="off">'
+             f'</form><button id="theme" type="button" title="light/dark theme">◐</button>'
+             f'<form method="post" action="/logout" class="inline">{csrf_field(csrf)}'
+             f'<button>Log out</button></form>') if logged_in else ""
     fl = f'<div class="flash">{e(flash)}</div>' if flash else ""
-    return (
-        f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{e(title)} · Owner Console</title>"
-        f'<link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer>'
-        f"</script></head><body><header>{banner}<strong>Owner Console</strong>"
-        f"<nav>{nav}</nav>{tools}</header><main><h1>{e(title)}</h1>{fl}{body}</main>"
-        f"<footer>Times US Eastern · figures from the journal and trader-core, never from "
-        f"the model · not advice</footer></body></html>"
-    )
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<title>{e(title)} · Owner Console</title>'
+            f'<link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer>'
+            f'</script></head><body class="{"app" if logged_in else "bare"}">'
+            f'<header class="top"><a class="brand" href="/">◆ Owner Console</a>{mode}'
+            f'<div class="spacer"></div>{tools}</header>{nav}<main>{fl}{body}'
+            f'<footer>Times US Eastern · numbers come from the journal, trader-core and the '
+            f'data feeds, never from the model · not advice</footer></main></body></html>')
 
 
 def login_page(error: str = "") -> str:
     err = f'<p class="flash">{e(error)}</p>' if error else ""
-    return layout(
-        "Log in",
-        f'{err}<form method="post" action="/login" class="card narrow">'
-        '<label>Password <input type="password" name="password" autofocus '
-        'autocomplete="current-password"></label><button>Log in</button>'
-        '<p class="muted">Password: secrets/console_password.txt</p></form>',
-        logged_in=False,
-    )
+    return layout("Log in", f'<div class="login">{err}<form method="post" action="/login" '
+                  'class="card"><h2>Owner Console</h2><label>Password <input type="password" '
+                  'name="password" autofocus autocomplete="current-password"></label>'
+                  '<button class="primary">Log in</button><p class="muted small">The password '
+                  'is in secrets/console_password.txt</p></form></div>', logged_in=False)
 
 
-# --- pages ---------------------------------------------------------------------------------------
-
-
-def home(
-    st: dict[str, Any],
-    plans: list[dict[str, Any]],
-    ideas: list[dict[str, Any]],
-    incidents: list[dict[str, Any]],
-    beats: dict[str, datetime],
-    llm: dict[str, Any],
-    pending: int,
-    csrf: str,
-    now: datetime,
-) -> str:
-    src = st.get("source")
-    stale = (
-        ""
-        if src == "live"
-        else (
-            f'<p class="flash">trader-core API unavailable: showing the last snapshot '
-            f"({ts(st.get('snapshot_ts'))}) (UI-27)</p>"
-            if src == "snapshot"
-            else f'<p class="flash">No status yet: {e(st.get("error"))}</p>'
-        )
-    )
-    eq = st.get("equity")
-    start = st.get("day_start_equity")
-    limit = st.get("loss_limit_pct") or 1.5
-    lim_usd = (Decimal(str(start)) * Decimal(str(limit)) / 100) if start else None
-    flags = []
-    if st.get("kill_switch"):
-        flags.append(badge("red", "KILL SWITCH ON"))
-    if st.get("halted"):
-        flags.append(badge("red", f"HALTED {st['halted']}"))
-    for p in st.get("paused") or []:
-        flags.append(badge("amber", f"PAUSED {p}"))
-    cards = (
-        f'<div class="grid"><div class="card"><h3>Account</h3>'
-        f'<p>Equity <b data-k="equity">{money(eq)}</b></p>'
-        f'<p>Day P&amp;L <b data-k="day_pnl">{money(st.get("day_pnl"))}</b> of the '
-        f"-{money(lim_usd)} limit ({e(limit)}%)</p>"
-        f'<p>Trades <b data-k="trades_today">{e(st.get("trades_today", "—"))}</b> of '
-        f"{e(st.get('max_trades', 3))}</p>"
-        f'<p>Window <b data-k="window">{e(st.get("window") or "none")}</b> · regime '
-        f"{e(st.get('regime', '—'))}</p><p>{' '.join(flags) or badge('green', 'TRADING OK')}"
-        f'</p><p><a href="/approvals">{pending} pending approval(s)</a></p></div>'
-        f'<div class="card"><h3>Health</h3>{health_list(st)}</div>'
-        f'<div class="card"><h3>Services and model (UI-4a)</h3>{services(beats, llm, now)}'
-        f'<p><a href="http://localhost:3000" rel="noopener">Grafana dashboards</a></p></div>'
-        f"</div>"
-    )
-    pos = table(
-        st.get("positions") or [],
-        [
-            ("ticker", "Ticker"),
-            ("style", "Style"),
-            ("qty", "Qty"),
-            ("entry", "Entry"),
-            ("stop", "Stop"),
-            ("t1", "T1"),
-            ("last", "Last"),
-            ("unrealized", "Unrealized"),
-            ("r", "R"),
-            ("opened_at", "In since"),
-            ("position_id", "Story"),
-        ],
-        "no open positions",
-        {
-            "unrealized": lambda v, r: money(v),
-            "r": lambda v, r: num(v, 2, True),
-            "opened_at": lambda v, r: ts(v, "%H:%M"),
-            "position_id": lambda v, r: link(f"/story/{v}", "story"),
-            "ticker": lambda v, r: link(f"/stock?symbol={quote(str(v))}", v),
-        },
-    )
-    plan_t = table(
-        plans,
-        [
-            ("window", "Window"),
-            ("ticker", "Ticker"),
-            ("setup", "Setup"),
-            ("trigger", "Trigger"),
-            ("stop", "Stop"),
-            ("target", "T1"),
-        ],
-        "no plan yet today",
-        {"ticker": lambda v, r: link(f"/stock?symbol={quote(str(v))}", v)},
-    )
-    picks = [r for r in ideas if r.get("status") == "pick"]
-    idea_t = table(
-        picks,
-        [
-            ("plan_for", "For"),
-            ("ticker", "Ticker"),
-            ("score", "Score"),
-            ("morning_setup", "Morning"),
-            ("morning_trigger", "Trigger"),
-        ],
-        "no next-day ideas yet",
-        {"ticker": lambda v, r: link(f"/stock?symbol={quote(str(v))}", v)},
-    )
-    inc = "".join(
-        f"<li>{badge(_incident_level(i['type']), i['type'])} "
-        f"{ts(i['ts'], '%m-%d %H:%M')} {e((i['detail'] or '')[:160])}</li>"
-        for i in incidents
-    )
-    inc_block = (
-        f'<ul class="plain">{inc}</ul>{cmd_button(csrf, "ACK", label="ACK alerts")}'
-        if incidents
-        else '<p class="muted">no open incidents</p>'
-    )
-    return (
-        f'<div data-live="home">{stale}{cards}<h2>Open positions (UI-2)</h2>{pos}'
-        f'<div class="grid2"><div><h2>Today\'s plan (UI-3)</h2>{plan_t}</div><div>'
-        f"<h2>Next-day ideas</h2>{idea_t}</div></div><h2>Incidents (UI-4b)</h2>"
-        f"{inc_block}</div>"
-    )
-
+# --- shared blocks -----------------------------------------------------------------------------
 
 def health_list(st: dict[str, Any]) -> str:
     h = st.get("health") or {}
     det = st.get("health_detail") or {}
     if not h:
-        return '<p class="muted">no health data</p>'
-    return (
-        '<ul class="plain">'
-        + "".join(
-            f'<li>{badge(v, f"{k}: {v}")} <span class="muted" data-k="health.{e(k)}">'
-            f"{e(det.get(k, ''))}</span></li>"
-            for k, v in sorted(h.items())
-        )
-        + "</ul>"
-    )
+        return empty("No health data yet", "trader-core reports component health every 30 s "
+                     "once it runs.")
+    return '<ul class="plain">' + "".join(
+        f'<li>{badge(v, k)} <span class="muted small" data-k="health.{e(k)}">'
+        f'{e(det.get(k, ""))}</span></li>' for k, v in sorted(h.items())) + "</ul>"
 
 
 def services(beats: dict[str, datetime], llm: dict[str, Any], now: datetime) -> str:
@@ -355,405 +379,49 @@ def services(beats: dict[str, datetime], llm: dict[str, Any], now: datetime) -> 
     for svc in ("core", "news", "notifier"):
         t = beats.get(svc)
         age = (now - t).total_seconds() if t else None
-        lv = (
-            "green"
-            if age is not None and age < 120
-            else "amber"
-            if age is not None and age < 600
-            else "red"
-        )
-        items.append(
-            f"<li>{badge(lv, svc)} heartbeat "
-            f"{e(f'{age:.0f}s ago' if age is not None else 'none in 1 h')}</li>"
-        )
+        lv = "green" if age is not None and age < 120 else "amber" if age is not None and \
+            age < 600 else "red"
+        items.append(f'<li>{badge(lv, svc)} <span class="muted small">'
+                     + e(f"heartbeat {age:.0f} s ago" if age is not None else "no heartbeat in 1 h")
+                     + '</span></li>')
     vram = llm.get("vram_gb")
-    items.append(
-        f"<li>Model {e(llm.get('model'))} · loaded "
-        f"{e(', '.join(llm.get('loaded') or []) or 'no')} · VRAM "
-        f"{e(f'{vram:.1f} GB' if vram is not None else 'n/a')} of 8 GB · p95 "
-        f"{e(llm.get('p95_ms') or '—')} ms ({e(llm.get('calls_today', 0))} calls)"
-        f"{' · ' + e(llm['error']) if llm.get('error') else ''}</li>"
-    )
+    items.append(f'<li>{chip(llm.get("model") or "model", "info")} <span class="muted small">'
+                 f'loaded {e(", ".join(llm.get("loaded") or []) or "no")} · VRAM '
+                 f'{e(f"{vram:.1f} GB" if vram is not None else "n/a")} of 8 GB · p95 '
+                 f'{e(llm.get("p95_ms") or "—")} ms ({e(llm.get("calls_today", 0))} calls)'
+                 f'{" · " + e(llm["error"]) if llm.get("error") else ""}</span></li>')
     return '<ul class="plain">' + "".join(items) + "</ul>"
 
 
-def stock(
-    sym: str,
-    quote_: dict[str, Any] | None,
-    chart_html: str,
-    daily_html: str,
-    ind: dict[str, Any],
-    news: list[dict[str, Any]],
-    flags: list[dict[str, Any]],
-    status: dict[str, Any],
-    checklist: dict[str, Any] | None,
-    options_iv: dict[str, Any] | None,
-    chain: dict[str, Any] | None,
-    csrf: str,
-    error: str = "",
-) -> str:
-    if not sym:
-        return (
-            "<p>Type any US symbol in the search box (press <kbd>/</kbd>).</p>"
-            '<p class="muted">Universe tickers show the live checklist; other symbols are '
-            "informational only (UR-1).</p>"
-        )
-    q = quote_ or {}
-    qhtml = (
-        (
-            f'<div class="card" data-symbol="{e(sym)}"><h3>Quote</h3>'
-            f'<p>Last <b data-q="last">{num(q.get("last"))}</b> · change '
-            f'<b data-q="change_pct">{num(q.get("change_pct"), 2, True)}%</b> · '
-            f'bid/ask <span data-q="bid">{num(q.get("bid"))}</span>/'
-            f'<span data-q="ask">{num(q.get("ask"))}</span> (spread '
-            f'<span data-q="spread_pct">{num(q.get("spread_pct"), 3)}</span>%)</p>'
-            f'<p>VWAP <span data-q="vwap">{num(q.get("vwap"))}</span> · RVOL '
-            f'<span data-q="rvol">{num(q.get("rvol"))}</span> · volume '
-            f'<span data-q="volume">{num(q.get("volume"), 0)}</span> · HOD/LOD '
-            f"{num(q.get('hod'))}/{num(q.get('lod'))} · source {e(q.get('source', '—'))}</p>"
-            f"</div>"
-        )
-        if quote_
-        else f'<p class="flash">Quote unavailable: {e(error)}</p>'
-    )
-    macd = ind.get("macd")
-    bb = ind.get("bollinger")
-    kc = ind.get("keltner")
-    ind_html = (
-        '<div class="card"><h3>Indicators (A4 code, on demand)</h3><ul class="plain">'
-        f"<li>RSI(14, 1m) {num(ind.get('rsi14'), 1)} · RSI(14, daily) "
-        f"{num(ind.get('rsi14d'), 1)}</li>"
-        f"<li>MACD {num(macd[0], 3) if macd else '—'} / signal "
-        f"{num(macd[1], 3) if macd else '—'} / hist {num(macd[2], 3, True) if macd else '—'}</li>"
-        f"<li>ATR(5m) {num(ind.get('atr5m'))} · ATR(14d) {num(ind.get('atr14d'))}</li>"
-        f"<li>Gap {num(ind.get('gap_pct'), 2, True)}% · range position "
-        f"{num(_pct(ind.get('range_pos')), 0)}%"
-        f"</li><li>Bollinger {num(bb[0]) if bb else '—'} – {num(bb[2]) if bb else '—'} · "
-        f"Keltner {num(kc[0]) if kc else '—'} – {num(kc[2]) if kc else '—'}</li>"
-        f"<li>EMA20d {num(ind.get('ema20d'))} · EMA50d {num(ind.get('ema50d'))}</li></ul></div>"
-    )
-    st_html = (
-        '<div class="card"><h3>In this system</h3><ul class="plain">'
-        f"<li>Universe: {badge('green', 'YES') if status.get('universe') else badge(None, 'NO')}"
-        f"</li><li>Correlated group: {e(status.get('group') or 'none')}</li>"
-        f"<li>Locks: {e(', '.join(status.get('locks') or []) or 'none')}</li>"
-        f"<li>Ideas: {e(', '.join(status.get('ideas') or []) or 'none')}</li>"
-        f"<li>Past trades: {e(status.get('trades_summary') or 'none')}</li></ul>"
-        f"<p>{cmd_button(csrf, 'OPT', f'{sym} BULL', 'Suggest bull (options)')} "
-        f"{cmd_button(csrf, 'OPT', f'{sym} BEAR', 'Suggest bear (options)')} "
-        f'<a class="btn" href="/ask?q={quote("What is the latest on " + sym + "?")}">Ask</a> '
-        f'<a class="btn" href="/alerts">Price alerts</a> '
-        f'<a class="btn" href="http://localhost:3000" rel="noopener">Grafana</a></p></div>'
-    )
-    if checklist and checklist.get("tradable"):
-        ck = table(
-            checklist["items"],
-            [
-                ("id", "Item"),
-                ("passed", "Result"),
-                ("value", "Measured"),
-                ("threshold", "Threshold"),
-            ],
-            fmt={"passed": lambda v, r: passfail(v)},
-        )
-        ck_html = f"<h2>Checklist dry-run now (UI-5)</h2>{ck}"
-    elif checklist:
-        ck_html = f'<p class="muted">{e(checklist.get("note"))}</p>'
-    else:
-        ck_html = '<p class="muted">Checklist unavailable (trader-core API)</p>'
-    news_t = table(
-        news,
-        [
-            ("published_at", "Time"),
-            ("source", "Source"),
-            ("headline", "Headline"),
-            ("finbert_score", "FinBERT"),
-        ],
-        "no news in the journal",
-        {"finbert_score": lambda v, r: num(v, 2, True)},
-    )
-    fl = ", ".join(f"{f['flag']} ({f['date']})" for f in flags) or "none"
-    opt = options_block(options_iv, chain)
-    return (
-        f'<div class="grid">{qhtml}{ind_html}{st_html}</div>'
-        f"<h2>Intraday</h2>{chart_html}<h2>Daily</h2>{daily_html}{ck_html}"
-        f"<h2>Options (OP-16)</h2>{opt}<h2>News and flags</h2><p>Event flags: {e(fl)}</p>"
-        f'{news_t}<p class="muted">Data limits (UI-6a): the free Alpaca IEX feed covers '
-        f"about 2–3% of volume; Finnhub free tier 60 calls/min (lookups cached 60 s); "
-        f"symbols outside the universe get no FinBERT run. Option prices are indicative."
-        f"</p>"
-    )
-
-
-def options_block(iv: dict[str, Any] | None, chain: dict[str, Any] | None) -> str:
-    if iv is None:
-        return '<p class="muted">Options data unavailable (options.mode off or no feed)</p>'
-    moves = ", ".join(
-        f"{k}: ±{v:.2f}" for k, v in list((iv.get("expected_moves") or {}).items())[:5]
-    )
-    head = (
-        f"<p>ATM IV 30d {num((iv.get('atm_iv_30d') or 0) * 100, 1)}% · IV rank "
-        f"{num(iv.get('iv_rank'), 0)} · IV pct {num(iv.get('iv_pct'), 0)} · history "
-        f"{e(iv.get('history'))} · term front {num((iv.get('term_front') or 0) * 100, 1)}% "
-        f"vs 30d {num((iv.get('term_30d') or 0) * 100, 1)}% · skew "
-        f"{num((iv.get('skew') or 0) * 100, 1, True)} pts</p><p>Expected move: "
-        f"{e(moves or 'n/a')}</p>"
-    )
-    if not chain:
-        return head
-    spot = chain.get("spot") or 0
-    rows = sorted(chain["rows"], key=lambda r: abs(r["strike"] - spot))[:18]
-    calls = {r["strike"]: r for r in rows if r["kind"] == "C"}
-    puts = {r["strike"]: r for r in rows if r["kind"] == "P"}
-
-    def cell(r: dict[str, Any] | None) -> str:
-        if r is None:
-            return "<td colspan=6>—</td>"
-        cls = "ok" if r["liquid"] else "bad"
-        return (
-            f"<td>{num(r['bid'])}/{num(r['ask'])}</td><td>{num(r['mid'])}</td>"
-            f"<td>{num((r['iv'] or 0) * 100, 0)}%</td><td>{num(r['delta'], 2, True)}</td>"
-            f'<td>{e(r["oi"])}/{e(r["volume"])}</td><td><span class="badge {cls}">'
-            f"{'liquid' if r['liquid'] else e(r['why'])}</span></td>"
-        )
-
-    body = "".join(
-        f"<tr>{cell(calls.get(k))}<th>{k:g}</th>{cell(puts.get(k))}</tr>"
-        for k in sorted(set(calls) | set(puts))
-    )
-    hdr = "<th>bid/ask</th><th>mid</th><th>IV</th><th>Δ</th><th>OI/vol</th><th>OP-4</th>"
-    return (
-        f'{head}<p>Chain {e(chain.get("expiry"))} (stock {num(spot)})</p><div class="tbl">'
-        f"<table><thead><tr><th colspan=6>Calls</th><th>Strike</th><th colspan=6>Puts</th>"
-        f"</tr><tr>{hdr}<th></th>{hdr}</tr></thead><tbody>{body}</tbody></table></div>"
-    )
-
-
-def ask_page(
-    csrf: str, answer: Any, history: list[dict[str, Any]], q: str, search: str = ""
-) -> str:
-    ans = ""
-    if answer is not None:
-        sug = "".join(
-            f'<a class="btn" href="/controls?suggest={quote(c)}">Suggested command: '
-            f"{e(c)} (opens Controls, you confirm)</a>"
-            for c in answer.suggested
-        )
-        note = f'<p class="muted">{e(answer.note)}</p>' if answer.note else ""
-        ans = (
-            f'<div class="card"><p><b>{e(answer.question)}</b></p><p>{e(answer.text)}</p>'
-            f'{note}<p class="muted">Source: {e(answer.source)} · tool {e(answer.tool)} '
-            f"{e(answer.args)} · {'Qwen wording' if answer.model_used else 'table only'}</p>"
-            f"{table(answer.rows[:50])}{sug}</div>"
-        )
-    hist = "".join(
-        f"<li>{ts(h['ts'], '%H:%M')} <b>{e(h['question'])}</b> — "
-        f"{e((h['answer'] or '')[:200])}</li>"
-        for h in reversed(history)
-    )
-    return (
-        f'<form method="post" action="/ask" class="card">{csrf_field(csrf)}'
-        f'<label>Question <input name="q" value="{e(q)}" maxlength="500" '
-        f'placeholder="Why were there no trades this morning?" autofocus></label>'
-        f'<button>Ask</button><p class="muted">Read-only: answers come from journal tools; '
-        f"during entry windows (09:35–10:30, 15:00–15:55 ET) the model waits and the table "
-        f"answers (UI-8b).</p></form>{ans}<h2>Today's questions (UI-8d)</h2>"
-        f'<form method="get" action="/ask" class="inline"><input name="search" '
-        f'value="{e(search)}" placeholder="search"><button>Search</button></form> '
-        f'<form method="post" action="/ask/clear" class="inline" data-confirm="Clear '
-        f"today's history?\">{csrf_field(csrf)}<button>Clear</button></form>"
-        f'<ul class="plain">{hist or "<li class=muted>none</li>"}</ul>'
-    )
-
-
-def approvals_page(csrf: str, pending: list[dict[str, Any]], today: list[dict[str, Any]]) -> str:
-    cards = []
-    for p in pending:
-        cards.append(
-            f'<div class="card"><h3>{e(p["ticker"])} {e(p["setup"])} · '
-            f'<span data-expires="{e(p["expires"].isoformat())}">…</span> left</h3>'
-            f"<p>Entry {num(p['entry'])} · stop {num(p['stop'])} · T1 {num(p['t1'])} · "
-            f"{e(p['qty'])} sh · risk {money(p['risk_usd'])}</p><p>{e(p['reasoning'][:400])}</p>"
-            f"<p>{link('/story/' + p['proposal_id'], 'trade story')}</p>"
-            f'<form method="post" action="/cmd" class="inline">{csrf_field(csrf)}'
-            f'<input type="hidden" name="name" value="YES"><label>Code from your phone '
-            f'<input name="arg" maxlength="8" autocomplete="off" required></label>'
-            f"<button>Approve</button></form> "
-            f'<form method="post" action="/cmd" class="inline">{csrf_field(csrf)}'
-            f'<input type="hidden" name="name" value="NO"><label>Code '
-            f'<input name="arg" maxlength="8" autocomplete="off" required></label>'
-            f'<button class="danger">Reject</button></form></div>'
-        )
-    body = "".join(cards) or '<p class="muted">no pending approvals</p>'
-    hist = table(
-        today,
-        [
-            ("sent_at", "Sent"),
-            ("ticker", "Ticker"),
-            ("setup", "Setup"),
-            ("answer", "Outcome"),
-            ("answered_at", "Answered"),
-            ("proposal_id", "Story"),
-        ],
-        "none today",
-        {"proposal_id": lambda v, r: link(f"/story/{v}", "story")},
-    )
-    return (
-        f'<p class="muted">Type the one-time code shown on your phone (UI-C3): a click '
-        f"alone never approves. The first answer wins, from either channel.</p>{body}"
-        f"<h2>Today (UI-11)</h2>{hist}"
-    )
-
-
-def controls_page(
-    csrf: str,
-    st: dict[str, Any],
-    audit: list[dict[str, Any]],
-    suggest: str = "",
-    result: dict[str, Any] | None = None,
-) -> str:
-    pos = st.get("positions") or []
-    flat = (
-        "close "
-        + (", ".join(f"{p['ticker']} {p['qty']} sh" for p in pos) or "nothing (no open positions)")
-        + " at market"
-    )
-    res = ""
-    if result is not None:
-        ok = bool(result.get("ok"))
-        res = f'<div class="card">{badge("green" if ok else "red", "SENT" if ok else "REFUSED")} ' \
-            f'{e(result.get("reason"))}'
-        if result.get("need_confirm"):
-            res += (
-                f'<form method="post" action="/cmd" class="inline">{csrf_field(csrf)}'
-                f'<input type="hidden" name="name" value="CONFIRM"><label>Confirmation '
-                f'code <input name="arg" maxlength="8" autocomplete="off" required></label>'
-                f'<button class="danger">Confirm</button></form>'
-            )
-        res += "</div>"
-    sug = (
-        (
-            f'<p class="flash">Suggested by Ask: {e(suggest)} — review, then press the button '
-            f"below.</p>"
-        )
-        if suggest
-        else ""
-    )
-    buttons = " ".join(
-        [
-            cmd_button(csrf, "STATUS"),
-            cmd_button(csrf, "PLAN"),
-            cmd_button(
-                csrf, "KILL", label="KILL (no confirmation: the safe direction)", danger=True
-            ),
-            cmd_button(csrf, "PAUSE", "DAY", "PAUSE DAY"),
-            cmd_button(csrf, "PAUSE", "SWING", "PAUSE SWING"),
-            cmd_button(csrf, "ACK"),
-            cmd_button(csrf, "ALERTS", "OFF", "Signal alerts OFF"),
-            cmd_button(csrf, "ALERTS", "ON", "Signal alerts ON"),
-        ]
-    )
-    destructive = " ".join(
-        [
-            cmd_button(csrf, "FLATTEN", label="FLATTEN", danger=True, confirm=f"FLATTEN: {flat}?"),
-            cmd_button(csrf, "RESUME", label="RESUME", confirm="Resume trading after a kill?"),
-            cmd_button(csrf, "UNPAUSE", "DAY", "UNPAUSE DAY", confirm="Unpause day trades?"),
-            cmd_button(csrf, "UNPAUSE", "SWING", "UNPAUSE SWING", confirm="Unpause swing?"),
-        ]
-    )
-    aud = table(
-        audit,
-        [("ts", "Time"), ("text", "Command"), ("accepted", "Accepted"), ("reason", "Result")],
-        "no console commands yet",
-        {
-            "accepted": lambda v, r: passfail(v),
-            "reason": lambda v, r: e(
-                "confirmation code issued (sent to phone)"
-                if "confirmation code issued" in (v or "")
-                else v
-            ),
-        },
-    )
-    return (
-        f'{sug}{res}<div class="card"><h3>Commands (UI-12)</h3><p>{buttons}</p>'
-        f"<h3>Need the confirmation code from your phone (SEC-3)</h3><p>{destructive}</p>"
-        f'<p class="muted">FLATTEN would {e(flat)}.</p></div>'
-        f"<h2>Audit (UI-13, source = console)</h2>{aud}"
-    )
-
-
-def story_page(d: dict[str, Any], chart_html: str, reasons: dict[str, str], csrf: str) -> str:
-    def sect(title: str, rows: list[dict[str, Any]], cols: Any = None) -> str:
-        return f"<h2>{e(title)}</h2>{table(rows, cols)}"
-
-    decs = d["decisions"]
-    expl = "".join(
-        f"<li><b>{e(x['reason_code'])}</b>: {e(reasons.get(x['reason_code'] or '', '—'))}</li>"
-        for x in decs
-        if x.get("reason_code")
-    )
-    checklist = []
-    for x in decs:
-        for it in x.get("checklist_json") or []:
-            checklist.append(it)
-    prop = d["proposal"][0]["json"] if d["proposal"] else {}
-    rev = d["review"][0] if d["review"] else {}
-    return (
-        f'{chart_html}<div class="grid2"><div class="card"><h3>A5 proposal</h3>'
-        f'<pre>{e(prop)}</pre></div><div class="card"><h3>A6 review</h3>'
-        f"<p>{badge(_verdict_level(rev.get('verdict')), rev.get('verdict') or 'none')}"
-        f" {e(rev.get('main_risk'))}</p><pre>{e(rev.get('rules_broken'))}</pre></div></div>"
-        f"{sect('Setup and trigger', d['setup'])}"
-        f"<h2>Checklist</h2>{checklist_table(checklist)}"
-        f'{sect("A7 decision and sizing", decs)}<ul class="plain">{expl}</ul>'
-        f"{sect('A12 compliance', d['compliance'])}{sect('Approval', d['approvals'])}"
-        f"{sect('Orders', d['orders'])}{sect('Fills', d['fills'])}"
-        f"{sect('Position and result', d['positions'])}{sect('Latency', d['latency'])}"
-        f"<h2>Owner notes (UI-29)</h2>{notes_list(d['notes'])}"
-        f"{note_form(csrf, 'proposal', d['proposal_id'])}"
-    )
-
-
 def notes_list(rows: Iterable[dict[str, Any]]) -> str:
-    items = "".join(
-        f"<li>{ts(r['ts'], '%m-%d %H:%M')} {e(', '.join(r.get('tags') or []))} — "
-        f"{e(r['note'])}{' (screenshot)' if r.get('screenshot_b64') else ''}</li>"
-        for r in rows
-    )
-    return f'<ul class="plain">{items or "<li class=muted>none</li>"}</ul>'
-
-
-TAGS = ("followed the plan", "FOMO", "hesitated", "early exit", "late entry", "moved stop")
+    items = "".join(f'<li>{ts(r["ts"], "%m-%d %H:%M")} '
+                    + " ".join(chip(t) for t in r.get("tags") or [])
+                    + f' {e(r["note"])}{" (screenshot)" if r.get("screenshot_b64") else ""}</li>'
+                    for r in rows)
+    return f'<ul class="plain">{items or "<li class=muted>none yet</li>"}</ul>'
 
 
 def note_form(csrf: str, ref_type: str, ref_id: str) -> str:
-    boxes = "".join(
-        f'<label class="chk"><input type="checkbox" name="tags" value="{e(t)}">{e(t)}</label>'
-        for t in TAGS
-    )
-    return (
-        f'<form method="post" action="/notes" enctype="multipart/form-data" class="card">'
-        f'{csrf_field(csrf)}<input type="hidden" name="ref_type" value="{e(ref_type)}">'
-        f'<input type="hidden" name="ref_id" value="{e(ref_id)}"><p>{boxes}</p>'
-        f'<label>Note <textarea name="note" maxlength="4000" rows="3"></textarea></label>'
-        f'<label>Screenshot <input type="file" name="screenshot" accept="image/png,'
-        f'image/jpeg"></label><button>Save note</button></form>'
-    )
-
-
-def _incident_level(kind: str | None) -> str:
-    k = kind or ""
-    return "red" if "HALT" in k or "DOWN" in k else "amber"
-
-
-def _verdict_level(v: str | None) -> str:
-    return "green" if v == "agree" else "amber"
-
-
-def _pct(x: Any) -> float | None:
-    return float(x) * 100 if x is not None else None
+    boxes = "".join(f'<label class="chk"><input type="checkbox" name="tags" value="{e(t)}">'
+                    f'{e(t)}</label>' for t in TAGS)
+    return (f'<form method="post" action="/notes" enctype="multipart/form-data" class="stack">'
+            f'{csrf_field(csrf)}<input type="hidden" name="ref_type" value="{e(ref_type)}">'
+            f'<input type="hidden" name="ref_id" value="{e(ref_id)}"><div>{boxes}</div>'
+            f'<label>Note <textarea name="note" maxlength="4000" rows="3"></textarea></label>'
+            f'<label>Screenshot <input type="file" name="screenshot" accept="image/png,'
+            f'image/jpeg"></label><div><button class="primary">Save note</button></div></form>')
 
 
 def checklist_table(items: list[dict[str, Any]]) -> str:
     return table(items, [("id", "Item"), ("passed", "Result"), ("detail", "Detail")],
                  fmt={"passed": lambda v, r: passfail(v)})
+
+
+def recap_hint(csrf: str) -> str:
+    return (cmd_button(csrf, "RECAP", "5", "Build week recap", primary=True) + " "
+            + cmd_button(csrf, "RECAP", "21", "Build month recap"))
+
+
+def backfill_hint() -> str:
+    return (f'For the past month at once, run {code("./run.sh backfill")} in WSL: news, '
+            f'analyst ratings, the recap and next-session ideas.')

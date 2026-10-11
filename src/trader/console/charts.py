@@ -56,7 +56,7 @@ def candles(
         yy = y(v)
         parts.append(
             f'<line x1="{PAD_L}" x2="{W - PAD_R}" y1="{yy:.1f}" y2="{yy:.1f}" '
-            f'stroke="#888" stroke-dasharray="2 4" stroke-width="1"/>'
+            f'class="level" stroke-dasharray="2 4"/>'
             f'<text x="{W - PAD_R + 4}" y="{yy + 4:.1f}" class="lbl">'
             f"{escape(name)} {v:.2f}</text>"
         )
@@ -64,35 +64,35 @@ def candles(
         y1, y2 = y(max(opening_range)), y(min(opening_range))
         parts.append(
             f'<rect x="{PAD_L}" y="{y1:.1f}" width="{W - PAD_L - PAD_R}" '
-            f'height="{max(y2 - y1, 1):.1f}" fill="#4a90d9" fill-opacity="0.08"/>'
+            f'height="{max(y2 - y1, 1):.1f}" class="orange"/>'
         )
     for i, b in enumerate(bars):
         up = b["c"] >= b["o"]
-        col = "#2e9d5b" if up else "#d0453c"
+        cls = "up" if up else "dn"
         xx = x(i)
         top, bot = y(max(b["o"], b["c"])), y(min(b["o"], b["c"]))
         parts.append(
             f'<line x1="{xx:.1f}" x2="{xx:.1f}" y1="{y(b["h"]):.1f}" '
-            f'y2="{y(b["l"]):.1f}" stroke="{col}" stroke-width="1"/>'
+            f'y2="{y(b["l"]):.1f}" class="wick-{cls}" stroke-width="1"/>'
             f'<rect x="{xx - bw / 2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
-            f'height="{max(bot - top, 1):.1f}" fill="{col}"/>'
+            f'height="{max(bot - top, 1):.1f}" class="c-{cls}"/>'
         )
     pts = [f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(vwap) if v]
     if len(pts) > 1:
         parts.append(
-            f'<polyline points="{" ".join(pts)}" fill="none" stroke="#a066d3" stroke-width="1.5"/>'
+            f'<polyline points="{" ".join(pts)}" class="vwap" stroke-width="1.5"/>'
         )
     for m in markers:
         xx, yy = x(int(m["i"])), y(float(m["price"]))
         kind = m.get("kind", "buy")
-        col = {"buy": "#2e9d5b", "sell": "#d0453c", "stop": "#e0a800"}.get(kind, "#888")
+        mcls = "m-buy" if kind == "buy" else "m-sell"
         tri = (
             f"{xx:.1f},{yy + 2:.1f} {xx - 5:.1f},{yy + 10:.1f} {xx + 5:.1f},{yy + 10:.1f}"
             if kind == "buy"
             else f"{xx:.1f},{yy - 2:.1f} {xx - 5:.1f},{yy - 10:.1f} {xx + 5:.1f},{yy - 10:.1f}"
         )
         parts.append(
-            f'<polygon points="{tri}" fill="{col}"><title>'
+            f'<polygon points="{tri}" class="{mcls}"><title>'
             f"{escape(str(m.get('label', kind)))}</title></polygon>"
         )
     parts.append(
@@ -130,31 +130,33 @@ def payoff(
         parts.append(
             f'<rect x="{x(band[0]):.1f}" y="{PAD_T}" '
             f'width="{max(x(band[1]) - x(band[0]), 1):.1f}" height="{H - PAD_T - PAD_B}" '
-            'fill="#4a90d9" fill-opacity="0.08"><title>1x expected move</title></rect>'
+            'class="band"><title>1x expected move</title></rect>'
         )
     parts.append(
         f'<line x1="{PAD_L}" x2="{W - PAD_R}" y1="{y(0):.1f}" y2="{y(0):.1f}" '
-        'stroke="#888" stroke-width="1"/>'
+        'class="zero"/>'
     )
     for series, col, name in (
-        (at_expiry, "#2e9d5b", "at expiry"),
-        (at_exit, "#4a90d9", "at planned exit"),
+        (at_expiry, "pay-exp", "at expiry"),
+        (at_exit, "pay-exit", "at planned exit"),
     ):
         pts = " ".join(f"{x(p):.1f},{y(v):.1f}" for p, v in zip(prices, series, strict=True))
         parts.append(
-            f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="2">'
+            f'<polyline points="{pts}" class="{col}">'
             f"<title>{name}</title></polyline>"
         )
     for name, p in marks.items():
         xx = x(p)
         parts.append(
             f'<line x1="{xx:.1f}" x2="{xx:.1f}" y1="{PAD_T}" y2="{H - PAD_B}" '
-            f'stroke="#888" stroke-dasharray="3 3"/><text x="{xx + 3:.1f}" '
+            f'class="mark"/><text x="{xx + 3:.1f}" '
             f'y="{PAD_T + 12}" class="lbl">{escape(name)} {p:.2f}</text>'
         )
     parts.append(
         f'<text x="{W - PAD_R + 4}" y="{y(hi) + 4:.1f}" class="lbl">{hi:+,.0f}</text>'
         f'<text x="{W - PAD_R + 4}" y="{y(lo) + 4:.1f}" class="lbl">{lo:+,.0f}</text>'
         "</svg>"
+        '<div class="legend"><span><i class="k-exp"></i>at expiry</span>'
+        '<span><i class="k-exit"></i>at the planned exit</span></div>'
     )
     return "".join(parts)

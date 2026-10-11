@@ -38,9 +38,12 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from trader.console import charts, indicators
+from trader.console import pages as pg
 from trader.console import render as r
 from trader.console.ask import Asker
-from trader.console.data import ConsoleData
+from trader.console.data import ConsoleData, recap_latest, upcoming_events
+from trader.console.data import news as news_q
+from trader.console.data import ratings as ratings_q
 from trader.journal import schema as s
 from trader.models import reasons as reasons_mod
 from trader.timeutil import to_et
@@ -216,29 +219,26 @@ def create_app(
     async def healthz(req: Request) -> Response:
         return JSONResponse({"ok": True})
 
-    # -- UI-1..UI-4b home + SSE (UI-22) -----------------------------------------------------------
+    # -- Today (UI-1..UI-4b) + SSE (UI-22) -----------------------------------------------------
     async def home_data() -> dict[str, Any]:
         st = await data.status()
-        return {
-            "status": st,
-            "pending": len(data.pending_approvals()),
-            "incidents": len(data.incidents_open()),
-        }
+        return {"status": st, "pending": len(data.pending_approvals()),
+                "incidents": len(data.incidents_open())}
 
     @page
     async def home(req: Request, ses: Session) -> Response:
-        st = await data.status()
-        body = r.home(
-            st,
-            data.plans(data.today()),
-            data.ideas(),
-            data.incidents_open(),
-            data.heartbeats(),
-            await data.ollama(),
-            len(data.pending_approvals()),
-            ses.csrf,
-            data.now(),
-        )
+        st, sc, *qs = await asyncio.gather(
+            data.status(), data.core.get("/scanner"),
+            *(data.core.get("/quote", symbol=x) for x in ("SPY", "QQQ", "SMH")))
+        run_at, recap = recap_latest(data)
+        body = pg.home(
+            st, plans=data.plans(data.today()), ideas=data.ideas(),
+            incidents=data.incidents_open(), beats=data.heartbeats(), llm=await data.ollama(),
+            pending=len(data.pending_approvals()), scanner=(sc or {}).get("rows") or [],
+            recap_rows=recap, recap_at=run_at, ratings=ratings_q(data, 14),
+            news=news_q(data, 3, limit=8), events=upcoming_events(data),
+            quotes={x: q for x, q in zip(("SPY", "QQQ", "SMH"), qs, strict=True) if q},
+            csrf=ses.csrf, now=data.now())
         return await html(req, ses, "Today", body)
 
     @page
@@ -250,7 +250,6 @@ def create_app(
                 d = await home_data()
                 yield f"data: {json.dumps(d, default=str)}\n\n"
                 await asyncio.sleep(sse_interval_s)
-
         return StreamingResponse(gen(), media_type="text/event-stream")
 
     @page
@@ -265,119 +264,105 @@ def create_app(
         q = await data.core.get("/quote", symbol=sym)
         return JSONResponse(q or {"error": data.core.last_error}, status_code=200 if q else 503)
 
-    # -- UI-4..UI-6a stock ------------------------------------------------------------------------
+    # -- Market recap, ratings, news (UI-33, UI-34) -----------------------------------------------
+    @page
+    async def market(req: Request, ses: Session) -> Response:
+        run_at, rows = recap_latest(data)
+        return await html(req, ses, "Market recap", pg.market(run_at, rows, ses.csrf))
+
+    @page
+    async def ratings_page(req: Request, ses: Session) -> Response:
+        qp = req.query_params
+        days = int(qp["days"]) if qp.get("days", "").isdigit() else 30
+        days = days if days in (7, 30, 90) else 30
+        tick = qp.get("ticker", "").upper()
+        tick = tick if SYMBOL.match(tick) else ""
+        action = qp.get("action", "")
+        action = action if action in r.ACTION_LABEL else ""
+        rows = ratings_q(data, days, tick or None, action or None)
+        return await html(req, ses, "Analyst ratings", pg.ratings(
+            rows, days=days, ticker=tick, action=action,
+            universe=tuple(data.cfg.universe.tickers)))
+
+    @page
+    async def news_page(req: Request, ses: Session) -> Response:
+        qp = req.query_params
+        days = int(qp["days"]) if qp.get("days", "").isdigit() else 7
+        days = days if days in (1, 7, 30) else 7
+        tick = qp.get("ticker", "").upper()
+        tick = tick if SYMBOL.match(tick) else ""
+        return await html(req, ses, "News", pg.news_page(
+            news_q(data, days, tick or None, limit=300), tick,
+            tuple(data.cfg.universe.tickers), days))
+
+    # -- Stock lookup (UI-4..UI-6a) -------------------------------------------------------------
     @page
     async def stock(req: Request, ses: Session) -> Response:
         sym = req.query_params.get("symbol", "").upper().strip().lstrip("$")
-        if sym and not SYMBOL.match(sym):
-            return await html(
-                req,
-                ses,
-                "Stock",
-                r.stock("", None, "", "", {}, [], [], {}, None, None, None, ses.csrf),
-                flash="not a valid symbol",
-            )
-        if not sym:
-            return await html(
-                req,
-                ses,
-                "Stock",
-                r.stock("", None, "", "", {}, [], [], {}, None, None, None, ses.csrf),
-            )
+        if not sym or not SYMBOL.match(sym):
+            body = pg.stock("", q=None, chart_html="", daily_html="", ind={}, news=[],
+                            flags=[], status={}, checklist=None, iv=None, chain=None,
+                            ratings=[], recap=None, csrf=ses.csrf)
+            return await html(req, ses, "Stock", body,
+                              flash="not a valid symbol" if sym else "")
         q, bars, daily, ck, iv, chain = await asyncio.gather(
-            data.core.get("/quote", symbol=sym),
-            data.core.get("/bars", symbol=sym),
-            data.core.get("/daily", symbol=sym),
-            data.core.get("/checklist", symbol=sym),
+            data.core.get("/quote", symbol=sym), data.core.get("/bars", symbol=sym),
+            data.core.get("/daily", symbol=sym), data.core.get("/checklist", symbol=sym),
             data.core.get("/options/iv", symbol=sym),
-            data.core.get("/options/chain", symbol=sym),
-        )
+            data.core.get("/options/chain", symbol=sym))
         intraday = (bars or {}).get("bars") or []
         dbars = (daily or {}).get("bars") or []
         lv = (bars or {}).get("levels") or {}
-        markers = _fill_markers(data, sym, intraday)
         chart_html = charts.candles(
-            intraday,
-            vwap=_vwap_series(intraday),
-            title=f"{sym} 1-minute",
-            levels={
-                "prior high": lv.get("prior_high"),
-                "prior low": lv.get("prior_low"),
-                "prior close": lv.get("prior_close"),
-                "PM high": lv.get("pm_high"),
-            },
-            opening_range=(bars or {}).get("or"),
-            markers=markers,
-        )
+            intraday, vwap=_vwap_series(intraday), title=f"{sym} 1-minute",
+            levels={"prior high": lv.get("prior_high"), "prior low": lv.get("prior_low"),
+                    "prior close": lv.get("prior_close"), "PM high": lv.get("pm_high")},
+            opening_range=(bars or {}).get("or"), markers=_fill_markers(data, sym, intraday))
         daily_html = charts.candles(dbars[-90:], title=f"{sym} daily")
         ind = indicators.summary(intraday, dbars, (q or {}).get("prior_close"))
-        news = data.rows(
-            s.news_items, {"ticker": sym}, order_by="published_at", descending=True, limit=10
-        )
-        flags = [
-            f
-            for f in data.rows(
-                s.event_flags, {"ticker": sym}, order_by="date", descending=True, limit=10
-            )
-        ]
-        status = _system_status(data, sym)
-        body = r.stock(
-            sym,
-            q,
-            chart_html,
-            daily_html,
-            ind,
-            news,
-            flags,
-            status,
-            ck,
-            iv,
-            chain,
-            ses.csrf,
-            data.core.last_error,
-        )
-        return await html(req, ses, f"{sym}", body)
+        _, recap = recap_latest(data)
+        body = pg.stock(
+            sym, q=q, chart_html=chart_html, daily_html=daily_html, ind=ind,
+            news=data.rows(s.news_items, {"ticker": sym}, order_by="published_at",
+                           descending=True, limit=10),
+            flags=data.rows(s.event_flags, {"ticker": sym}, order_by="date", descending=True,
+                            limit=10),
+            status=_system_status(data, sym), checklist=ck, iv=iv, chain=chain,
+            ratings=ratings_q(data, 90, sym), recap=next(
+                (x for x in recap if x.get("ticker") == sym), None),
+            csrf=ses.csrf, error=data.core.last_error)
+        return await html(req, ses, sym, body)
 
-    # -- UI-7..UI-8d ask --------------------------------------------------------------------------
+    # -- Ask (UI-7..UI-8d) ------------------------------------------------------------------------
     @page
     async def ask_get(req: Request, ses: Session) -> Response:
         search = req.query_params.get("search", "")
-        body = r.ask_page(
-            ses.csrf, None, data.chats(q=search), req.query_params.get("q", ""), search
-        )
-        return await html(req, ses, "Ask", body)
+        q = req.query_params.get("q", "")
+        ans = await ask.ask(q) if q else None
+        return await html(req, ses, "Ask", pg.ask_page(ses.csrf, ans, data.chats(q=search), q,
+                                                       search))
 
     @page
     async def ask_post(req: Request, ses: Session) -> Response:
         q = str((await req.form()).get("q", "")).strip()
         ans = await ask.ask(q) if q else None
-        return await html(req, ses, "Ask", r.ask_page(ses.csrf, ans, data.chats(), q))
+        return await html(req, ses, "Ask", pg.ask_page(ses.csrf, ans, data.chats(), q))
 
     @page
     async def ask_clear(req: Request, ses: Session) -> Response:
         data.clear_chats()
         return RedirectResponse("/ask", status_code=303)
 
-    # -- UI-9..UI-13 ------------------------------------------------------------------------------
+    # -- Approvals, controls, commands (UI-9..UI-13) --------------------------------------------
     @page
     async def approvals(req: Request, ses: Session) -> Response:
-        return await html(
-            req,
-            ses,
-            "Approvals",
-            r.approvals_page(ses.csrf, data.pending_approvals(), data.approvals_today()),
-        )
+        return await html(req, ses, "Approvals", pg.approvals_page(
+            ses.csrf, data.pending_approvals(), data.approvals_today()))
 
     @page
     async def controls(req: Request, ses: Session) -> Response:
-        return await html(
-            req,
-            ses,
-            "Controls",
-            r.controls_page(
-                ses.csrf, await data.status(), data.audit(), req.query_params.get("suggest", "")
-            ),
-        )
+        return await html(req, ses, "Controls", pg.controls_page(
+            ses.csrf, await data.status(), data.audit(), req.query_params.get("suggest", "")))
 
     @page
     async def cmd(req: Request, ses: Session) -> Response:
@@ -385,155 +370,106 @@ def create_app(
         name, arg = str(form.get("name", "")), str(form.get("arg", ""))
         res = await data.command(name, arg)
         if name.upper() in ("YES", "NO"):
-            flash = ("Approval sent: " if res.get("ok") else "Approval refused: ") + str(
-                res.get("reason")
-            )
-            return await html(
-                req,
-                ses,
-                "Approvals",
-                r.approvals_page(ses.csrf, data.pending_approvals(), data.approvals_today()),
-                flash=flash,
-            )
-        return await html(
-            req,
-            ses,
-            "Controls",
-            r.controls_page(ses.csrf, await data.status(), data.audit(), result=res),
-        )
+            flash = ("Approval sent: " if res.get("ok") else "Approval refused: ") + \
+                str(res.get("reason"))
+            return await html(req, ses, "Approvals", pg.approvals_page(
+                ses.csrf, data.pending_approvals(), data.approvals_today()), flash=flash)
+        return await html(req, ses, "Controls", pg.controls_page(
+            ses.csrf, await data.status(), data.audit(), result=res))
 
     @page
     async def stories(req: Request, ses: Session) -> Response:
         rows = data.recent_proposals(7)
-        t = r.table(
-            rows,
-            [
-                ("ts", "Time"),
-                ("ticker", "Ticker"),
-                ("setup", "Setup"),
-                ("result", "Result"),
-                ("reason_code", "Reason"),
-                ("qty", "Qty"),
-                ("proposal_id", "Story"),
-            ],
-            "no decisions in 7 days",
-            {
+        body = r.page_head("Trades", "Every decision of the last 7 days, taken or not")
+        if rows:
+            body += r.card(f"{len(rows)} decisions", r.table(rows, [
+                ("ts", "Time"), ("ticker", "Ticker"), ("setup", "Setup"), ("result", "Result"),
+                ("reason_code", "Reason"), ("qty", "Qty"), ("proposal_id", "")], "", {
                 "proposal_id": lambda v, row: r.link(f"/story/{v}", "story"),
-                "reason_code": lambda v, row: r.e(f"{v} — {REASONS.get(v or '', '')}"),
-            },
-        )
-        return await html(req, ses, "Trades and decisions (7 days)", t)
+                "ticker": lambda v, row: r.stock_link(v),
+                "result": lambda v, row: r.chip(v, "ok" if v in ("APPROVE", "SUBMIT") else
+                                                "neutral"),
+                "reason_code": lambda v, row: r.e(f"{v} — {REASONS.get(v or '', '')}"
+                                                  if v else "")}))
+        else:
+            body += r.card("Decisions", r.empty(
+                "No decisions in 7 days", "A decision is journaled for every setup that "
+                "triggers, taken or rejected, with the reason. Setups trigger only inside the "
+                "trading windows on market days.", icon="≡"))
+        return await html(req, ses, "Trades", body)
 
     @page
     async def story(req: Request, ses: Session) -> Response:
         pid = req.path_params["pid"][:64]
         d = data.story(pid)
-        tick = (
-            d["setup"][0]["ticker"]
-            if d["setup"]
-            else d["decisions"][0]["ticker"]
-            if d["decisions"]
-            else None
-        )
+        tick = (d["setup"][0]["ticker"] if d["setup"] else
+                d["decisions"][0]["ticker"] if d["decisions"] else None)
         chart_html = ""
         if tick:
             b = await data.core.get("/bars", symbol=tick)
             bars = (b or {}).get("bars") or []
-            chart_html = charts.candles(
-                bars,
-                vwap=_vwap_series(bars),
-                title=f"{tick} story",
-                markers=_fill_markers(data, tick, bars, pid),
-            )
-        return await html(
-            req, ses, f"Trade story {tick or pid}", r.story_page(d, chart_html, REASONS, ses.csrf)
-        )
+            chart_html = charts.candles(bars, vwap=_vwap_series(bars), title=f"{tick} story",
+                                        markers=_fill_markers(data, tick, bars, pid))
+        return await html(req, ses, f"Trade story {tick or pid}",
+                          pg.story_page(d, chart_html, REASONS, ses.csrf))
 
-    # -- UI-32 co-pilot ---------------------------------------------------------------------------
+    # -- Co-pilot (UI-32) -----------------------------------------------------------------------
     @page
     async def copilot(req: Request, ses: Session) -> Response:
         cards = []
         for t in data.copilot_tickets():
-            cards.append(
-                f'<div class="card"><h3>{r.e(t["ticker"])} {r.e(t["setup"])} · '
-                f"{r.ts(t['ts'], '%H:%M')}</h3><p>Plan: buy {r.e(t['qty'])} near "
-                f"{r.num(t['entry'])} · stop {r.num(t['stop'])} · T1 {r.num(t['t1'])} · risk "
-                f'{r.money(t["risk_usd"])}</p><form method="post" action="/copilot/fill" '
-                f'class="inline">{r.csrf_field(ses.csrf)}<input type="hidden" name="ticker" '
+            cards.append(r.card(
+                f"{t['ticker']} {t['setup']} · {r.ts(t['ts'], '%H:%M')}",
+                f'<dl class="kv"><dt>Buy</dt><dd>{r.e(t["qty"])} near {r.num(t["entry"])}</dd>'
+                f'<dt>Stop</dt><dd>{r.num(t["stop"])}</dd><dt>T1</dt><dd>{r.num(t["t1"])}</dd>'
+                f'<dt>Risk</dt><dd>{r.money(t["risk_usd"])}</dd></dl>'
+                f'<form method="post" action="/copilot/fill" class="inline">'
+                f'{r.csrf_field(ses.csrf)}<input type="hidden" name="ticker" '
                 f'value="{r.e(t["ticker"])}"><label>Qty <input name="qty" size="5" '
                 f'value="{r.e(t["qty"] or "")}"></label><label>Price <input name="price" '
-                f'size="8" value="{r.e(t["entry"] or "")}"></label><button>I filled</button>'
-                f"</form> {r.link('/story/' + t['proposal_id'], 'plan story')}</div>"
-            )
-        empty = '<p class="muted">no co-pilot plans today (mode.day_trades: copilot)</p>'
-        body = (
-            "".join(cards) or empty
-        ) + '<p class="muted">"I filled" sends FILLED; exits then come as alerts (CP-2).</p>'
-        return await html(req, ses, "Co-pilot tickets (UI-32)", body)
+                f'size="8" value="{r.e(t["entry"] or "")}"></label><button class="primary">'
+                f'I filled</button></form> {r.link("/story/" + t["proposal_id"], "plan story")}',
+                cls="attn"))
+        body = r.page_head("Co-pilot", "Plans the system would trade; you place the order, "
+                           "it tracks the exits") + ("".join(cards) or r.card("Tickets", r.empty(
+                               "No co-pilot plans today", "Set " + r.code("mode.day_trades: "
+                               "copilot") + " in config/config.yaml: at a trigger the plan "
+                               "appears here and on Telegram; press I filled after your order "
+                               "fills and exit alerts follow (CP-2).", icon="✈")))
+        return await html(req, ses, "Co-pilot", body)
 
     @page
     async def copilot_fill(req: Request, ses: Session) -> Response:
         f = await req.form()
-        tick, qty, price = (
-            str(f.get("ticker", "")).upper(),
-            str(f.get("qty", "")),
-            str(f.get("price", "")),
-        )
+        tick, qty, price = (str(f.get("ticker", "")).upper(), str(f.get("qty", "")),
+                            str(f.get("price", "")))
         if not (SYMBOL.match(tick) and qty.isdigit() and re.fullmatch(r"\d+(\.\d+)?", price)):
             return await html(req, ses, "Co-pilot", "", flash="ticker, qty and price needed")
         res = await data.command("FILLED", f"{tick} {qty} @ {price}")
-        return await html(
-            req,
-            ses,
-            "Co-pilot",
-            f"<p>{r.e(res.get('reason'))}</p><p>{r.link('/copilot', 'back')}</p>",
-        )
+        return await html(req, ses, "Co-pilot", r.card("Result", f"<p>{r.e(res.get('reason'))}"
+                                                       f"</p><p>{r.link('/copilot', 'back')}</p>"))
 
-    # -- OP-17/OP-18 options ----------------------------------------------------------------------
+    # -- Options (OP-16..OP-19, UI-36) ----------------------------------------------------------
     @page
     async def options(req: Request, ses: Session) -> Response:
-        rows = data.suggestions(30)
-        t = r.table(
-            rows,
-            [
-                ("ts", "Time"),
-                ("ticker", "Ticker"),
-                ("direction", "View"),
-                ("structure", "Structure"),
-                ("expiry", "Expiry"),
-                ("contracts", "Qty"),
-                ("max_loss", "Max loss"),
-                ("status", "Status"),
-                ("mark", "P/L / contract"),
-                ("pnl", "Result"),
-                ("r_multiple", "R"),
-                ("exit_reason", "Exit"),
-                ("suggestion_id", "Payoff"),
-            ],
-            "no options suggestions in 30 days",
-            {
-                "suggestion_id": lambda v, row: r.link(f"/options/{v}", "payoff"),
-                "max_loss": lambda v, row: r.money(v),
-                "mark": lambda v, row: r.money(v),
-                "pnl": lambda v, row: r.money(v),
-            },
-        )
         from trader.options import monitor
 
-        rep = r.e(monitor.report(rows)) if rows else ""
-        gate = monitor.promotion_status(rows)
-        g = "".join(
-            f"<li>{r.e(k[0])} {r.e(k[1])}: {r.passfail(ok)} {r.e(why)}</li>"
-            for k, (ok, why) in sorted(gate.items())
-        )
-        return await html(
-            req,
-            ses,
-            "Options suggestions (OP-18)",
-            f"{t}<h2>Track record (A16-3)</h2><pre>{rep}</pre>"
-            f'<h2>Promotion gate (A16-4)</h2><ul class="plain">{g or "<li>none</li>"}'
-            f"</ul>",
-        )
+        qp = req.query_params
+        rows = data.suggestions(30)
+        board = await data.core.get("/options/board")
+        err = "" if board else data.core.last_error
+        preview = None
+        psym = qp.get("preview", "").upper()
+        if psym and SYMBOL.match(psym):
+            preview = await data.core.get("/options/preview", symbol=psym,
+                                          direction=qp.get("dir", "bull"),
+                                          style=qp.get("style", "day"))
+            if preview is None:
+                preview = {"symbol": psym, "view": {}, "suggestions": [],
+                           "notes": [data.core.last_error]}
+        body = pg.options(rows, board, preview, monitor.report(rows) if rows else "",
+                          monitor.promotion_status(rows), ses.csrf, err)
+        return await html(req, ses, "Options", body)
 
     @page
     async def option_detail(req: Request, ses: Session) -> Response:
@@ -543,64 +479,46 @@ def create_app(
         from trader.options.monitor import from_row
 
         sug = from_row(row)
-        if sug is None:
-            return await html(req, ses, "Option", f"<pre>{r.e(row['text'])}</pre>")
-        body = f"<pre>{r.e(row['text'])}</pre>" + payoff_svg(sug, row)
-        return await html(req, ses, f"Payoff {row['ticker']} {row['structure']} (OP-17)", body)
+        body = r.page_head(f"{row['ticker']} {row['structure'].replace('_', ' ')}",
+                           f"Suggested {r.ts(row['ts'], '%b %d %H:%M')} ET · status "
+                           f"{r.e(row['status'])}")
+        if sug is not None:
+            body += r.card("Payoff", payoff_svg(sug, row))
+        body += r.card("Message", f"<pre>{r.e(row['text'])}</pre>")
+        return await html(req, ses, "Option", body)
 
-    # -- UI-14..UI-17 -----------------------------------------------------------------------------
+    # -- Alerts, ideas, reports, compliance (UI-14..UI-17) ----------------------------------------
     @page
     async def alerts(req: Request, ses: Session) -> Response:
         rows = data.alerts_today()
         rules, wl = data.bot_rules()
-        body = (
-            f"<p>{r.cmd_button(ses.csrf, 'ALERTS', 'ON', 'Signal alerts ON')} "
-            f"{r.cmd_button(ses.csrf, 'ALERTS', 'OFF', 'Signal alerts OFF (mute)')}</p>"
-            f"<h2>Today's alert log (trader-core, AL-1..AL-7)</h2>"
-            + r.table(
-                rows,
-                [
-                    ("ts", "Time"),
-                    ("ticker", "Ticker"),
-                    ("kind", "Signal"),
-                    ("direction", "Dir"),
-                    ("label", "Label"),
-                    ("checklist_score", "Score"),
-                    ("first_failed", "Failed"),
-                    ("delivery", "Delivery"),
-                    ("hit", "+1R first"),
-                ],
-                "no alerts today",
-            )
-            + f'<h2>Lightweight alerts bot rules (UI-14)</h2><p class="muted">{r.e(wl)} · '
-            f"the bot is edited from Telegram (/alert, /watch, /mute) because it keeps its "
-            f"own database; this view is read-only.</p>" + r.table(rules, empty="no rules")
-        )
+        body = (r.page_head("Alerts", "trader-core's signal alerts today and the standalone bot's "
+                            "price rules", r.cmd_button(ses.csrf, "ALERTS", "ON",
+                                                        "Signal alerts ON") + " "
+                            + r.cmd_button(ses.csrf, "ALERTS", "OFF", "Mute signal alerts"))
+                + r.card("Today's signal alerts", r.table(rows, [
+                    ("ts", "Time"), ("ticker", "Ticker"), ("kind", "Signal"),
+                    ("direction", "Dir"), ("label", "Label"), ("checklist_score", "Score"),
+                    ("first_failed", "First failed"), ("delivery", "Delivery"),
+                    ("hit", "+1R first")], "", {"ticker": lambda v, row: r.stock_link(v)})
+                    if rows else r.empty(
+                        "No alerts today", "Signal alerts (opening-range breaks, VWAP, new "
+                        "highs and lows, volume spikes) are sent pre-market, 9:30-10:30 and "
+                        "15:00-16:00 ET on market days, ranked and capped (AL-4..AL-6).",
+                        icon="◔"))
+                + r.card("Standalone bot rules", (f'<p class="muted small">{r.e(wl)}</p>'
+                                                  + r.table(rules)) if rules else r.empty(
+                    "No bot rules", r.e(wl) + ". The optional alerts bot keeps its own "
+                    "database; add rules from Telegram (" + r.code("/add NVDA above 140")
+                    + ").", icon="◔")))
         return await html(req, ses, "Alerts", body)
 
     @page
     async def ideas(req: Request, ses: Session) -> Response:
-        cur = data.ideas()
-        hist = data.idea_history(20)
-        cols = [
-            ("plan_for", "For"),
-            ("ticker", "Ticker"),
-            ("status", "Status"),
-            ("rank", "Rank"),
-            ("score", "Score"),
-            ("morning_setup", "Morning setup"),
-            ("morning_trigger", "Trigger"),
-            ("news_tone", "News"),
-            ("close", "Close"),
-            ("range_pos", "Range pos"),
-        ]
-        extra = [c for c in ("result", "grade", "triggered", "hit_t1") if hist and c in hist[0]]
-        body = (
-            f"<h2>Latest picks and screen (UI-15)</h2>{r.table(cur, cols, 'no ideas yet')}"
-            f"<h2>Track record (20 days)</h2>"
-            f"{r.table(hist, [*cols[:5], *[(c, c) for c in extra]], 'no history')}"
-        )
-        return await html(req, ses, "Next-day ideas", body)
+        _, recap = recap_latest(data)
+        watch = [x for x in recap if x.get("kind") == "stock" and x.get("tags")]
+        return await html(req, ses, "Next-day ideas", pg.ideas(
+            data.ideas(), data.idea_history(20), watch, ses.csrf))
 
     @page
     async def reports(req: Request, ses: Session) -> Response:
@@ -611,56 +529,45 @@ def create_app(
                 return await html(req, ses, "Reports", "", flash="not found")
             if req.query_params.get("download"):
                 return FileResponse(p, filename=p.name)
-            return await html(
-                req,
-                ses,
-                f"Report {p.name}",
-                f"<p>{r.link(f'/reports?name={quote(name)}&download=1', 'download')}"
-                f"</p><pre>{r.e(p.read_text(encoding='utf-8', errors='replace')[:400_000])}</pre>",
-            )
+            return await html(req, ses, f"Report {p.name}", r.page_head(
+                p.name, r.link(f"/reports?name={quote(name)}&download=1", "download"))
+                + r.card("Report", "<pre>" + r.e(
+                    p.read_text(encoding="utf-8", errors="replace")[:400_000]) + "</pre>"))
         rows = data.reports()
-        t = r.table(
-            rows,
-            [("name", "Report"), ("mtime", "Updated"), ("size", "Bytes")],
-            "no reports yet (reports/ is written by trader-core)",
-            {"name": lambda v, row: r.link(f"/reports?name={quote(str(v))}", v)},
-        )
-        return await html(req, ses, "Reports archive (UI-16)", t)
+        body = r.page_head("Reports", "Daily, weekly and monthly reviews written by trader-core")
+        body += r.card(f"{len(rows)} files", r.table(rows, [
+            ("name", "Report"), ("mtime", "Updated"), ("size", "Bytes")], "", {
+            "name": lambda v, row: r.link(f"/reports?name={quote(str(v))}", v)})) if rows \
+            else r.card("Archive", r.empty(
+                "No reports yet", "trader-core writes the daily review at 4:30 PM ET, the weekly "
+                "on Fridays at 5:00 and the monthly at month end into reports/.", icon="▤"))
+        return await html(req, ses, "Reports", body)
 
     @page
     async def compliance(req: Request, ses: Session) -> Response:
         c = data.compliance()
-        lock_cols = [
-            ("ticker", "Ticker"),
-            ("lock_type", "Type"),
-            ("start", "From"),
-            ("until", "Unlocks"),
-            ("reason", "Cause"),
-        ]
-        body = (
-            f"<h2>Active locks</h2>{r.table(c['active'], lock_cols, 'no active locks')}"
-            f"<h2>Recent locks (calendar)</h2>{r.table(c['recent'], lock_cols)}"
-            f"<h2>Tax lots (adjusted basis)</h2>"
-            + r.table(
-                c["lots"],
-                [
-                    ("ticker", "Ticker"),
-                    ("acquired_at", "Acquired"),
-                    ("qty", "Qty"),
-                    ("remaining_qty", "Open"),
-                    ("cost", "Cost"),
-                    ("adjusted_basis", "Adj. basis"),
-                    ("realized_pnl", "Realized"),
-                    ("disallowed_loss", "Disallowed"),
-                    ("route", "Route"),
-                ],
-                "no lots",
-            )
-            + f"<h2>Wash sales (disallowed losses)</h2>{r.table(c['wash'], empty='none')}"
-        )
-        return await html(req, ses, "Compliance (UI-17)", body)
+        lock_cols = [("ticker", "Ticker"), ("lock_type", "Type"), ("start", "From"),
+                     ("until", "Unlocks"), ("reason", "Cause")]
+        lfmt = {"ticker": lambda v, row: r.stock_link(v),
+                "lock_type": lambda v, row: r.chip(v, "warn")}
+        body = (r.page_head("Compliance", "Wash-sale locks, tax lots and disallowed losses")
+                + r.tiles([r.tile("Active locks", str(len(c["active"]))),
+                           r.tile("Tax lots", str(len(c["lots"]))),
+                           r.tile("Wash sales", str(len(c["wash"])))])
+                + r.card("Active locks", r.table(c["active"], lock_cols, fmt=lfmt) if c["active"]
+                         else r.empty("No active locks", "Every universe ticker is tradable. A "
+                                      "loss locks its ticker (and options) for 31 days.",
+                                      icon="✓"))
+                + r.card("Recent locks", r.table(c["recent"], lock_cols, "none yet", lfmt))
+                + r.card("Tax lots (adjusted basis)", r.table(c["lots"], [
+                    ("ticker", "Ticker"), ("acquired_at", "Acquired"), ("qty", "Qty"),
+                    ("remaining_qty", "Open"), ("cost", "Cost"), ("adjusted_basis", "Adj. basis"),
+                    ("realized_pnl", "Realized"), ("disallowed_loss", "Disallowed"),
+                    ("route", "Route")], "No lots yet: a lot is created with each fill."))
+                + r.card("Wash sales (disallowed losses)", r.table(c["wash"], empty="None.")))
+        return await html(req, ses, "Compliance", body)
 
-    # -- UI-29..UI-31 -----------------------------------------------------------------------------
+    # -- Journal, scanner, latency (UI-29..UI-31) -------------------------------------------------
     @page
     async def notes_get(req: Request, ses: Session) -> Response:
         notes = data.notes()
@@ -668,29 +575,29 @@ def create_app(
         for n in notes:
             for t in n.get("tags") or []:
                 tags[t] = tags.get(t, 0) + 1
-        stats = ", ".join(f"{k}: {v}" for k, v in sorted(tags.items(), key=lambda kv: -kv[1]))
         closed = data.closed_positions(30)
-        t = r.table(
-            closed,
-            [
-                ("opened_at", "Date"),
-                ("ticker", "Ticker"),
-                ("setup", "Setup"),
-                ("route", "Route"),
-                ("r_multiple", "R"),
-                ("exit_reason", "Exit"),
-                ("position_id", "Note"),
-            ],
-            "no closed trades in 30 days",
-            {"position_id": lambda v, row: r.link(f"/story/{v}", "story / add note")},
-        )
-        return await html(
-            req,
-            ses,
-            "Owner journal (UI-29)",
-            f"<p>Tag statistics (30 days): {r.e(stats or 'none yet')}</p>{t}"
-            f"<h2>Notes</h2>{r.notes_list(notes)}",
-        )
+        rs = [float(p.get("r_multiple") or 0) for p in closed]
+        body = (r.page_head("Journal", "Your notes and tags on each trade")
+                + r.tiles([r.tile("Closed trades (30 days)", str(len(closed))),
+                           r.tile("Total R", f"{sum(rs):+.2f}R" if rs else "—"),
+                           r.tile("Notes", str(len(notes))),
+                           r.tile("Top tag", r.e(max(tags, key=tags.__getitem__))
+                                  if tags else "—")])
+                + r.card("Closed trades", r.table(closed, [
+                    ("opened_at", "Date"), ("ticker", "Ticker"), ("setup", "Setup"),
+                    ("route", "Route"), ("r_multiple", "R"), ("exit_reason", "Exit"),
+                    ("position_id", "")], "", {
+                    "position_id": lambda v, row: r.link(f"/story/{v}", "story / add note"),
+                    "ticker": lambda v, row: r.stock_link(v),
+                    "r_multiple": lambda v, row: r.num(v, 2, True)}) if closed else r.empty(
+                    "No closed trades in 30 days", "Each closed trade (system, co-pilot or "
+                    "shadow) gets a row here; open its story to add notes, tags and a "
+                    "screenshot.", icon="✎"))
+                + r.card("Tag statistics", " ".join(r.chip(f"{k}: {v}") for k, v in sorted(
+                    tags.items(), key=lambda kv: -kv[1])) or '<p class="muted small">No tags '
+                    "yet.</p>")
+                + r.card("Notes", r.notes_list(notes)))
+        return await html(req, ses, "Journal", body)
 
     @page
     async def notes_post(req: Request, ses: Session) -> Response:
@@ -701,19 +608,15 @@ def create_app(
             raw = await shot.read()
             if raw:
                 if len(raw) > MAX_SCREENSHOT or not raw[:8].startswith((b"\x89PNG", b"\xff\xd8")):
-                    return await html(
-                        req, ses, "Journal", "", flash="screenshot must be a PNG/JPEG under 2 MB"
-                    )
+                    return await html(req, ses, "Journal", "",
+                                      flash="screenshot must be a PNG/JPEG under 2 MB")
                 b64 = base64.b64encode(raw).decode()
         ref_id = str(f.get("ref_id", ""))[:64]
-        data.add_note(
-            str(f.get("ref_type", "proposal")),
-            ref_id,
-            [str(t) for t in f.getlist("tags") if str(t) in r.TAGS],
-            str(f.get("note", "")),
-            b64,
-        )
-        return RedirectResponse(f"/story/{quote(ref_id)}" if ref_id else "/notes", status_code=303)
+        data.add_note(str(f.get("ref_type", "proposal")), ref_id,
+                      [str(t) for t in f.getlist("tags") if str(t) in r.TAGS],
+                      str(f.get("note", "")), b64)
+        return RedirectResponse(f"/story/{quote(ref_id)}" if ref_id else "/notes",
+                                status_code=303)
 
     @page
     async def scanner(req: Request, ses: Session) -> Response:
@@ -722,27 +625,35 @@ def create_app(
         for a in reversed(data.alerts_today()):
             labels[a["ticker"]] = f"{a['label']} {a['checklist_score']}/10"
         rows = [{**x, "alert": labels.get(x["ticker"], "")} for x in (sc or {}).get("rows", [])]
-        t = r.table(
-            rows,
-            [
-                ("ticker", "Ticker"),
-                ("last", "Last"),
-                ("change_pct", "% chg"),
-                ("rvol", "RVOL"),
-                ("rs_qqq", "RS vs QQQ"),
-                ("vwap_dist_pct", "% from VWAP"),
-                ("alert", "Last alert (AL-2)"),
-                ("in_play", "In play (UN-1)"),
-            ],
-            f"scanner unavailable: {data.core.last_error}",
-            {
-                "ticker": lambda v, row: r.link(f"/stock?symbol={quote(str(v))}", v),
-                "change_pct": lambda v, row: r.num(v, 2, True),
-                "rs_qqq": lambda v, row: r.num(v, 2, True),
+        live = [x for x in rows if x.get("last") is not None]
+        body = r.page_head("Scanner", "The universe and in-play names, live from trader-core")
+        if live:
+            body += r.card("Day change", r.heatmap([
+                {"ticker": x["ticker"], "value": x.get("change_pct"),
+                 "sub": f"RVOL {r.num(x.get('rvol'), 1)}" if x.get("rvol") else "",
+                 "href": f"/stock?symbol={quote(x['ticker'])}"} for x in live]))
+            body += r.card("Ranked by move", r.table(live, [
+                ("ticker", "Ticker"), ("last", "Last"), ("change_pct", "Day %"),
+                ("rvol", "RVOL"), ("rs_qqq", "vs QQQ"), ("vwap_dist_pct", "From VWAP %"),
+                ("alert", "Last alert"), ("in_play", "In play")], "", {
+                "ticker": lambda v, row: r.stock_link(v),
+                "change_pct": lambda v, row: r.delta(v),
+                "rs_qqq": lambda v, row: r.delta(v, " pts"),
                 "vwap_dist_pct": lambda v, row: r.num(v, 2, True),
-            },
-        )
-        return await html(req, ses, "Live scanner (UI-30)", t)
+                "in_play": lambda v, row: r.chip("in play", "info") if v else ""}))
+        else:
+            _, recap = recap_latest(data)
+            stocks = [x for x in recap if x.get("kind") == "stock"]
+            why = ("trader-core's API is not answering: " + r.e(data.core.last_error)
+                   if sc is None else "No live prices yet: the stream runs on market days from "
+                   "9:30 ET (pre-market from 4:00 for the in-play scan).")
+            body += r.card("Live", r.empty("Scanner idle", why, r.recap_hint(ses.csrf), "▦"))
+            if stocks:
+                body += r.card("Last session (from the recap)", r.heatmap([
+                    {"ticker": x["ticker"], "value": x.get("ret_1d"),
+                     "sub": f"5d {r.num(x.get('ret_5d'), 1, True)}%",
+                     "href": f"/stock?symbol={quote(x['ticker'])}"} for x in stocks]))
+        return await html(req, ses, "Scanner", body)
 
     @page
     async def latency(req: Request, ses: Session) -> Response:
@@ -756,81 +667,73 @@ def create_app(
         for x in rows:
             sh = shadow.get(x.get("setup_id"))
             x["shadow"] = f"{sh['exit_reason'] or 'open'} {sh['exit_price'] or ''}" if sh else ""
-        body = (
-            f"<p>{r.e((lat or {}).get('summary', data.core.last_error))}</p>"
-            f"<p>Missed by reason: {r.e(by_reason or 'none')}</p>"
-            + r.table(
-                rows,
-                [
-                    ("trigger_ts", "Trigger"),
-                    ("ticker", "Ticker"),
-                    ("setup", "Setup"),
-                    ("mode", "Mode"),
-                    ("latency_s", "s"),
-                    ("model_s", "model s"),
-                    ("owner_s", "owner s"),
-                    ("prearmed", "pre-armed"),
-                    ("outcome", "Outcome"),
-                    ("reason_code", "Reason"),
-                    ("shadow", "Shadow (SH-1)"),
-                ],
-                "no triggers today",
-            )
-        )
-        return await html(req, ses, "Latency and missed trades (UI-31)", body)
+        lats = sorted(float(x["latency_s"]) for x in rows if x.get("latency_s") is not None)
+        body = (r.page_head("Latency and missed trades", "Trigger-to-order time and every missed "
+                            "trigger with the shadow result")
+                + r.tiles([r.tile("Triggers today", str(len(rows))),
+                           r.tile("Orders", str(len(rows) - len(missed))),
+                           r.tile("Missed", str(len(missed))),
+                           r.tile("p95 trigger→order", f"{lats[int(len(lats) * 0.95) - 1]:.1f} s"
+                                  if lats else "—", '<span class="muted small">budget 10 s'
+                                  '</span>')])
+                + (f'<p class="small">{r.e((lat or {}).get("summary", ""))}</p>' if lat else "")
+                + ('<p class="small">Missed by reason: '
+                   + " ".join(r.chip(f"{k}: {v}", "warn") for k, v in by_reason.items())
+                   + "</p>" if by_reason else "")
+                + r.card("Triggers", r.table(rows, [
+                    ("trigger_ts", "Trigger"), ("ticker", "Ticker"), ("setup", "Setup"),
+                    ("mode", "Mode"), ("latency_s", "s"), ("model_s", "Model s"),
+                    ("owner_s", "Owner s"), ("prearmed", "Pre-armed"), ("outcome", "Outcome"),
+                    ("reason_code", "Reason"), ("shadow", "Shadow result")], "", {
+                    "ticker": lambda v, row: r.stock_link(v),
+                    "outcome": lambda v, row: r.chip(v, "ok" if v == "ORDER" else "warn")})
+                    if rows else r.empty(
+                        "No triggers today", "Each trigger inside a window is timed from the "
+                        "candle close to the order (LAT-1); missed ones are kept with their "
+                        "reason and followed as shadow trades (SH-1).", icon="⏱")))
+        return await html(req, ses, "Latency", body)
 
-    # -- UI-18..UI-20 -----------------------------------------------------------------------------
+    # -- Config, model, runs (UI-18..UI-20) -----------------------------------------------------
     @page
     async def config(req: Request, ses: Session) -> Response:
-        c = data.config_view()
-        snap = c["snapshot"]
         import difflib
 
+        c = data.config_view()
+        snap = c["snapshot"]
         snap_text = (snap or {}).get("yaml_text") or ""
-        diff = (
-            "".join(
-                difflib.unified_diff(
-                    snap_text.splitlines(True),
-                    c["file"].splitlines(True),
-                    "effective today",
-                    c["file_name"],
-                )
-            )
-            if snap_text
-            else "(today's snapshot stores only the config hash)"
-        )
-        body = (
-            f"<p>Effective config: {r.e((snap or {}).get('effective_date'))} · hash "
-            f"{r.e(((snap or {}).get('yaml_hash') or '')[:12])}. Edits apply next session (SR-5); "
-            f"edit config/config.yaml on the host, never here (DV-3).</p>"
-            f"<h2>Pending edits (diff)</h2><pre>{r.e(diff)}</pre>"
-            f"<h2>{r.e(c['file_name'])}</h2><pre>{r.e(c['file'])}</pre>"
-        )
-        return await html(req, ses, "Config (UI-18)", body)
+        diff = ("".join(difflib.unified_diff(snap_text.splitlines(True),
+                                             c["file"].splitlines(True), "effective today",
+                                             c["file_name"]))
+                if snap_text else "(today's snapshot stores only the config hash)")
+        body = (r.page_head("Config", f"Effective {r.e((snap or {}).get('effective_date'))} · "
+                            f"hash {r.e(((snap or {}).get('yaml_hash') or '')[:12])}. Edits apply "
+                            "next session (SR-5); edit config/config.yaml on the host (DV-3)")
+                + r.card("Pending edits (diff)", f"<pre>{r.e(diff)}</pre>")
+                + r.card(c["file_name"], f"<pre>{r.e(c['file'])}</pre>"))
+        return await html(req, ses, "Config", body)
 
     @page
     async def model(req: Request, ses: Session) -> Response:
         from trader.hardware import PROFILES
 
         llm = await data.ollama()
-        rows = [
-            {
-                "model": p.tag,
-                "weights_gb": p.weights_gb,
-                "vram_needed_gb_8k": p.vram_needed_gb(),
-                "tier": p.tier,
-                "use": p.use,
-            }
-            for p in PROFILES
-        ]
-        body = (
-            f"<p>Configured: <b>{r.e(llm.get('model'))}</b> · loaded "
-            f"{r.e(', '.join(llm.get('loaded') or []) or 'no')} · VRAM "
-            f"{r.num(llm.get('vram_gb'), 1)} GB · p95 {r.e(llm.get('p95_ms') or '—')} ms</p>"
-            f'{r.table(rows)}<p class="muted">The reference machine is an RTX 4060 Laptop '
-            f"8 GB (docs/HARDWARE.md). Change the model with ./run.sh model --apply.</p>"
-        )
-        return await html(req, ses, "Model and hardware (UI-19)", body)
+        rows = [{"model": p.tag, "weights_gb": p.weights_gb,
+                 "vram_needed_gb_8k": p.vram_needed_gb(), "tier": p.tier, "use": p.use}
+                for p in PROFILES]
+        vram = llm.get("vram_gb")
+        body = (r.page_head("Model and hardware", "Qwen on the local GPU; change it with "
+                            + r.code("./run.sh model --apply"))
+                + r.tiles([r.tile("Configured", r.e(llm.get("model"))),
+                           r.tile("Loaded", r.e(", ".join(llm.get("loaded") or []) or "no")),
+                           r.tile("VRAM", f"{vram:.1f} GB" if vram is not None else "—",
+                                  r.meter((vram or 0) / 8) + '<span class="muted small">of 8 GB'
+                                  '</span>'),
+                           r.tile("p95 today", f"{llm['p95_ms']} ms" if llm.get("p95_ms")
+                                  else "—", f'<span class="muted small">'
+                                  f'{r.e(llm.get("calls_today", 0))} calls</span>')])
+                + r.card("Models this system supports", r.table(rows),
+                         sub="Reference machine: RTX 4060 Laptop 8 GB (docs/HARDWARE.md)"))
+        return await html(req, ses, "Model", body)
 
     @page
     async def runs(req: Request, ses: Session) -> Response:
@@ -842,30 +745,20 @@ def create_app(
             rb = next((x for x in rs if x["name"] == b), None)
             if ra and rb:
                 keys = sorted(set(ra["summary"]) | set(rb["summary"]))
-                comp = r.table(
-                    [
-                        {"metric": k, a: ra["summary"].get(k), b: rb["summary"].get(k)}
-                        for k in keys
-                        if not isinstance(ra["summary"].get(k), dict | list)
-                    ]
-                )
-        rows = [
-            {
-                "run": x["name"],
-                **{k: v for k, v in x["summary"].items() if not isinstance(v, dict | list)},
-            }
-            for x in rs
-        ]
-        form = (
-            '<form method="get" action="/runs" class="inline"><input name="a" placeholder='
-            '"run A"><input name="b" placeholder="run B"><button>Compare</button></form>'
-        )
-        return await html(
-            req,
-            ses,
-            "Replay and backtest runs (UI-20)",
-            f"{form}{comp}{r.table(rows, empty='no runs yet (./run.sh replay)')}",
-        )
+                comp = r.card(f"{a} vs {b}", r.table([
+                    {"metric": k, a: ra["summary"].get(k), b: rb["summary"].get(k)}
+                    for k in keys if not isinstance(ra["summary"].get(k), dict | list)]))
+        rows = [{"run": x["name"], **{k: v for k, v in x["summary"].items()
+                                      if not isinstance(v, dict | list)}} for x in rs]
+        form = ('<form method="get" action="/runs" class="filters"><input name="a" '
+                'placeholder="run A"><input name="b" placeholder="run B"><button>Compare'
+                '</button></form>')
+        body = (r.page_head("Replay and backtest runs") + form + comp
+                + (r.card(f"{len(rows)} runs", r.table(rows)) if rows else r.card("Runs", r.empty(
+                    "No runs yet", "Run " + r.code("./run.sh replay 10") + " (synthetic days) or "
+                    + r.code("./run.sh backtest") + " (real history); results land in runs/.",
+                    icon="▶"))))
+        return await html(req, ses, "Runs", body)
 
     routes = [
         Route("/login", login_get),
@@ -877,6 +770,9 @@ def create_app(
         Route("/api/home", api_home),
         Route("/api/quote", api_quote),
         Route("/stock", stock),
+        Route("/market", market),
+        Route("/ratings", ratings_page),
+        Route("/news", news_page),
         Route("/ask", ask_get),
         Route("/ask", ask_post, methods=["POST"]),
         Route("/ask/clear", ask_clear, methods=["POST"]),
@@ -992,7 +888,7 @@ def payoff_svg(sug: Any, row: dict[str, Any]) -> str:
     marks = {"now": v.spot, "T1": v.t1, "invalidation": v.invalidation}
     return (
         charts.payoff(prices, exp_pl, exit_pl, marks, (v.spot - em, v.spot + em))
-        + '<p class="muted">Green: P/L per contract at expiry · blue: at the planned exit '
+        + '<p class="muted small">P/L per contract at expiry and at the planned exit '
         f"({r.ts(sug.exit_at, '%b %d %H:%M')}), Black-Scholes at entry IV (estimate). Shaded: "
         "1x expected move.</p>"
     )

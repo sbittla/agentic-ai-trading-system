@@ -93,7 +93,7 @@ class TradingStatus(Msg):
 class NewsItem(Msg):
     id: str
     ticker: str
-    source: Literal["finnhub", "edgar", "reddit", "recorded"]
+    source: Literal["finnhub", "edgar", "reddit", "recorded", "rss"]
     published_at: datetime
     headline: str
     text: str = ""
