@@ -257,13 +257,20 @@ cmd_ui() {   # cmd_ui SERVICE... : start one UI service and print where it is
   fi
 }
 
-svc_exec() {   # svc_exec SERVICE ARGS...: in the running container, else a one-off one
-  if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx "$1"; then
-    "${COMPOSE[@]}" exec -T "$@"
-  else
-    local s="$1"; shift
-    "${COMPOSE[@]}" run --rm -T --no-deps "$s" "$@"
-  fi
+stale_services() {   # running services whose container is older than the image just built
+  local svc cid img
+  for svc in "$@"; do
+    cid=$("${COMPOSE[@]}" ps -q --status running "$svc" 2>/dev/null) || continue
+    [ -n "$cid" ] || continue
+    img=$(docker inspect -f '{{.Config.Image}}' "$cid") || continue
+    [ "$(docker inspect -f '{{.Image}}' "$cid")" = "$(docker image inspect -f '{{.Id}}' "$img" 2>/dev/null)" ] \
+      || echo "$svc"
+  done
+}
+
+in_session() {   # true on weekdays 9:25-16:05 ET (do not restart trader-core then)
+  local now; now=$(TZ=America/New_York date +%u%H%M)
+  [ "${now:0:1}" -le 5 ] && [ "${now:1}" -ge 925 ] && [ "${now:1}" -le 1605 ]
 }
 
 cmd_backfill() {   # cmd_backfill [days]: data for the past week/month, then ideas (UI-33/34)
@@ -272,19 +279,38 @@ cmd_backfill() {   # cmd_backfill [days]: data for the past week/month, then ide
     || die "usage: ./run.sh backfill [days 1-365]"
   local sessions=$(( days * 5 / 7 )); [ "$sessions" -lt 1 ] && sessions=1
   check_docker
+  step "Images for the current code"
+  "${COMPOSE[@]}" build -q trader-core news-sentiment console \
+    || die "image build failed (docker/Dockerfile); see the output above"
   "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+  db_upgrade
+  step "Journal tables and grants (idempotent)"
+  "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader migrate \
+    || die "trader migrate failed: ./run.sh logs postgres"
+  # one-off containers from the fresh images, so a running older container cannot answer
   step "News, filings and analyst ratings: last $days days (news-sentiment)"
-  svc_exec news-sentiment trader backfill-news --days "$days" \
-    || warn "news backfill failed: ./run.sh logs news-sentiment (FINNHUB_TOKEN in .env.news?)"
+  "${COMPOSE[@]}" run --rm -T --no-deps news-sentiment trader backfill-news --days "$days" \
+    || warn "news backfill failed (FINNHUB_TOKEN in .env.news? network access to the feeds?)"
   step "Recap of the last $sessions sessions and the next-session watchlist (Telegram)"
-  svc_exec trader-core trader recap --days "$sessions" \
+  "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader recap --days "$sessions" \
     || die "recap failed (Alpaca keys in .env.core? ./run.sh connections)"
+  local stale; stale=$(stale_services trader-core news-sentiment console | xargs)
+  if [ -n "$stale" ]; then
+    if in_session && [[ " $stale " == *" trader-core "* ]]; then
+      warn "running on older code: $stale. Market is open, so not restarting trader-core now; run ./run.sh after 4:05 PM ET"
+    else
+      step "Restart on the new code: $stale"
+      # shellcheck disable=SC2086 # word splitting intended: one service per word
+      "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout "$WAIT_S" $stale \
+        || die "restart failed: ./run.sh logs <service>"
+    fi
+  fi
   step "Next-session ideas"
   if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx trader-core; then
     "${COMPOSE[@]}" exec -T trader-core trader plan
     ok "ideas and options ideas arrive on Telegram in a minute or two; console: http://localhost:8080/ideas"
   else
-    warn "trader-core is not running: ./run.sh, then ./run.sh backfill again (or send PLAN)"
+    warn "trader-core is not running: ./run.sh, then send PLAN on Telegram for the ideas"
   fi
 }
 
