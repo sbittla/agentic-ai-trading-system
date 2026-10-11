@@ -86,7 +86,7 @@ flowchart LR
 | `trader-core` → `notifier` | Outbox row + `NOTIFY outbound_msg` | Approvals, alerts, reports |
 | `notifier` → `trader-core` | Outbox row + `NOTIFY inbound_cmd` (only after SEC-1..3 checks) | `YES K7Q2`, `KILL`, `FLATTEN` + confirmation |
 | Any → `ollama` | HTTP JSON on the internal network | Structured Qwen calls |
-| `console` → `trader-core` | HTTP GET on the internal network (port 8081, never published) | Quotes, bars, checklist dry-run, scanner, latency, option chains |
+| `console` → `trader-core` | HTTP GET on the internal network (port 8081, never published) | Quotes, bars, checklist dry-run, scanner, latency, option chains, the options board and side-effect-free previews (UI-36) |
 | `console` → `trader-core` (actions) | Outbox row + `NOTIFY inbound_cmd`, source forced to `console` by the database guard | `KILL`, `YES <code>`, `FILLED NVDA 40 @ 190.05` |
 
 If Postgres is down, `trader-core` blocks new entries (no journal, no trade) while broker-side brackets keep protecting open positions.
@@ -109,15 +109,19 @@ agentic-ai-trading-system/
 │   ├── docker-compose.yml            # 6 services + replay and monitoring profiles
 │   └── postgres/init.sql             # roles: core_rw, news_rw, notifier_rw, readonly
 ├── src/trader/
-│   ├── cli.py                        # `trader run|replay|status|kill|flatten|validate-config|health`
+│   ├── cli.py                        # `trader run|replay|status|kill|flatten|validate-config|health|recap|backfill-news`
 │   ├── bus.py                        # in-process bus + Postgres outbox bridge
 │   ├── journal/                      # SQLAlchemy models, Alembic migrations
 │   ├── models/                       # Pydantic messages
-│   ├── agents/                       # a01_universe.py … a12_compliance.py
+│   ├── agents/                       # a01_universe.py … a12_compliance.py, recap.py (UI-34)
+│   ├── news/                         # sources.py, ratings.py (analyst actions, UI-33), names.py
+│   ├── options/                      # A13–A16 and the desk (OPTIONS_REQUIREMENTS.md)
+│   ├── console/                      # Owner Console: app.py routes, pages.py, render.py, charts.py
 │   ├── services/
 │   │   ├── core_main.py              # entry point for trader-core
 │   │   ├── news_main.py              # entry point for news-sentiment
-│   │   └── notifier_main.py          # entry point for notifier
+│   │   ├── notifier_main.py          # entry point for notifier
+│   │   └── core_api.py               # trader-core's internal GET-only API for the console
 │   ├── brokers/alpaca_adapter.py     # only module that talks to the Trading API
 │   ├── llm/ollama_client.py          # only module that talks to Qwen
 │   ├── prompts/
