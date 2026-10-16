@@ -4,7 +4,7 @@
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 188 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned).
+**Totals:** 204 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned; 16 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md)).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -301,6 +301,22 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `UI-34` | Recap of the last N sessions, next-session watchlist, ./run.sh backfill | trader-core, news, console | unit/test_ratings_recap.py, unit/test_console.py | — |
 | `UI-35` | Empty sections say why and what to do | console | unit/test_console.py | — |
 | `UI-36` | Options board (IV, IV rank, expected move, structures) and side-effect-free preview | options desk, core API, console | unit/test_options.py, unit/test_console.py | — |
+| `TS-1` | Deterministic engine: same bars, same ideas; no LLM computes a number or a signal | scanner | unit/test_scanner.py | — |
+| `TS-2` | Indicators identical to TA-Lib (SMA, EMA, RSI, MACD, BBANDS, ATR, ADX/DI, STOCH, OBV, ROC) | scanner.ta | unit/test_scanner.py | — |
+| `TS-3` | Candlestick patterns identical to TA-Lib; inside bar and NR7 fixtures | scanner.patterns | unit/test_scanner.py | — |
+| `TS-4` | Swing technique catalog (§3.1); shorts are the mirrored long rules | scanner.techniques | unit/test_scanner.py | — |
+| `TS-5` | Next-session day watchlist ranked by expected range, with levels and bias | scanner.inplay | unit/test_scanner.py | — |
+| `TS-6` | Context: market regime, trend, relative strength, RVOL, ADX | scanner.techniques | unit/test_scanner.py | — |
+| `TS-7` | Idea fields; T1 1.5R / T2 3R from the printed trigger and stop; R within 0.25-2.5 ATR | scanner.techniques | unit/test_scanner.py | — |
+| `TS-8` | Score: measured edge, overheated-trend penalty, room, small context weights; min_score/top_n | scanner.techniques, report | unit/test_scanner.py | — |
+| `TS-9` | One idea per ticker; other techniques listed as confluence | scanner.techniques | unit/test_scanner.py | — |
+| `TS-10` | No look-ahead: ideas for day D unchanged by later bars | scanner | unit/test_scanner.py | — |
+| `TS-11` | Walk-forward grading: next-session fills, no gap chase, stop first, T1 half + break-even, time exit, minute bars | scanner.evaluate | unit/test_scanner.py | — |
+| `TS-12` | Evaluation report, weak flag, shrunk edges file, day-watchlist lift | scanner.evaluate | unit/test_scanner.py | — |
+| `TS-13` | Optional Qwen summary dropped when it carries a number not in the data | scanner.explain | unit/test_scanner.py | — |
+| `TS-14` | trader scan / scan-eval, ./run.sh scan, Telegram; trader-core sends the scan at 16:20 ET | cli, trader-core | unit/test_scanner.py, replay/test_technical_scan_job.py | — |
+| `TS-15` | scanner config section with validated disabled names (optional :long/:short) | config | unit/test_scanner.py | — |
+| `TS-16` | Daily bars from the Parquet store; short or missing history skipped with the reason | scanner.data | unit/test_scanner.py | — |
 
 ## How to use
 

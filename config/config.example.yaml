@@ -146,3 +146,14 @@ options:                           # OPTIONS_REQUIREMENTS.md §10 (advisory: no 
   max_contracts: 10
   avoid_earnings: true
   max_alerts_per_window: 6
+
+scanner:                           # docs/SCANNER_REQUIREMENTS.md (advisory: ideas, no orders)
+  symbols: []                      # scanned on top of universe.tickers; fetch-history downloads them
+  min_score: 50                    # 50 = neutral; the measured edge and context move it
+  top_n: 5                         # swing ideas shown
+  in_play_top_n: 5                 # day watchlist size
+  min_samples: 30                  # filled ideas before a technique can be flagged weak
+  max_hold_days: 10                # swing time exit when grading
+  disabled: [REVERSAL_CANDLE:long, RSI2_REVERSION:short, TREND_PULLBACK:short, BEAR_FLAG]
+  eval_file: reports/scanner_eval.json   # written by `trader scan-eval`, read by the scan
+  alert_after_close: true          # trader-core sends the scan to Telegram at 16:20 ET

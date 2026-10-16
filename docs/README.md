@@ -41,6 +41,7 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Owner Console (built, http://localhost:8080): cockpit, market recap, analyst ratings, news, any-stock lookup, plain-language Q&A, approvals, controls, options board, journal |
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
+| [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md) | Technical scanner (`./run.sh scan`): why a TA-Lib-identical engine and not an LLM, the technique catalog, score, walk-forward grading, measured results |
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |
 | [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |
 | [RUNBOOK.md](RUNBOOK.md) | Setup (including `./run.sh backfill`), daily routine, commands (including `RECAP`), incident playbooks, go-live checklist |

@@ -317,6 +317,28 @@ class ServicesCfg(_Frozen):
     notifier_poll_sec: PollCfg = PollCfg()
 
 
+class ScannerCfg(_Frozen):
+    """Technical scanner (SCANNER_REQUIREMENTS.md TS-15). ``disabled`` holds technique names,
+    optionally with ":long" or ":short"; the defaults lost money in both halves of the
+    2025-2026 history (SCANNER_REQUIREMENTS.md §6). Re-check with ``trader scan-eval``."""
+
+    symbols: tuple[str, ...] = ()        # scanned on top of universe.tickers (fetch-history too)
+    min_score: int = 50
+    top_n: int = 5
+    in_play_top_n: int = 5
+    min_samples: int = 30
+    max_hold_days: int = 10
+    disabled: tuple[str, ...] = ("REVERSAL_CANDLE:long", "RSI2_REVERSION:short",
+                                 "TREND_PULLBACK:short", "BEAR_FLAG")
+    eval_file: str = "reports/scanner_eval.json"
+    alert_after_close: bool = True       # trader-core sends the scan at 16:20 ET
+
+    @field_validator("symbols", mode="before")
+    @classmethod
+    def _upper(cls, v: Any) -> Any:
+        return tuple(str(t).upper().strip() for t in v)
+
+
 class Config(_Frozen):
     mode: ModeCfg = ModeCfg()
     universe: UniverseCfg
@@ -339,6 +361,7 @@ class Config(_Frozen):
     in_play: InPlayCfg = InPlayCfg()
     tax: TaxCfg = TaxCfg()
     options: OptionsCfg = OptionsCfg()
+    scanner: ScannerCfg = ScannerCfg()
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
@@ -402,6 +425,19 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
     for name, g in u.correlated_groups.items():
         if g.max_open < 1:
             p.append(f"universe.correlated_groups.{name}.max_open >= 1")
+    # technical scanner (TS-15)
+    sc = cfg.scanner
+    if not 0 <= sc.min_score <= 100:
+        p.append("scanner.min_score: 0-100")
+    if sc.top_n < 1 or sc.in_play_top_n < 1 or sc.max_hold_days < 1 or sc.min_samples < 1:
+        p.append("scanner: top_n, in_play_top_n, max_hold_days and min_samples >= 1")
+    from trader.scanner.techniques import technique_names
+    known = set(technique_names())
+    for name in sc.disabled:
+        tech, _, side = name.partition(":")
+        if tech not in known or side not in ("", "long", "short"):
+            p.append(f"scanner.disabled: unknown technique {name!r} "
+                     f"(known: {', '.join(sorted(known))}; optional :long or :short)")
     # windows (TW-1)
     w = cfg.windows
     try:

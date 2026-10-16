@@ -11,6 +11,8 @@
     trader migrate | backup --daily-at 18:00 | fetch-history --days 730
     trader eval-prompts [--llm ollama|rules] | gate --record NAME --note TEXT
     trader validate-journal
+    trader scan [--date D] [--all] [--json] [--telegram] [--explain]   (technical scanner)
+    trader scan-eval [--from D] [--to D] [--minutes]   (walk-forward grading, TS-11)
 """
 
 from __future__ import annotations
@@ -540,7 +542,9 @@ def cmd_fetch_history(a: argparse.Namespace) -> int:
     end = date.today()
 
     async def go() -> None:
-        for sym in list(cfg.universe.tickers) + list(cfg.universe.context_symbols):
+        syms = dict.fromkeys([*cfg.universe.tickers, *cfg.universe.context_symbols,
+                              *cfg.scanner.symbols])
+        for sym in syms:
             daily = await hist.daily_bars(sym, end - timedelta(days=a.days), end)
             store.write("daily", sym, daily)
             mins = await hist.minute_bars(sym, datetime.now(UTC) - timedelta(days=a.minute_days),
@@ -548,6 +552,114 @@ def cmd_fetch_history(a: argparse.Namespace) -> int:
             store.write("minute", sym, mins, keep_days=a.minute_days + 2)
             print(f"{sym}: {len(daily)} daily, {len(mins)} minute bars")
     asyncio.run(go())
+    return 0
+
+
+def _scan_inputs(cfg: config_mod.Config) -> tuple[Path, dict[str, Any], Any]:
+    from trader.data.store import resolve_bars_path
+    from trader.scanner.data import load_daily
+
+    root = resolve_bars_path(cfg.storage.bars_path)
+    syms = list(dict.fromkeys([*cfg.universe.tickers, *cfg.scanner.symbols, "SPY"]))
+    series = load_daily(root, syms)
+    spy = series.pop("SPY", None)
+    return root, series, spy
+
+
+def cmd_scan(a: argparse.Namespace) -> int:
+    """TS-14: swing ideas and the next-session day watchlist from stored daily bars."""
+    from trader.notify.telegram import TelegramNotifier
+    from trader.scanner import report
+    from trader.scanner.evaluate import load_edges
+    from trader.scanner.inplay import in_play
+    from trader.scanner.techniques import scan
+
+    for f in a.env_file or []:
+        load_env_file(f)
+    cfg = _cfg(a.config)
+    sc = cfg.scanner
+    root, series, spy = _scan_inputs(cfg)
+    if not series:
+        print(f"no daily bars under {root}: run `trader fetch-history` (./run.sh fetch-history)")
+        return 1
+    asof = date.fromisoformat(a.date) if a.date else None
+    edges, edges_src = load_edges(sc.eval_file)
+    ideas, skipped = scan(series, spy, asof, frozenset(sc.disabled), edges)
+    plays = in_play(series, asof)
+    if a.json:
+        print(json.dumps(report.as_json(asof, ideas, plays, skipped), indent=1, default=str))
+        return 0
+    summary = None
+    if a.explain:
+        from trader.scanner.explain import explain
+
+        try:
+            shown = [d for d in ideas if d.score >= sc.min_score][:sc.top_n]
+            summary = asyncio.run(explain(_llm("ollama", cfg), shown,
+                                          plays[:sc.in_play_top_n]))
+        except Exception as exc:   # noqa: BLE001 - the scan never depends on the model
+            print(f"  Qwen summary skipped: {exc}")
+        if summary is None:
+            print("  Qwen summary unavailable or rejected (numbers not in the data)")
+    if asof is None and series:
+        asof = max(s.dates[-1] for s in series.values())
+    text = report.render(asof, ideas, plays, skipped,
+                         top_n=len(ideas) if a.all else sc.top_n, in_play_n=sc.in_play_top_n,
+                         min_score=0 if a.all else sc.min_score, summary=summary,
+                         edges_from=edges_src)
+    print(text)
+    if a.telegram:
+        token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+        if token and chat:
+            ok = asyncio.run(TelegramNotifier(token, chat).send(text, kind="scan"))
+        elif os.environ.get("DATABASE_URL"):     # trader-core: the notifier service delivers
+            from trader.bus import SqlOutbox
+            from trader.notify.whatsapp import OutboxNotifier
+
+            now = datetime.now(UTC)
+            asyncio.run(OutboxNotifier(SqlOutbox(_journal(create=False), "core"),
+                                       lambda: now).send(text, kind="scan"))
+            ok = True
+        else:
+            print("no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID and no DATABASE_URL: use "
+                  "--env-file .env.alerts, or ./run.sh scan --telegram (via the notifier)")
+            return 1
+        print("sent to Telegram" if ok else "Telegram send failed")
+        return 0 if ok else 1
+    return 0
+
+
+def cmd_scan_eval(a: argparse.Namespace) -> int:
+    """TS-11/TS-12: grade every past idea walk-forward; write the edges file the scan uses."""
+    from trader.scanner import report
+    from trader.scanner.data import MinuteBars
+    from trader.scanner.evaluate import edges_from, walk_forward
+    from trader.scanner.evaluate import report as eval_report
+    from trader.scanner.inplay import evaluate_in_play
+
+    cfg = _cfg(a.config)
+    sc = cfg.scanner
+    root, series, spy = _scan_inputs(cfg)
+    if not series:
+        print(f"no daily bars under {root}: run `trader fetch-history` (./run.sh fetch-history)")
+        return 1
+    start = date.fromisoformat(a.start) if a.start else None
+    end = date.fromisoformat(a.end) if a.end else None
+    graded = walk_forward(series, spy, start=start, end=end, max_hold=sc.max_hold_days,
+                          minutes=MinuteBars(root) if a.minutes else None)
+    rep = eval_report(graded, sc.min_samples)
+    ip = evaluate_in_play(series, sc.in_play_top_n if a.top is None else a.top, start, end)
+    print(report.eval_text(rep, ip))
+    print("\nGraded without scanner.disabled, so turned-off techniques keep being measured.")
+    if not a.no_write:
+        out = Path(sc.eval_file)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        from trader.timeutil import ET
+
+        payload = {"generated": datetime.now(ET).isoformat(), "from": a.start, "to": a.end,
+                   "edges": edges_from(graded), "report": rep, "in_play": ip}
+        out.write_text(json.dumps(payload, indent=1, default=str), encoding="utf-8")
+        print(f"wrote {out} (the scan's measured-edge input)")
     return 0
 
 
@@ -1015,6 +1127,21 @@ def build_parser() -> argparse.ArgumentParser:
     ie.add_argument("--prefix", default="", help="database role prefix, e.g. srb")
     ie.add_argument("--database", default="", help="database name (default <prefix>_trader)")
     ie.set_defaults(fn=cmd_init_env)
+    sc = sub.add_parser("scan", help="technical scanner: swing ideas + day watchlist (TS-14)")
+    sc.add_argument("--date", help="scan as of this session (default: latest stored bar)")
+    sc.add_argument("--all", action="store_true", help="every idea, ignoring min_score/top_n")
+    sc.add_argument("--json", action="store_true")
+    sc.add_argument("--telegram", action="store_true", help="also send the text to Telegram")
+    sc.add_argument("--explain", action="store_true", help="add a Qwen summary (TS-13)")
+    sc.add_argument("--env-file", action="append", help="load KEY=value file(s) first")
+    sc.set_defaults(fn=cmd_scan)
+    se = sub.add_parser("scan-eval", help="walk-forward grading of the scanner (TS-11/12)")
+    se.add_argument("--from", dest="start")
+    se.add_argument("--to", dest="end")
+    se.add_argument("--minutes", action="store_true", help="use stored minute bars")
+    se.add_argument("--top", type=int, default=None, help="day watchlist size to grade")
+    se.add_argument("--no-write", action="store_true", help="do not write scanner.eval_file")
+    se.set_defaults(fn=cmd_scan_eval)
     tc = sub.add_parser("telegram-chats", help="show chat ids that messaged the bot")
     tc.add_argument("--env-file", action="append")
     tc.set_defaults(fn=cmd_telegram_chats)

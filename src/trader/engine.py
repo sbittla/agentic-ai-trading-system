@@ -89,6 +89,7 @@ from trader.timeutil import ET, et_date, et_datetime, to_et
 log = structlog.get_logger(__name__)
 CHECKLIST_FAIL_PREFIXES = ("NT_CK", "NT_MF")    # the view's own checklist (OP-9)
 LLM_UNLOAD_AT = time(17, 45)   # after the daily/weekly/monthly reports
+SCAN_HISTORY_DAYS = 560         # calendar days of daily bars for the scanner (SMA200 + 52 weeks)
 D0 = Decimal(0)
 
 
@@ -235,6 +236,9 @@ class TradingEngine:
         # Live only: replays and backtests keep their recorded plan schedule (RP-2).
         if not self.sim_mode:
             sch.add("next_session_plan", time(16, 15), self.job_next_plan, until=time(23, 59))
+            if self.cfg.scanner.alert_after_close:
+                sch.add("technical_scan", time(16, 20), self.job_technical_scan,
+                        until=time(23, 59), retry_min=10)
             # after the 4:30-5:30 reports: free the GPU and ~3 GB RAM overnight; QW-4 reloads
             # the model at 8:55 and the news service loads it on its first call from 7:15
             sch.add("llm_unload", LLM_UNLOAD_AT, self._unload_llm, when="daily",
@@ -722,6 +726,40 @@ class TradingEngine:
         if callable(unload):
             ok = await unload()
             log.info("llm_unloaded", ok=ok, at=to_et(now).isoformat())
+
+    async def job_technical_scan(self, now: datetime) -> bool:
+        """TS-14: after the close, the technical scanner's swing ideas and next-session day
+        watchlist (SCANNER_REQUIREMENTS.md) to the owner. Advisory only: nothing is ordered."""
+        from trader.scanner.evaluate import load_edges
+        from trader.scanner.inplay import in_play
+        from trader.scanner.report import render
+        from trader.scanner.techniques import Series, scan
+
+        if self.history is None:
+            return True
+        sc, today = self.cfg.scanner, et_date(now)
+        series: dict[str, Series] = {}
+        for t in dict.fromkeys([*self.cfg.universe.tickers, *sc.symbols, "SPY"]):
+            try:
+                bars = await self.history.daily_bars(t, today - timedelta(days=SCAN_HISTORY_DAYS),
+                                                     today + timedelta(days=1))
+            except Exception as exc:   # noqa: BLE001
+                log.warning("scan_history_failed", ticker=t, error=str(exc))
+                continue
+            rows = [(et_date(b.ts), b.o, b.h, b.l, b.c, float(b.v)) for b in bars
+                    if et_date(b.ts) <= today]
+            if rows:
+                series[t] = Series.from_rows(t, rows)
+        spy = series.pop("SPY", None)
+        if not series or max(x.dates[-1] for x in series.values()) < today:
+            log.warning("scan_no_session_bar", day=today.isoformat())
+            return False                                  # today's bar not final yet: retry
+        edges, src = load_edges(sc.eval_file)
+        ideas, skipped = scan(series, spy, today, frozenset(sc.disabled), edges)
+        text = render(today, ideas, in_play(series, today), skipped, top_n=sc.top_n,
+                      in_play_n=sc.in_play_top_n, min_score=sc.min_score, edges_from=src)
+        await self.say(text, kind="scan")
+        return True
 
     async def job_window_end(self, now: datetime, window: str) -> None:
         """NT-1: no order in the window -> log 'no qualifying setup' with the closest

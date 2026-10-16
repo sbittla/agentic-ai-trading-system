@@ -12,6 +12,8 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 > Personal research project. Not financial or tax advice.
 
+**Technical scanner:** `./run.sh scan` ranks swing ideas from 9 classic techniques (pullbacks, breakouts, flags, squeezes, Connors RSI(2), MACD, reversal candles; long and short) and a next-session day-trading watchlist, with trigger, stop and targets. Indicator and candlestick math is identical to TA-Lib, and `./run.sh scan-eval` grades every technique on stored history. trader-core sends the scan to Telegram at 16:20 ET. See [docs/SCANNER_REQUIREMENTS.md](docs/SCANNER_REQUIREMENTS.md) for why this is a deterministic engine rather than an LLM, and for the measured results.
+
 **Just want day-trading price alerts on Telegram?** Run the standalone alerts bot: one ~50 MB
 container, no GPU, LLM or database. See [docs/ALERTS.md](docs/ALERTS.md):
 `./run.sh alerts`
@@ -22,11 +24,11 @@ Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIR
 
 ## Key documents
 
-- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
+- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Technical scanner](docs/SCANNER_REQUIREMENTS.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
 
 ## Status
 
-Milestones M0–M7 plus REQUIREMENTS 1.3, the options layer and the Owner Console are built and tested offline: 451 tests including the Postgres integration tests, with all 252 automated requirement IDs covered. Paper trading (M8) needs Alpaca and Finnhub keys, a Telegram bot (Reddit optional), and Qwen on the local NVIDIA GPU: follow [docs/ACCOUNT_SETUP.md](docs/ACCOUNT_SETUP.md). See [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
+Milestones M0–M7 plus REQUIREMENTS 1.3, the options layer and the Owner Console are built and tested offline: 485 tests including the Postgres integration tests, with all 268 automated requirement IDs covered. Paper trading (M8) needs Alpaca and Finnhub keys, a Telegram bot (Reddit optional), and Qwen on the local NVIDIA GPU: follow [docs/ACCOUNT_SETUP.md](docs/ACCOUNT_SETUP.md). See [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
 
 ## Run it (WSL, repo root)
 
