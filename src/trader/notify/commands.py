@@ -25,7 +25,8 @@ SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP", "PLAN",
         "ALERTS",            # AL-4: ALERTS ON|OFF
         "FILLED", "SOLD",    # CP-2: FILLED NVDA 40 @ 132.55 (owner's own fills)
         "OPT", "CHAIN", "IV", "OPTS", "OPTIONS",   # OP-13 (read-only, no orders)
-        "RECAP"}             # UI-34: RECAP [sessions] - past-window recap + watchlist
+        "RECAP",             # UI-34: RECAP [sessions] - past-window recap + watchlist
+        "SCAN"}              # TS-19: technical scan now (read-only, no orders)
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 APPROVAL = {"YES", "NO"}
 KNOWN = SAFE | DESTRUCTIVE | APPROVAL | {"CONFIRM"}

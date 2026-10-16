@@ -727,19 +727,23 @@ class TradingEngine:
             ok = await unload()
             log.info("llm_unloaded", ok=ok, at=to_et(now).isoformat())
 
-    async def job_technical_scan(self, now: datetime) -> bool:
-        """TS-14: after the close, the technical scanner's swing ideas and next-session day
-        watchlist (SCANNER_REQUIREMENTS.md) to the owner. Advisory only: nothing is ordered."""
+    async def job_technical_scan(self, now: datetime, latest: bool = False) -> bool:
+        """TS-14, TS-17..TS-19: after the close, the technical scanner's swing ideas (with
+        the decision checks from this engine's live state: earnings, locks, positions,
+        correlation, size) and the next-session day watchlist, to the owner and to
+        ``scanner.latest_file`` for the console. ``latest`` (SCAN command): scan the newest
+        stored session instead of waiting for today's. Advisory only: nothing is ordered."""
+        from trader.scanner.checks import apply_checks
         from trader.scanner.evaluate import load_edges
         from trader.scanner.inplay import in_play
-        from trader.scanner.report import render
+        from trader.scanner.report import as_json, render, write_latest
         from trader.scanner.techniques import Series, scan
 
         if self.history is None:
             return True
         sc, today = self.cfg.scanner, et_date(now)
         series: dict[str, Series] = {}
-        for t in dict.fromkeys([*self.cfg.universe.tickers, *sc.symbols, "SPY"]):
+        for t in dict.fromkeys([*self.cfg.universe.tickers, *sc.symbols, "SPY", "SMH"]):
             try:
                 bars = await self.history.daily_bars(t, today - timedelta(days=SCAN_HISTORY_DAYS),
                                                      today + timedelta(days=1))
@@ -751,15 +755,58 @@ class TradingEngine:
             if rows:
                 series[t] = Series.from_rows(t, rows)
         spy = series.pop("SPY", None)
-        if not series or max(x.dates[-1] for x in series.values()) < today:
+        smh = series.get("SMH")                             # sector check (MF-2 analogue)
+        if "SMH" not in self.cfg.universe.tickers:
+            series.pop("SMH", None)
+        last = max((x.dates[-1] for x in series.values()), default=None)
+        if last is None or (not latest and last < today):
             log.warning("scan_no_session_bar", day=today.isoformat())
-            return False                                  # today's bar not final yet: retry
+            return latest                                 # today's bar not final yet: retry
+        day = last if latest else today
         edges, src = load_edges(sc.eval_file)
-        ideas, skipped = scan(series, spy, today, frozenset(sc.disabled), edges)
-        text = render(today, ideas, in_play(series, today), skipped, top_n=sc.top_n,
+        ideas, skipped = scan(series, spy, day, frozenset(sc.disabled), edges)
+        ideas = apply_checks(ideas, self._scan_context(day, now, edges, smh))
+        plays = in_play(series, day)
+        text = render(day, ideas, plays, skipped, top_n=sc.top_n,
                       in_play_n=sc.in_play_top_n, min_score=sc.min_score, edges_from=src)
+        try:
+            write_latest(sc.latest_file, as_json(
+                day, ideas, plays, skipped, generated=now, source="trader-core",
+                edges_from=src, min_score=sc.min_score, top_n=sc.top_n,
+                context_note="Checks use trader-core's live state: earnings, locks, "
+                             "positions, equity and the risk rules."))
+        except OSError as exc:
+            log.warning("scan_write_failed", error=str(exc))
         await self.say(text, kind="scan")
         return True
+
+    def _scan_context(self, day: date, now: datetime, edges: dict[str, float] | None,
+                      smh: Any) -> Any:
+        """Decision-check inputs from the live state (TS-17, TS-18)."""
+        from trader.scanner.checks import base_context
+
+        ctx = base_context(self.cfg, asof=day, edges=edges, macro=self.macro, sector=smh,
+                           calendar=self.cal)
+        if self.ta.news and self.ta.news_available:      # else: earnings unknown
+            ctx.earnings = {t: nf.earnings_date for t, nf in self.ta.news.items()}
+        locks: dict[str, list[str]] = {}
+        for t in self.cfg.universe.tickers:
+            found = self.compliance.check_entry(t, now, "swing").locks_found
+            locks[t] = [f for f in found if not f.startswith("EARNINGS") and f != "UNIVERSE"]
+        ctx.locks = locks
+        open_pos = self.pm.open_positions()
+        ctx.held = frozenset(self.cfg.canonical(p.ticker) for p in open_pos)
+        if self.equity > 0:
+            exposure = sum((p.cost * p.qty_open / p.qty_filled for p in open_pos
+                            if p.qty_filled and p.route == "broker"), D0)
+
+            def sizer(entry: float, stop: float) -> tuple[int, float, str]:
+                qty, risk_usd, _, why = self.risk.size(
+                    Decimal(str(entry)), Decimal(str(stop)), self.equity, self.buying_power,
+                    exposure, planned=True)
+                return qty, float(risk_usd), why
+            ctx.sizer = sizer
+        return ctx
 
     async def job_window_end(self, now: datetime, window: str) -> None:
         """NT-1: no order in the window -> log 'no qualifying setup' with the closest
@@ -1935,6 +1982,18 @@ class TradingEngine:
                     await self.say(text, "recap")
                 self._spawn(_recap())
                 reply = f"RECAP of the last {days} sessions started: the watchlist follows"
+        elif action == "SCAN":                                                  # TS-19
+            if self.history is None:
+                reply = "SCAN needs the market-data history client"
+            else:
+                async def _scan() -> None:
+                    try:
+                        await self.job_technical_scan(self.now(), latest=True)
+                    except Exception as exc:   # noqa: BLE001
+                        log.warning("scan_failed", error=str(exc))
+                        await self.say(f"SCAN failed: {exc}", "command_reply")
+                self._spawn(_scan())
+                reply = "SCAN started: the technical scan follows"
         elif action == "PLAN":
             if self.next_session_day(self.now()) is None:
                 reply = "PLAN runs outside market hours; the 9:00/2:45 plans cover the session"

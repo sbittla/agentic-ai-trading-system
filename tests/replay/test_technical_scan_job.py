@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -60,3 +61,48 @@ async def test_after_close_scan_waits_for_the_final_bar(tmp_path: Path) -> None:
                                         for s in [*cfg.universe.tickers, "SPY"]})
     assert await h.engine.job_technical_scan(et(DAY, 16, 20)) is False     # retried later
     assert not [t for k, t in h.notifier.sent if k == "scan"]
+
+
+@pytest.mark.rule("TS-18")
+@pytest.mark.rule("TS-19")
+async def test_live_state_feeds_the_checks_and_the_console_file(tmp_path: Path) -> None:
+    import json
+    from decimal import Decimal
+
+    from trader.models.messages import Command
+
+    cfg = default_config()
+    latest = tmp_path / "technical_scan.json"
+    cfg = cfg.model_copy(update={"scanner": cfg.scanner.model_copy(update={
+        "eval_file": str(tmp_path / "none.json"), "latest_file": str(latest),
+        "min_score": 0})})
+    h = Harness(cfg, DAY, tmp_path)
+    syms = [*cfg.universe.tickers, "SPY", "SMH"]
+    h.engine.history = InMemoryHistory({s: daily(s, DAY, 320, k) for k, s in enumerate(syms)})
+    h.engine.equity = h.engine.buying_power = Decimal("25000")
+    now = et(DAY, 16, 20)
+    h.engine.compliance.add_lock("AAPL", "WASH", now - timedelta(days=1),
+                                 now + timedelta(days=20), "test lock")
+    ctx = h.engine._scan_context(DAY, now, None, None)
+    assert ctx.locks is not None and ctx.locks["AAPL"] and not ctx.locks["MSFT"]
+    assert ctx.held == frozenset() and ctx.sizer is not None
+    qty, risk_usd, why = ctx.sizer(100.0, 96.0)
+    assert qty == 31 and why == "risk"                           # RiskManager.size, 0.5%
+    assert await h.engine.job_technical_scan(now) is True
+    data = json.loads(latest.read_text(encoding="utf-8"))
+    assert data["source"] == "trader-core" and data["asof"] == DAY.isoformat()
+    for d in data["swing"]:
+        keys = {c["key"]: c for c in d["checks"]}
+        assert keys["locks"]["ok"] is not None and keys["held"]["ok"] is not None
+        if d["symbol"] == "AAPL" and d["side"] == "long":
+            assert keys["locks"]["ok"] is False and d["verdict"] == "blocked"
+    # SCAN from the console or Telegram scans the newest stored session (TS-19)
+    latest.unlink()
+    reply = await h.engine.handle_command(Command(name="SCAN", sender="console",
+                                                  received_at=now, source="console"))
+    assert reply.startswith("SCAN started")
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if latest.exists():
+            break
+    assert latest.exists()

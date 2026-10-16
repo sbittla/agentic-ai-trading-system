@@ -58,7 +58,8 @@ def home(st: dict[str, Any], *, plans: list[dict[str, Any]], ideas: list[dict[st
          pending: int, scanner: list[dict[str, Any]], recap_rows: list[dict[str, Any]],
          recap_at: datetime | None, ratings: list[dict[str, Any]], news: list[dict[str, Any]],
          events: list[dict[str, Any]], quotes: dict[str, dict[str, Any]], csrf: str,
-         now: datetime) -> str:
+         now: datetime, technical: dict[str, Any] | None = None) -> str:
+    from trader.console.technical import home_card
     src = st.get("source")
     notice = "" if src == "live" else (
         f'<p class="flash">trader-core API unavailable: showing its last snapshot '
@@ -175,6 +176,7 @@ def home(st: dict[str, Any], *, plans: list[dict[str, Any]], ideas: list[dict[st
                         + link("/controls", "Controls", "btn"))
             + k + market
             + card("Open positions", pos_html)
+            + home_card(technical)
             + '<div class="grid2">' + card("Today's plan", plan_html)
             + card("Next-day ideas", ideas_html, actions=link("/ideas", "All ideas →")) + "</div>"
             + '<div class="grid2">' + card("Latest analyst actions", rat_html,

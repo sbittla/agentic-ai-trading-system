@@ -103,6 +103,23 @@ class Frame:
         """Mirrored value back to a real price."""
         return round(v * self.side, 2)
 
+    def weekly_up(self, i: int) -> bool | None:
+        """Higher timeframe (TS-17): the week-to-date close above a rising 10-week average
+        of weekly closes (mirrored for shorts). None with fewer than 15 weeks."""
+        closes: list[float] = []
+        last: tuple[int, int] | None = None
+        for d, c in zip(self.dates[:i + 1], self.c[:i + 1], strict=True):
+            key = (d.isocalendar()[0], d.isocalendar()[1])
+            if key != last:
+                closes.append(float(c))
+                last = key
+            else:
+                closes[-1] = float(c)
+        if len(closes) < 15:
+            return None
+        w = ta.sma(np.asarray(closes, dtype=np.float64), 10)
+        return bool(closes[-1] > w[-1] and w[-1] > w[-5])
+
     def b(self, i: int) -> float:
         return 0.05 * float(self.atr[i])
 
@@ -162,6 +179,12 @@ class Idea:
     confluence: list[str] = field(default_factory=list)
     factors: dict[str, int] = field(default_factory=dict)
     index: int = -1          # bar index in the series (evaluation)
+    context: dict[str, Any] = field(default_factory=dict)   # inputs of the decision checks
+    checks: list[dict[str, Any]] = field(default_factory=list)   # TS-17 (scanner.checks)
+    verdict: str | None = None       # go | caution | blocked | watch | options (TS-18)
+    shares: int | None = None        # TS-18 size from the risk rules
+    risk_usd: float | None = None
+    plan: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         d = {k: v for k, v in self.__dict__.items() if k != "index"}
@@ -342,6 +365,18 @@ def _score(x: Frame, i: int, tech: Technique, cand: Cand, others: int, edge: flo
     return max(0, min(100, 50 + sum(f.values()))), f, room
 
 
+def _context(x: Frame, i: int, t: Technique) -> dict[str, Any]:
+    """Inputs of the decision checks, in the trade's direction."""
+    mk = x.spy_up[i]
+    rs = x.rs63[i]
+    return {"uptrend": x.uptrend(i), "weekly_up": x.weekly_up(i),
+            "market_up": None if math.isnan(mk) else bool(mk > 0),
+            "rs63": None if math.isnan(rs) else round(float(rs), 2),
+            "adx": None if math.isnan(x.adx[i]) else round(float(x.adx[i]), 1),
+            "rvol": round(float(x.v[i] / x.vol50[i]), 2) if x.vol50[i] > 0 else None,
+            "reversion": t.kind == "reversion"}
+
+
 def frames(s: Series, spy: Series | None) -> tuple[Frame, Frame]:
     return Frame(s, spy, +1), Frame(s, spy, -1)
 
@@ -379,7 +414,8 @@ def ideas_at(fr: tuple[Frame, Frame], i: int, disabled: frozenset[str] = frozens
                 entry=cand.entry, trigger=trig, stop=stop,
                 t1=round(trig + x.side * m1 * r, 2), t2=round(trig + x.side * m2 * r, 2),
                 risk=r, room_r=None if room is None else round(room, 1), score=score,
-                why=cand.why, confluence=same, factors=factors, index=i))
+                why=cand.why, confluence=same, factors=factors, index=i,
+                context=_context(x, i, t)))
     return _dedup(out) if dedup else out
 
 
