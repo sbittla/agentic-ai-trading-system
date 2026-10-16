@@ -1,6 +1,6 @@
 # Build Status
 
-**As of:** October 15, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
+**As of:** October 16, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
 
 Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (small live) need the owner's accounts, keys and the local model, and real trading days.
 
@@ -22,6 +22,8 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 | Analyst ratings, recap, backfill (UI-33..36) | Done (offline) | `news/ratings.py` (Finnhub upgrade-downgrade + Yahoo/Google News RSS headline rules, `analyst_actions`), `agents/recap.py` (`trader recap`, `RECAP N`, `market_recap`), `NewsAgent.backfill` (`trader backfill-news`), `./run.sh backfill [days]`, console Market recap / Analyst ratings / News pages, options board and preview |
 | Trading-decision checks and Technical scan page (TS-17..TS-19, UI-37) | Done | `scanner/checks.py` (hard/soft checks, RiskManager sizing, verdicts, bearish ideas options-only), `SCAN` command, `console/technical.py` (page + Today card); coverage map in [TRADING_DECISIONS.md](TRADING_DECISIONS.md) |
 | Technical scanner (SCANNER_REQUIREMENTS.md) | Done, advisory | `scanner/` (TA-Lib-identical indicators and candlestick patterns, 9 swing techniques long and short, day watchlist, score with measured edge, walk-forward grading), `trader scan` / `scan-eval`, `./run.sh scan`, trader-core 16:20 ET Telegram scan |
+| Gap review against professional practice (GAP_REVIEW.md, REQUIREMENTS 1.4) | Done | `portfolio.py` + `agents/a07_risk.py` (PF-1..PF-4: open risk, measured correlation, beta exposure, swing gap stress), `agents/a08_execution.py` `order_sanity` (OC-1..OC-4), `metrics.py` + `a11_reporter.py` (PA-1..PA-3: Sharpe, Sortino, Calmar, SQN, SPY benchmark), `metrics.py` + `backtest/walkforward.py` (SV-1..SV-3: bootstrap interval, Monte Carlo drawdown, statistical pass bar) |
+| News catalysts (NEWS_CATALYST_REQUIREMENTS.md, A17) | Done, advisory; uncalibrated until backfilled and graded | `catalyst/` (stories, rules + Qwen typing, strength, social, event-study outlook, confluence, position view, walk-forward grading and gates), A3 enrichment and fundamentals (`catalyst/collect.py`), trader-core jobs and `CATALYST` command, `trader catalyst` / `catalyst-eval` / `backfill-catalysts`, console Catalysts page |
 | M8 Backtest + paper | Ready to start | Needs keys, history download, and 20+ paper days |
 | M9 Small live | Not started | After the M8 gates |
 

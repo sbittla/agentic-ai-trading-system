@@ -51,7 +51,7 @@ Qwen3 14B needs about 10.9 GB, so on this card part of it would run on the CPU. 
 | --- | --- | --- |
 | Windows, browser and other apps (measured) | ~18 GB | 13.5 GB was available before starting Docker |
 | WSL2 VM cap (`.wslconfig`) | 12 GB + 8 GB swap | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) §1.1 step 4. Without a cap the VM grabs memory and Docker Desktop crashed |
-| ↳ news-sentiment (PyTorch + FinBERT) | 1.5–2 GB | CPU inference, threads capped at 4 (`OMP_NUM_THREADS`) |
+| ↳ news-sentiment (PyTorch + FinBERT, FinTwitBERT, MiniLM) | 2–2.6 GB | CPU inference, threads capped at 4 (`OMP_NUM_THREADS`); the two catalyst models add about 0.6 GB (ADR-017) |
 | ↳ trader-core | 0.3–0.6 GB | |
 | ↳ ollama (host side; weights are in VRAM) | 1–2 GB | |
 | ↳ postgres, notifier, backup | ~0.5 GB | |

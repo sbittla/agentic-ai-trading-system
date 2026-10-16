@@ -90,3 +90,12 @@ class ReportNarrativeOut(_LlmOut):
     what_went_well: str = Field(max_length=500)
     what_to_fix: str = Field(max_length=500)
     tomorrow_focus: str = Field(max_length=500)
+
+
+class CatalystTypeOut(_LlmOut):
+    """NC-5: Qwen labels a story no rule typed; it never sets a number."""
+
+    ticker: str
+    ctype: Literal["EARNINGS", "GUIDANCE", "ANALYST", "M_AND_A", "PRODUCT", "REGULATORY_LEGAL",
+                   "MANAGEMENT", "CAPITAL", "INSIDER", "MACRO_SECTOR", "OTHER"]
+    direction: Literal["positive", "negative", "mixed"]

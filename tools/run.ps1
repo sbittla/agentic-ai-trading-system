@@ -24,6 +24,9 @@
 #   run.cmd scan [--telegram] [--date D] [--all]   technical scanner: swing ideas + day
 #                           watchlist from stored daily bars (docs/SCANNER_REQUIREMENTS.md)
 #   run.cmd scan-eval       grade every technique walk-forward; writes reports/scanner_eval.json
+#   run.cmd catalyst [TICKER] [--telegram]   news catalysts: strength, 1d-1m outlook, view
+#   run.cmd catalyst-eval   grade past outlooks walk-forward; writes reports/catalyst_eval.json
+#   run.cmd backfill-catalysts [days]   once: a year of news + bars, then catalyst-eval
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -325,6 +328,30 @@ function Test-InSession {   # true on weekdays 9:25-16:05 ET (do not restart tra
     return ($day -ge 1 -and $day -le 5 -and $hm -ge 925 -and $hm -le 1605)
 }
 
+function Invoke-BackfillCatalysts([object[]]$Rest) {   # NC-30: event-study history, then grading
+    $days = if ($Rest.Count -gt 0) { [string]$Rest[0] } else { '365' }
+    if ($days -notmatch '^\d+$' -or [int]$days -lt 30 -or [int]$days -gt 730) { die 'usage: run.cmd backfill-catalysts [days 30-730]' }
+    Test-Docker
+    step 'Images for the current code'
+    & docker @Compose build -q trader-core news-sentiment console
+    Assert-Native 'image build failed (docker/Dockerfile); see the output above'
+    & docker @Compose up -d --wait postgres | Out-Null
+    Update-Database
+    step 'Journal tables and grants (idempotent)'
+    & docker @Compose run --rm -T --no-deps trader-core trader migrate
+    Assert-Native 'trader migrate failed: run.cmd logs postgres'
+    step 'Daily bars for the history tickers (trader-core)'
+    & docker @Compose run --rm -T --no-deps trader-core trader fetch-history --days ([int]$days + 420) --daily-only
+    if ($LASTEXITCODE -ne 0) { warn 'bar download failed (Alpaca keys in .env.core?); grading uses what is stored' }
+    step "News, filings and fundamentals: last $days days (news-sentiment; can take an hour)"
+    & docker @Compose run --rm -T --no-deps news-sentiment trader backfill-catalysts --days $days
+    if ($LASTEXITCODE -ne 0) { warn 'catalyst news backfill failed (FINNHUB_TOKEN in .env.news?)' }
+    step 'Walk-forward grading (trader-core)'
+    & docker @Compose run --rm -T --no-deps trader-core trader catalyst-eval --days $days
+    Assert-Native 'catalyst-eval failed: see the output above'
+    ok 'done: run.cmd catalyst, or the console Catalysts page'
+}
+
 function Invoke-Backfill([object[]]$Rest) {   # data for the past week/month, then ideas (UI-33/34)
     $days = if ($Rest.Count -gt 0) { [string]$Rest[0] } else { '30' }
     if ($days -notmatch '^\d+$' -or [int]$days -lt 1 -or [int]$days -gt 365) { die 'usage: run.cmd backfill [days 1-365]' }
@@ -449,7 +476,8 @@ switch ($cmd) {
         exit $LASTEXITCODE
     }
     'backfill' { Invoke-Backfill $rest; exit 0 }
-    { $_ -in 'scan', 'scan-eval' } {
+    'backfill-catalysts' { Invoke-BackfillCatalysts $rest; exit 0 }
+    { $_ -in 'scan', 'scan-eval', 'catalyst', 'catalyst-eval' } {
         Test-Docker   # trader-core has the bar store; --telegram goes via the notifier
         & docker @Compose run --rm -T --no-deps trader-core trader $cmd @rest
         exit $LASTEXITCODE

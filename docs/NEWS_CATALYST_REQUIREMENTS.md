@@ -1,6 +1,6 @@
 # News Catalyst Requirements (NC)
 
-**Version:** 0.1 draft (October 16, 2026) · Status: **for owner review, not built** · Companion to [REQUIREMENTS.md](REQUIREMENTS.md), [DATA_SPEC.md](DATA_SPEC.md), [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md) and [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md)
+**Version:** 1.0 (October 16, 2026) · Status: **built, advisory; outlooks stay UNCALIBRATED until the NC-34 gate passes** · Gaps vs desk practice: [GAP_REVIEW.md](GAP_REVIEW.md) · Companion to [REQUIREMENTS.md](REQUIREMENTS.md), [DATA_SPEC.md](DATA_SPEC.md), [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md) and [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md)
 
 The news catalyst feature answers, per stock:
 
@@ -18,6 +18,8 @@ It is **advisory**. It produces views, ranges and suggested plans; it never plac
 ./run.sh catalyst-eval            # walk-forward grading of past outlooks; writes reports/catalyst_eval.json
 ./run.sh backfill-catalysts 365   # one-time history for calibration (§6)
 ```
+
+On Windows, `run.cmd` takes the same commands. In Telegram or the console, `CATALYST [TICKER]` runs it on request. trader-core runs it at 8:45, 10:45, 12:15 and 13:45 ET, at 16:25 (the only run that may alert), grades at 16:40, and re-grades the whole history every Sunday at 18:30.
 
 ### What the answer looks like (illustrative numbers, not a forecast)
 
@@ -79,7 +81,7 @@ The task splits into reading text, which suits language models, and estimating m
 | Story grouping and novelty | **New: `sentence-transformers/all-MiniLM-L6-v2`** (Apache-2.0, 80 MB, CPU) | **Add.** Groups 14 headlines about one earnings report into one story, and tells a new story from a rehash. Novelty is one of the strongest strength factors |
 | Catalyst type and short explanation | **Qwen3 8B** (existing, Ollama) | **Keep, new prompt `prompts/catalyst/v1.md`.** Rules (regex: "beats", "guidance", "FDA", "acquire", 8-K item numbers) classify first; Qwen handles only what rules can't, with schema-constrained JSON (QW-2). It also writes the plain-English "why" from computed numbers (like TS-13) |
 | Move probability and ranges | **No ML model in phase 1.** Implied move (A13) and realized volatility give the width; a pooled, shrunk **event study** (§5.6) gives the tilt | **Chosen.** Explainable, works with little data, can be graded. Daily stock returns are mostly noise; a complex model would fit the noise |
-| Same, phase 3 | **LightGBM quantile regression** (MIT, CPU) on the §5.3–§5.5 features | **Optional.** Built only if it beats the phase-1 method on walk-forward grading (§6, NC-33). Otherwise it stays off |
+| Same, phase 6 | **LightGBM quantile regression** (MIT, CPU) on the §5.3–§5.5 features | **Not built (October 16, 2026).** There is no graded history to train on yet. Build it only if it beats the event study on walk-forward grading (§6, NC-33) |
 | Price forecasting foundation models (Chronos, TimesFM, Lag-Llama) | — | **Rejected.** They forecast from the price series alone, ignore the news, and show no reliable edge on single-stock daily returns. They'd also need the GPU |
 | Bigger finance LLM (Fin-R1, FinGPT, Qwen3 14B) | — | **Rejected.** Doesn't fit 8 GB alongside the trading agents (HARDWARE.md §2); reading text better doesn't make price numbers better |
 | Paid sentiment APIs | — | **Out of scope** (ADR-003) |
@@ -194,6 +196,19 @@ Two parts, split by container: **A3 is extended** (news-sentiment) to build stor
 | `NC-25` | **Vehicle** (suggestion only): bullish → stock (long, ADR-008) or a call debit spread when IV rank < 60; bearish → put debit spread (ADR-015), never a short sale; neutral → nothing, or "wait for confirmation" when the day-0 reaction disagrees with the news. Event risk inside the horizon → defined-risk only. Option structures come from A14 and pass A15, unchanged. |
 | `NC-26` | **Plan numbers by code**: entry trigger above the day-0 high (bullish) or below the day-0 low (bearish), or the scanner's trigger if a scanner idea agrees; invalidation at the other side of the day-0 range ± 0.25 ATR; T1/T2 at 1.5R/3R, capped at the horizon's 90th percentile move; size from the existing sizer and risk limits (`risk:` section, 0.5% per trade), never from the model. Wash-sale (WS) and compliance (A12) checks run as for any idea. |
 
+### 5.7a Research practice (added after [GAP_REVIEW.md](GAP_REVIEW.md))
+
+| ID | Requirement |
+| --- | --- |
+| `NC-41` | **Point in time.** News published at or after the 4 PM close belongs to the next session (its day 0). A run as of a past date sees only items published before that date ends. |
+| `NC-42` | **One event per ticker per day 0** (the strongest story) in the event study; the evaluation states that overlapping horizons on one ticker are not independent. |
+| `NC-43` | **Abnormal return** = return − beta × SPY return, with a 120-session beta from the bars before day 0. |
+| `NC-44` | When an adjustment applies, the range **shape** comes from past events that share the flag (≥ 30), not from the mixed population. |
+| `NC-45` | Items flagged as instruction-like by A3 (A3-4) never become stories. |
+| `NC-46` | Stories store their item ids, whether a rule or the model typed them, and the prompt version. |
+| `NC-47` | **Relevance.** An item counts only if its headline or first 400 characters name the company (symbol or a name in `news/names.py`). Feeds file articles about other companies under a ticker; on October 16, 2026, 60% of stored items failed this check. Filings, rating actions and insider forms always count. |
+| `NC-48` | **Non-events.** Previews ("to report", "what to expect"), opinion and listicles ("should you buy", "3 reasons", "could double", "may") are typed OTHER, with no materiality points: the event, if any, comes later. |
+
 ### 5.8 Outputs
 
 | ID | Requirement |
@@ -217,9 +232,11 @@ Two parts, split by container: **A3 is extended** (news-sentiment) to build stor
 
 | Agent | Container | Type | Runs (ET) | Does |
 | --- | --- | --- | --- | --- |
-| **A3** (extended) | news-sentiment | Code + FinBERT + **social model** + **MiniLM** + Qwen (types only) | Every 15 min (as today); social every 30 min | Stories, novelty, type, social daily numbers (NC-1..6, NC-11..15) |
-| **A17 News catalyst** (new) | trader-core | Code; Qwen for wording only | 8:45 AM (overnight news), every 30 min in market hours for stories with new items, 4:20 PM full run, and on request | Strength, confluence, outlook, stance and plan (NC-7..10, NC-16..26); journals and hands options views to A14 |
-| **A17 grader** | trader-core | Code | 4:30 PM daily | Grades ended horizons (NC-35); weekly gate check (NC-34) |
+| **A3** (extended) | news-sentiment | Code + FinBERT + **social model** + **MiniLM** | Every 15 min (as today); fundamentals at 7:30 AM | Embeddings per item (NC-1), social scores per post (NC-11), earnings, analyst consensus, Form 4, Reg SHO short volume (NC-16) |
+| **A17 News catalyst** (new) | trader-core | Code; Qwen types stories rules miss (≤ 20 per run) | 8:45, 10:45, 12:15, 13:45 and 16:25 ET, and on request (`CATALYST`) | Stories and novelty (NC-1..6), strength (NC-7..10), social indicator (NC-11..15), confluence, outlook, stance and plan (NC-16..26) |
+| **A17 grader** | trader-core | Code | 16:40 daily; Sundays 18:30 full walk-forward | Grades ended horizons (NC-35); feature and alert gates (NC-33, NC-34) |
+
+The 16:25 run sends Telegram alerts only when `catalyst.telegram` is on **and** the gate passes. Bearish views are described for puts; A14 builds the actual structure on request (OP-13).
 
 No new container. Nothing from A3 or A17 reaches the order path: A17 output is ideas and alerts, as with the scanner (TS) and options (A14) flows.
 
@@ -227,12 +244,15 @@ No new container. Nothing from A3 or A17 reaches the order path: A17 output is i
 
 | Table | Writer | Columns (main) |
 | --- | --- | --- |
-| `news_stories` | news-sentiment | story_id, ticker, first_seen, last_seen, type, direction, type_source (rule/model), prompt_version, novelty, items, sources, headline |
-| `news_story_items` | news-sentiment | story_id, item_id |
-| `social_daily` | news-sentiment | date, ticker, source, mentions, mention_z, net_sentiment, bull_share, authors, crowded |
-| `catalyst_outlooks` | trader-core | outlook_id, as_of, ticker, story_id, strength, factors_json, confluence_json, horizons_json (P(up), median, p10, p90, n, confidence per h), stance, vehicle, plan_json, calibrated |
-| `catalyst_grades` | trader-core | outlook_id, horizon, realized_ret, realized_excess, in_range, up |
-| `fundamentals_daily` | news-sentiment | date, ticker, eps_surprise_pct, rec_trend_json, next_earnings, short_interest_pct, days_to_cover, insider_net_90d |
+| `news_items` (+2 columns) | news-sentiment | kind (news, 8-K, rating, post), publisher (the outlet behind the feed, NC-3) |
+| `news_embeddings` | news-sentiment | item_id, ticker, model, vec (base64 float16) |
+| `social_posts` | news-sentiment | item_id, ticker, ts, source, author (salted hash), score, tag, length, text_hash, model |
+| `fundamentals_daily` | news-sentiment | date, ticker, kind (earnings, recommendation, earnings_calendar, insider, short_volume, apewisdom), json |
+| `news_stories` | trader-core | story_id, ticker, first_seen, last_seen, ctype, direction, type_source, prompt_version, novelty, items, sources, sentiment, strength, headline, item_ids |
+| `catalyst_outlooks` | trader-core | outlook_id, ts, as_of, ticker, story_id, strength, label, direction, ctype, factors, confluence, social, horizons, stance, vehicle, plan, calibrated, text |
+| `catalyst_grades` | trader-core | outlook_id, as_of, ticker, horizon, p_up, p10, p90, median, stance, realized, realized_excess, in_range, up, graded_at |
+
+The social indicator is computed from `social_posts` when needed, so there is no `social_daily` table. `trader migrate` adds the two `news_items` columns to existing databases (additive only).
 
 Grants follow DATA_SPEC §3: the console role reads all of these; `trader migrate` applies them.
 
@@ -252,7 +272,10 @@ Grants follow DATA_SPEC §3: the console role reads all of these; `trader migrat
 catalyst:
   enabled: true
   horizons: [1, 5, 10, 21]          # sessions
-  story_join: 0.75                  # NC-1 cosine similarity
+  story_join: 0.75                  # NC-1 cosine similarity (sentence embeddings)
+  story_join_hash: 0.45             # NC-1 the same with word-hash vectors (no model)
+  story_window_h: 72
+  novelty_days: 30                  # NC-2
   min_strength: 40                  # NC-4
   alert_strength: 60                # NC-28
   half_life_h: 24                   # NC-7
@@ -263,18 +286,25 @@ catalyst:
   social_sources: [reddit]          # add stocktwits, apewisdom after verification
   telegram: false                   # NC-28; the gate (NC-34) must also pass
   history_universe: extended        # universe | extended (adds the 40 names in news/names.py)
+  adjustments: []                   # NC-20: informational; catalyst-eval decides (NC-33)
+  gate_min_graded: 100              # NC-34
+  gate_coverage: [0.75, 0.85]
+  embed_model: sentence-transformers/all-MiniLM-L6-v2
+  social_model: StephanAkkerman/FinTwitBERT-sentiment
 ```
+
+Source weights (NC-3) are `catalyst.source_weights` (publisher substring → weight) with `default_source_weight: 0.6`. The adjustments actually used come from `reports/catalyst_eval.json`, written by the walk-forward, not from this key.
 
 ## 11. Phases
 
-| Phase | Builds | Done when |
+| Phase | Builds | Status (October 16, 2026) |
 | --- | --- | --- |
-| **1. Stories and strength** | NC-1..10, `news_stories`, MiniLM, rules + Qwen typing, console list, CLI | Strength and type show on the console for live news |
-| **2. History and outlook** | NC-17..23, NC-30..33, event study, `catalyst-eval` | The first walk-forward report exists with coverage and Brier per horizon |
-| **3. Social** | NC-11..15, social model, Reddit (and Stocktwits/ApeWisdom if verified) | `social_daily` fills daily; agreement and crowding shown |
-| **4. Confluence and position** | NC-16, NC-24..26, `fundamentals_daily`, hand-off to A14 | Each outlook shows confluence and a plan sized by the existing sizer |
-| **5. Alerts and gate** | NC-28, NC-34, NC-35, `/catalyst` | Alerts send only while the gate passes |
-| **6. Optional ML** | LightGBM quantile model | Kept only if it beats phase 2 on walk-forward grading |
+| **1. Stories and strength** | NC-1..10, `news_stories`, MiniLM, rules + Qwen typing, console list, CLI | Built |
+| **2. History and outlook** | NC-17..23, NC-30..33, event study, `catalyst-eval` | Built; needs `./run.sh backfill-catalysts 365` once to have history |
+| **3. Social** | NC-11..15, social model, Reddit (and Stocktwits/ApeWisdom if verified) | Built; **no data until Reddit keys are set** |
+| **4. Confluence and position** | NC-16, NC-24..26, `fundamentals_daily`, sizing by the live risk rules | Built |
+| **5. Alerts and gate** | NC-28, NC-34, NC-35, `CATALYST` command | Built; alerts stay off until the gate passes and `catalyst.telegram` is on |
+| **6. Optional ML** | LightGBM quantile model | Not built: no graded history to train on yet |
 
 ## 12. Out of scope
 
@@ -283,11 +313,11 @@ catalyst:
 - Intraday tick-by-tick news trading; the playbook keeps the live day entries.
 - Price-target forecasts beyond 1 month.
 
-## 13. Open questions for the owner
+## 13. Owner decisions (October 16, 2026: the proposed defaults)
 
-1. **Reddit keys**: social analysis needs `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` in `.env.news` (ACCOUNT_SETUP.md). Will you create a Reddit app? Without it, social is limited to mention counts from ApeWisdom (if verified) or is absent.
-2. **Which stocks**: only the universe tickers (13 today), or any ticker on request (`catalyst AMD`)? On-request analysis works, but tickers outside the universe have less history and lower confidence.
-3. **History**: is a one-time backfill of 1 year of news acceptable (~2–3 hours inside the Finnhub free limit)? Calibration needs it.
-4. **Alerts**: keep Telegram catalyst alerts off until the gate passes (proposed), or send them labelled UNCALIBRATED from day one?
-5. **Default horizon** for the stance: let the code pick the best horizon (proposed), or fix one (for example 1 week, matching swing trades)?
-6. **Stocktwits and ApeWisdom**: OK to use them if their terms allow programmatic use?
+1. **Reddit keys:** still to be created. Until `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are in `.env.news`, the social indicator says "no data" and strength leaves out its 5 social points.
+2. **Stocks:** the universe by default; any ticker on request (`./run.sh catalyst AMD`, `CATALYST AMD`). History uses the universe plus the 40 large caps in `news/names.py` (`catalyst.history_universe: extended`).
+3. **History:** a one-time `./run.sh backfill-catalysts 365`.
+4. **Alerts:** off until the gate passes (NC-34) **and** `catalyst.telegram: true`.
+5. **Horizon:** the code picks the horizon with the largest typical move for its uncertainty.
+6. **Stocktwits and ApeWisdom:** built, off by default (`catalyst.social_sources: [reddit]`) until their terms are confirmed.

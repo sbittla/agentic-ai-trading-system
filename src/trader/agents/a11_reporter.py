@@ -25,7 +25,16 @@ from trader.interfaces import LLMClient
 from trader.journal import schema as s
 from trader.journal.store import SqlJournal
 from trader.llm.base import load_prompt
-from trader.metrics import by, max_drawdown_pct, standards, summarize
+from trader.metrics import (
+    benchmark,
+    by,
+    daily_returns,
+    max_drawdown_pct,
+    risk_adjusted,
+    standards,
+    statistical_gate,
+    summarize,
+)
 from trader.models.llm_schemas import ReportNarrativeOut
 from trader.timeutil import ET, et_datetime, to_et
 
@@ -120,6 +129,36 @@ class Reporter:
                                   .order_by(s.equity.c.id))
         return [float(r["equity"]) for r in rows]
 
+    def daily_equity(self, first: date, last: date) -> list[float]:
+        """End-of-day equity per session from ``daily_metrics`` (PA-1)."""
+        rows = self.journal.query(select(s.daily_metrics.c.equity).where(and_(
+            s.daily_metrics.c.date >= first, s.daily_metrics.c.date <= last))
+            .order_by(s.daily_metrics.c.date))
+        return [float(r["equity"]) for r in rows if r["equity"] is not None]
+
+    def spy_closes(self, first: date, last: date) -> tuple[float | None, float | None]:
+        """PA-2: SPY close before ``first`` and the latest close up to ``last``, from the
+        level map (``prior_close`` of each session)."""
+        rows = self.journal.query(select(s.levels.c.date, s.levels.c.prior_close).where(and_(
+            s.levels.c.ticker == "SPY", s.levels.c.date >= first,
+            s.levels.c.date <= last + timedelta(days=4))).order_by(s.levels.c.date))
+        closes = [float(r["prior_close"]) for r in rows if r["prior_close"]]
+        return (closes[0], closes[-1]) if len(closes) >= 2 else (None, None)
+
+    def analytics(self, first: date, last: date, trades: list[dict[str, Any]],
+                  history: list[dict[str, Any]]) -> dict[str, Any]:
+        """PA-1..PA-3 and SV-1..SV-3 for a report period."""
+        eq = self.daily_equity(first, last)
+        rets = daily_returns(eq)
+        ret_pct = (eq[-1] / eq[0] - 1) * 100 if len(eq) >= 2 and eq[0] > 0 else 0.0
+        rs = [float(t.get("r_multiple") or 0) for t in trades]
+        all_rs = [float(t.get("r_multiple") or 0) for t in history]
+        r = self.cfg.risk
+        return {"risk_adjusted": risk_adjusted(rets, rs),
+                "benchmark": benchmark(*self.spy_closes(first, last), ret_pct),
+                "statistical": statistical_gate(all_rs, r.risk_per_trade_pct,
+                                                r.monthly_drawdown_limit_pct)}
+
     # -- reports ----------------------------------------------------------------------------
     async def daily(self, d: date, kind: str = "daily") -> dict[str, Any]:
         """10:30 morning summary (kind='morning') or 4:30 PM daily review (A11-1)."""
@@ -207,10 +246,13 @@ class Reporter:
                 "standards": standards(all_trades, breaches, max_drawdown_pct(curve),
                                        self.cfg.risk.monthly_drawdown_limit_pct),
                 "pipeline": self.no_trade_log(since, until),
+                **self.analytics(d.replace(day=1), d, trades, all_trades),
                 "overrides": sum(1 for t in trades if t.get("override")),
                 "locks": [x["ticker"] for x in self.compliance.locked_list(self.now())]}
         data["text"] = (f"{self.tag()} Weekly review week ending {d}\n"
-                        + json.dumps({k: data[k] for k in ("results", "standards")}, default=str,
+                        + json.dumps({k: data[k] for k in ("results", "standards",
+                                                           "risk_adjusted", "benchmark",
+                                                           "statistical")}, default=str,
                                      indent=1))
         self._write(f"{d.isoformat()}_weekly", data)
         return data
@@ -225,9 +267,12 @@ class Reporter:
                 "by_setup": by(trades, "setup"), "max_dd_pct": max_drawdown_pct(curve),
                 "monthly_limit_pct": self.cfg.risk.monthly_drawdown_limit_pct,
                 "wash_sale_report": self.compliance.monthly_report(year, month),
+                **self.analytics(first, nxt - timedelta(days=1), trades,
+                                 self.journal.closed_positions()),
                 "gates": sorted(self.journal.gates_passed())}
         data["text"] = f"{self.tag()} Monthly review {data['month']}\n" + json.dumps(
-            data["results"], default=str)
+            {k: data[k] for k in ("results", "risk_adjusted", "benchmark", "statistical")},
+            default=str)
         self._write(f"{year}-{month:02d}_monthly", data)
         exp = self.out_dir / f"{year}-{month:02d}_wash_sales.json"
         exp.write_text(json.dumps(data["wash_sale_report"], indent=1, default=str),

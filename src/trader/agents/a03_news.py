@@ -131,6 +131,7 @@ class NewsAgent:
         self.last_hot_fetch: datetime | None = None   # NW-1
         self.last_flags: dict[str, EventFlags] = {}         # NW-1: keep full-cycle summary
         self.source_errors: dict[str, str] = {}
+        self.enricher: Callable[[Sequence[tuple[NewsItem, str]]], None] | None = None  # NC-1
 
     async def hot_cycle(self, tickers: Sequence[str]) -> list[EventFlags]:
         """NW-1: a fast poll for tickers with an open position or a game-plan setup. News and
@@ -252,9 +253,15 @@ class NewsAgent:
                          "published_at": it.published_at, "received_at": now,
                          "headline": clean_text(it.headline)[0][:500], "cleaned_text": cleaned,
                          "raw_text": (it.text or "")[:20000], "finbert_score": sc,
-                         "suspicious": sus})
+                         "suspicious": sus, "kind": it.kind,
+                         "publisher": str(it.meta.get("publisher") or it.source)[:64]})
         if self.journal is not None and rows:
             self.journal.insert_many(s.news_items, rows)
+        if self.enricher is not None and fresh:   # NC-1 embeddings, NC-11 social scores
+            try:
+                self.enricher([(it, c) for it, c, _ in fresh])
+            except Exception as exc:   # noqa: BLE001 - enrichment never blocks the news
+                log.warning("news_enrich_failed", error=str(exc))
 
     def flags_for(self, ticker: str, now: datetime) -> list[str]:
         """A3-3 event flags."""

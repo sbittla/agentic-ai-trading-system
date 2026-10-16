@@ -14,6 +14,8 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 **Technical scanner:** `./run.sh scan` ranks swing ideas from 9 classic techniques (pullbacks, breakouts, flags, squeezes, Connors RSI(2), MACD, reversal candles; long and short) and a next-session day-trading watchlist, with trigger, stop and targets. Indicator and candlestick math is identical to TA-Lib, and `./run.sh scan-eval` grades every technique on stored history. trader-core sends the scan to Telegram at 16:20 ET. See [docs/SCANNER_REQUIREMENTS.md](docs/SCANNER_REQUIREMENTS.md) for why this is a deterministic engine rather than an LLM, and for the measured results.
 
+**News catalysts:** `./run.sh catalyst [TICKER]` scores how strong a stock's news is (0-100), gives P(up), the typical move and a 10-90% range for 1 day, 1 week, 2 weeks and 1 month, reads social sentiment next to the news, checks technicals, options, analysts, earnings, insiders and short volume, and suggests a view (stock, call or put spread, or no trade) sized by the risk rules. Run `./run.sh backfill-catalysts 365` once so the ranges are measured on a year of past events; outlooks say UNCALIBRATED until the walk-forward record earns the label. See [docs/NEWS_CATALYST_REQUIREMENTS.md](docs/NEWS_CATALYST_REQUIREMENTS.md).
+
 **Just want day-trading price alerts on Telegram?** Run the standalone alerts bot: one ~50 MB
 container, no GPU, LLM or database. See [docs/ALERTS.md](docs/ALERTS.md):
 `./run.sh alerts`
@@ -24,7 +26,7 @@ Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIR
 
 ## Key documents
 
-- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Technical scanner](docs/SCANNER_REQUIREMENTS.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
+- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Technical scanner](docs/SCANNER_REQUIREMENTS.md) · [News catalysts](docs/NEWS_CATALYST_REQUIREMENTS.md) · [Gap review](docs/GAP_REVIEW.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
 
 ## Status
 

@@ -45,6 +45,7 @@ ALLOWED = {
     "OPTIONS",
     "RECAP",
     "SCAN",
+    "CATALYST",
 }
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 ARG_RE = re.compile(r"^[A-Za-z0-9 .@:_-]{0,40}$")
@@ -402,6 +403,19 @@ class ConsoleData:
         """TS-12: the newest walk-forward grades (reports/scanner_eval.json)."""
         sc = getattr(self.cfg, "scanner", None)
         return self._report_json(sc.eval_file if sc else "scanner_eval.json")
+
+    def catalysts(self) -> dict[str, Any] | None:
+        """NC-27: the newest catalyst outlooks (reports/catalysts.json)."""
+        ca = getattr(self.cfg, "catalyst", None)
+        return self._report_json(ca.latest_file if ca else "catalysts.json")
+
+    def catalyst_eval(self) -> dict[str, Any] | None:
+        """NC-32: walk-forward grades (reports/catalyst_eval.json), without the event list."""
+        ca = getattr(self.cfg, "catalyst", None)
+        ev = self._report_json(ca.eval_file if ca else "catalyst_eval.json")
+        if ev:
+            ev.pop("event_list", None)
+        return ev
 
     def report_path(self, name: str) -> Path | None:
         root = self.paths.reports.resolve()

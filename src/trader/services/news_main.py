@@ -52,6 +52,10 @@ class NewsService:
                                            os.environ["REDDIT_CLIENT_SECRET"],
                                            os.environ.get("REDDIT_USER_AGENT", ua),
                                            cfg.data.reddit_subreddits))
+        if "stocktwits" in cfg.catalyst.social_sources:   # NC-11, off until verified
+            from trader.catalyst.collect import StocktwitsPosts
+
+            sources.append(StocktwitsPosts())
         from trader.news.ratings import RatingsFeed  # UI-33: upgrades and downgrades
 
         sources.append(RatingsFeed(journal, os.environ.get("FINNHUB_TOKEN"),
@@ -61,8 +65,19 @@ class NewsService:
         macro = MacroCalendar.load(base / cfg.windows.macro_calendar_file)
         llm = OllamaClient(cfg.llm.base_url, cfg.llm.model, journal=journal,
                            temperature=cfg.llm.temperature, seed=cfg.llm.seed)
-        agent = NewsAgent(cfg, sources, await asyncio.to_thread(make_scorer), llm, journal, cal,
-                          macro, lambda: datetime.now(UTC))
+        scorer = await asyncio.to_thread(make_scorer)
+        agent = NewsAgent(cfg, sources, scorer, llm, journal, cal, macro,
+                          lambda: datetime.now(UTC))
+        fundamentals = None
+        if cfg.catalyst.enabled:   # NC-1 embeddings, NC-11 social scores, NC-16 fundamentals
+            from trader.catalyst.collect import Enricher, FundamentalsFeed
+            from trader.catalyst.text import make_embedder, make_social_scorer
+
+            embedder = await asyncio.to_thread(make_embedder, cfg.catalyst.embed_model)
+            social = await asyncio.to_thread(make_social_scorer, cfg.catalyst.social_model,
+                                             scorer)
+            agent.enricher = Enricher(journal, embedder, social, social.name)
+            fundamentals = FundamentalsFeed(journal, os.environ.get("FINNHUB_TOKEN"), ua)
         universe = UniverseAgent(cfg, None, lambda: datetime.now(UTC))
 
         async def heartbeat() -> None:
@@ -73,12 +88,34 @@ class NewsService:
                                                        "errors": agent.source_errors})
                 await asyncio.sleep(cfg.services.heartbeat_sec)
 
+        async def collect_fundamentals(day: Any) -> None:
+            """NC-16, once a trading day at 07:30 ET (Finnhub, SEC Form 4, FINRA)."""
+            if fundamentals is None:
+                return
+            from trader.catalyst.agent import extended_tickers
+
+            tickers = list(cfg.universe.tickers)
+            try:
+                ciks = await EdgarFilings(ua).cik_map()
+                await fundamentals.finnhub(tickers, day)
+                await fundamentals.insiders(tickers, day, ciks)
+                await fundamentals.short_volume(tickers, day)
+                if "apewisdom" in cfg.catalyst.social_sources:
+                    await fundamentals.apewisdom(extended_tickers(cfg), day)
+            except Exception as exc:   # noqa: BLE001 - never blocks the news loop
+                log.warning("fundamentals_failed", error=str(exc))
+
         async def poll() -> None:
             last_universe = None
+            last_fund = None
             while True:
                 now = datetime.now(UTC)
                 local = to_et(now)
                 market_day = cal.is_trading_day(local.date())
+                if (market_day and local.hour * 60 + local.minute >= 7 * 60 + 30
+                        and last_fund != local.date()):
+                    last_fund = local.date()
+                    await collect_fundamentals(local.date())
                 active = market_day and 7 * 60 + 15 <= local.hour * 60 + local.minute <= 16 * 60
                 if active:
                     try:

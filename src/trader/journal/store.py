@@ -77,8 +77,30 @@ class SqlJournal:
                     if exists is None:
                         c.execute(text(f"CREATE SCHEMA {s.SCHEMA}"))
             s.metadata.create_all(self.engine, checkfirst=True)
+            self._add_missing_columns()
         except OperationalError as exc:
             raise JournalUnavailable(str(exc)) from exc
+
+    def _add_missing_columns(self) -> None:
+        """New nullable columns on existing tables (``create_all`` only creates tables).
+        Additive only: a column is never dropped, renamed or retyped here."""
+        from sqlalchemy import inspect
+
+        insp = inspect(self.engine)
+        schema = None if self.is_sqlite else s.SCHEMA
+        have_tables = set(insp.get_table_names(schema=schema))
+        for table in s.metadata.sorted_tables:
+            if table.name not in have_tables:
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name, schema=schema)}
+            for col in table.columns:
+                if col.name in have or not col.nullable or col.primary_key:
+                    continue
+                ddl = col.type.compile(dialect=self.engine.dialect)
+                name = table.name if self.is_sqlite else f"{s.SCHEMA}.{table.name}"
+                with self.engine.begin() as c:
+                    c.execute(text(f'ALTER TABLE {name} ADD COLUMN "{col.name}" {ddl}'))
+                log.info("journal_column_added", table=table.name, column=col.name)
 
     def apply_grants(self, prefix: str | None = None) -> list[str]:
         """Least-privilege grants per role (SEC-17); Postgres only, run by `trader migrate`.

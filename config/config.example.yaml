@@ -85,6 +85,16 @@ risk:                           # section 6; read-only to all agents
   revenge_cooldown_min: 10      # DR-3
   ticker_loss_streak_lock: {losses: 3, days: 5}   # RC-4
   setup_disable_after_trades: 20                 # RC-3
+  # portfolio risk across the book (GAP_REVIEW.md G1-G4)
+  max_open_risk_pct: 1.5        # PF-1: open risk to stops + the new trade
+  max_pair_correlation: 0.8     # PF-2: 60-day return correlation that counts as one bet
+  max_beta_exposure_pct: 150    # PF-3: sum(beta x market value), % of equity
+  max_gap_loss_pct: 1.5         # PF-4: swing loss if the stop gaps by the 99th pct gap
+
+execution:                      # pre-trade order sanity (OC-1..OC-4)
+  max_price_deviation_pct: 1.0  # OC-1: limit price vs last trade
+  max_adv_pct: 1.0              # OC-2: shares vs 20-day average volume
+  max_order_notional: 0         # OC-4: absolute $ cap per order; 0 = off
 
 wash_sale:                      # section 7
   policy: strict                # strict | balanced | year_end_only
@@ -109,7 +119,7 @@ llm:
   timeout_sec: 60
   retries: 1
   max_context_tokens: 8192
-  prompt_versions: {a03: v1, a05_plan: v1, a05_proposal: v1, a06: v1, a11: v1}
+  prompt_versions: {a03: v1, a05_plan: v1, a05_proposal: v1, a06: v1, a11: v1, catalyst: v1}
 
 notifications:
   whatsapp_enabled: true
@@ -119,6 +129,14 @@ storage:
   journal_url_env: DATABASE_URL     # Postgres URL comes from each container's env file
   bars_path: /app/data/bars
   backup_daily_at: "18:00"
+
+catalyst:                         # NEWS_CATALYST_REQUIREMENTS.md (advisory, A17)
+  enabled: true
+  min_strength: 40                # NC-4
+  alert_strength: 60              # NC-28
+  social_sources: [reddit]        # stocktwits, apewisdom: off until their terms are confirmed
+  telegram: false                 # NC-28: also needs the walk-forward gate (NC-34)
+  history_universe: extended      # universe + the 40 large caps in news/names.py
 
 services:                         # ADR-010
   heartbeat_sec: 30

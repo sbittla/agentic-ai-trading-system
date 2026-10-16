@@ -30,6 +30,7 @@ from trader.models.messages import (
     SetupTriggered,
 )
 from trader.models.reasons import Reason
+from trader.portfolio import PortfolioStats
 from trader.timeutil import et_date
 
 log = structlog.get_logger(__name__)
@@ -108,6 +109,7 @@ class RiskState:
     reduced_trades: list[float] = field(default_factory=list)
     history: list[ClosedTrade] = field(default_factory=list)
     breaches: int = 0
+    portfolio: PortfolioStats = field(default_factory=PortfolioStats)   # PF-1..PF-4
 
     @property
     def day_pnl(self) -> Decimal:
@@ -270,8 +272,11 @@ class RiskManager:
         return pct
 
     def size(self, entry: Decimal, stop: Decimal, equity: Decimal, buying_power: Decimal,
-             open_exposure: Decimal, planned: bool) -> tuple[int, Decimal, Decimal, str]:
-        """Returns (qty, risk_usd, risk_pct, binding constraint)."""
+             open_exposure: Decimal, planned: bool, *, ticker: str | None = None,
+             style: str | None = None, positions: list[OpenPositionView] | None = None
+             ) -> tuple[int, Decimal, Decimal, str]:
+        """Returns (qty, risk_usd, risk_pct, binding constraint). With ``ticker`` and
+        ``positions`` the portfolio caps apply too (PF-1, PF-3, PF-4)."""
         r = self.cfg.risk
         pct = self.risk_pct(planned)
         risk_usd = equity * pct / 100
@@ -283,9 +288,39 @@ class RiskManager:
                       .to_integral_value(rounding=ROUND_FLOOR))                     # LL-9
         room = min(buying_power, equity * Decimal(str(r.max_leverage)) - open_exposure)  # LL-11
         qty_bp = max(0, math.floor(room / entry)) if room > 0 else 0
-        qty = min(qty_risk, qty_cap, qty_bp)
-        binding = {qty_risk: "risk", qty_cap: "LL-9 position cap", qty_bp: "LL-11 leverage"}[qty]
+        caps = {"risk": qty_risk, "LL-9 position cap": qty_cap, "LL-11 leverage": qty_bp}
+        if ticker is not None and positions is not None:
+            caps.update(self.portfolio_caps(entry, stop, equity, ticker, style, positions))
+        qty = min(caps.values())
+        binding = [k for k, v in caps.items() if v == qty][-1]   # ties: the last cap, as before
         return max(qty, 0), per_share * max(qty, 0), pct, binding
+
+    def portfolio_caps(self, entry: Decimal, stop: Decimal, equity: Decimal, ticker: str,
+                       style: str | None, positions: list[OpenPositionView]) -> dict[str, int]:
+        """Share caps from the whole book, not the single trade (PF-1, PF-3, PF-4)."""
+        r, pf = self.cfg.risk, self.state.portfolio
+        per_share = entry - stop
+        out: dict[str, int] = {}
+        # PF-1 open risk ("heat"): what every open position loses from its last price to its
+        # stop, plus the new trade, stays under the cap. Locked-in stops add nothing.
+        heat = sum((max(D0, p.last - p.stop) * p.qty for p in positions), D0)
+        room = equity * Decimal(str(r.max_open_risk_pct)) / 100 - heat
+        out["PF-1 open risk"] = int((room / per_share).to_integral_value(
+            rounding=ROUND_FLOOR)) if room > 0 else 0
+        # PF-3 beta-weighted exposure: a 1.8-beta stock counts as 1.8x its market value
+        used = sum((Decimal(str(pf.beta_of(p.group))) * p.exposure for p in positions), D0)
+        b = Decimal(str(max(pf.beta_of(ticker), 0.1)))
+        room_b = equity * Decimal(str(r.max_beta_exposure_pct)) / 100 - used
+        out["PF-3 beta exposure"] = int((room_b / (b * entry)).to_integral_value(
+            rounding=ROUND_FLOOR)) if room_b > 0 else 0
+        # PF-4 overnight gap: a swing held overnight can open through its stop. The stressed
+        # loss per share is the stop distance plus the stock's 99th-percentile adverse gap.
+        g = pf.gap.get(ticker)
+        if style == "swing" and g is not None:
+            stressed = per_share + entry * Decimal(str(g))
+            out["PF-4 gap risk"] = int((equity * Decimal(str(r.max_gap_loss_pct)) / 100
+                                        / stressed).to_integral_value(rounding=ROUND_FLOOR))
+        return out
 
     # -- checklist (A7-1) --------------------------------------------------------------------
     def setup_status(self, setup: str) -> Literal["live", "paper"]:
@@ -436,6 +471,12 @@ class RiskManager:
                 return False, f"{Reason.HALT_LL10}: correlated group {name} already open"
             if g in grp.tickers and any(p.group == g for p in open_pos) and grp.max_open <= 1:
                 pass   # same ticker handled by DR-1 / DR-5 below
+        pf = st.portfolio
+        for p in open_pos:   # PF-2: measured correlation, on top of the configured groups
+            c = pf.correlation(g, p.group) if p.group != g else None
+            if c is not None and c >= r.max_pair_correlation:
+                return False, (f"{Reason.NT_PF_CORRELATION}: {g} moves with open {p.group} "
+                               f"(60-day correlation {c:.2f} >= {r.max_pair_correlation})")
         same = [p for p in open_pos if p.group == g]
         for p in same:
             if p.unrealized < 0 or ctx.last_price < p.entry:
@@ -473,8 +514,11 @@ class RiskManager:
             return self._reject(proposal_id, it, items, s)
         ok, why = self._limits(s, ctx)
         exposure = sum((p.exposure for p in ctx.positions if p.route == route), D0)
+        book = [p for p in ctx.positions if p.route == route]
         qty, risk_usd, pct, binding = self.size(s.entry, s.stop, ctx.equity, ctx.buying_power,
-                                                exposure, ctx.planned)
+                                                exposure, ctx.planned,
+                                                ticker=self.cfg.canonical(s.ticker),
+                                                style=s.style, positions=book)
         if ok and qty < 1:
             ok, why = False, f"{Reason.SIZE_TOO_SMALL}: qty {qty} ({binding})"
         if ok and mode in ("approve", "copilot") and route == "broker" \

@@ -36,12 +36,14 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 
 | Document | What it covers |
 | --- | --- |
+| [GAP_REVIEW.md](GAP_REVIEW.md) | Gap review against professional practice: risk across the book, pre-trade order checks, statistical evidence, model inventory; what was closed and what was deferred |
 | [REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md) | Gap review from a day trader's point of view: latency, data quality, alerts, learning speed; prioritized proposals |
 | [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) | Options suggestions and alerts for bullish and bearish views (agents A13–A16), defined risk; advisory mode built |
 | [UI_REQUIREMENTS.md](UI_REQUIREMENTS.md) | Owner Console (built, http://localhost:8080): cockpit, market recap, analyst ratings, news, any-stock lookup, plain-language Q&A, approvals, controls, options board, journal |
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
 | [TRADING_DECISIONS.md](TRADING_DECISIONS.md) | Every trading decision (context, setup, size, exits, discipline), the rule that makes it, and where the console shows it |
+| [NEWS_CATALYST_REQUIREMENTS.md](NEWS_CATALYST_REQUIREMENTS.md) | News catalysts (`./run.sh catalyst`): strength, a 1-day to 1-month outlook with ranges, social sentiment, confluence and a position view; models chosen and why; walk-forward grading |
 | [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md) | Technical scanner (`./run.sh scan`): why a TA-Lib-identical engine and not an LLM, the technique catalog, score, walk-forward grading, measured results |
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |
 | [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) | Every config field and its validation; secrets |

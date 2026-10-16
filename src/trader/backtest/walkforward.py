@@ -15,7 +15,7 @@ from typing import Any
 from trader.backtest.engine import run_replay
 from trader.config import Config
 from trader.llm.fakes import RulesLLM
-from trader.metrics import summarize
+from trader.metrics import statistical_gate, summarize
 from trader.models.messages import Bar, EventFlags
 
 DEFAULT_GRID: dict[str, list[float]] = {"filters.min_rvol": [1.5, 2.0],
@@ -80,9 +80,15 @@ async def walk_forward(cfg: Config, minutes: dict[date, list[Bar]], daily: dict[
             if all(a != b for a, b in zip(vals, vals[1:], strict=False)):
                 unstable.append(key)
     total = summarize(oos_trades)
+    # SV-3: averages alone can pass on luck; the 95% interval and the Monte Carlo drawdown
+    # must agree before the backtest counts as evidence
+    stat = statistical_gate([float(t.get("r_multiple") or 0) for t in oos_trades],
+                            cfg.risk.risk_per_trade_pct, cfg.risk.monthly_drawdown_limit_pct)
     passed = (total["expectancy_r"] > 0.1 and total["profit_factor"] >= 1.3
-              and total["trades"] >= 100)
+              and total["trades"] >= 100 and stat["pass"])
     return {"windows": windows, "oos": total, "unstable_params": unstable,
+            "statistical": stat,
             "pass_bar": {"expectancy_gt_0_1R": total["expectancy_r"] > 0.1,
                          "profit_factor_ge_1_3": total["profit_factor"] >= 1.3,
-                         "trades_ge_100": total["trades"] >= 100, "pass": passed}}
+                         "trades_ge_100": total["trades"] >= 100,
+                         "statistical_gate": stat["pass"], "pass": passed}}

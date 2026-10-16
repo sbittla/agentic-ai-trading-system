@@ -18,6 +18,11 @@ Defines every external data source, how often it is called, the internal tables 
 | Finnhub | Analyst upgrades/downgrades (UI-33) | REST `stock/upgrade-downgrade` (premium on some plans; turned off for the session on 401/403) | Every 30 min per ticker | 10 calls per 30 min |
 | Yahoo Finance / Google News RSS | Rating-action headlines (UI-33), parsed by rules; the headline must name the ticker or company as the subject | `feeds.finance.yahoo.com/rss/2.0/headline?s=<T>`, `news.google.com/rss/search?q=...` | Every 30 min per ticker; `./run.sh backfill` once | 20 requests per 30 min, User-Agent set |
 | Reddit (PRAW) | Posts and comment counts mentioning the tickers | r/stocks, r/investing, r/wallstreetbets, r/StockMarket search | Every 15 min | Under 100 queries/min; non-commercial |
+| Finnhub | Earnings surprises, analyst consensus, next earnings date (NC-16) | REST `stock/earnings`, `stock/recommendation`, `calendar/earnings` | 7:30 AM daily; `backfill-catalysts` once | ~2 calls per ticker a day; an endpoint refused on the plan is skipped (logged once) |
+| SEC EDGAR | Form 4 open-market insider trades (NC-16) | `submissions` JSON, then each Form 4 XML (read with regular expressions) | 7:30 AM daily, last 90 days, ≤ 25 filings per ticker | < 10 requests/s with the User-Agent |
+| FINRA Reg SHO | Daily short-sale volume share (NC-16) | `cdn.finra.org/equity/regsho/daily/CNMSshvolYYYYMMDD.txt` (public file) | 7:30 AM daily, last 20 sessions | ~25 files a day |
+| Stocktwits (off) | Messages with users' own Bullish/Bearish tags (NC-11) | `api.stocktwits.com/api/2/streams/symbol/<T>.json` | With A3 when `catalyst.social_sources` has `stocktwits` | Off until its terms are confirmed |
+| ApeWisdom (off) | Reddit mention counts per ticker (NC-11) | `apewisdom.io/api/v1.0/filter/all-stocks/page/<n>` | 7:30 AM when enabled | Off until its terms are confirmed |
 | Macro calendar | CPI, jobs report, FOMC dates | Published BLS and Federal Reserve schedules, entered in config yearly | Yearly, checked monthly | — |
 
 **Data quality rules**
@@ -102,6 +107,14 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | `option_suggestions` | suggestion_id, ts, ticker, direction, source, style, structure, expiry, legs_json, contracts, entry_price (+debit/−credit), max_loss, max_gain, breakeven, underlying, invalidation, t1, iv_rank, detail_json (view, numbers, entry quotes), text, status, mark, exit_price, exit_reason, closed_at, pnl, r_multiple, stock_view_right | A14 / A16 |
 | `owner_notes` | ts, ref_type, ref_id, tags, note, screenshot_b64 | console (UI-29) |
 | `console_chats` | ts, day, question, answer, tool, rows_json, model_used | console (UI-8d) |
+| `news_embeddings` | item_id (unique), ticker, model, vec (base64 float16) | news-sentiment (NC-1) |
+| `social_posts` | item_id (unique), ticker, ts, source, author (salted hash), score, tag, length, text_hash, model | news-sentiment (NC-11) |
+| `fundamentals_daily` | date, ticker, kind (earnings, recommendation, earnings_calendar, insider, short_volume, apewisdom), json | news-sentiment (NC-16) |
+| `news_stories` | story_id (unique), ticker, first_seen, last_seen, ctype, direction, type_source, prompt_version, novelty, items, sources, sentiment, strength, headline, item_ids | trader-core A17 (NC-1..NC-10, NC-46) |
+| `catalyst_outlooks` | outlook_id (unique), ts, as_of, ticker, story_id, strength, label, direction, ctype, factors, confluence, social, horizons, stance, vehicle, plan, calibrated, text | trader-core A17 (NC-17..NC-26) |
+| `catalyst_grades` | outlook_id, as_of, ticker, horizon, p_up, p10, p90, median, stance, realized, realized_excess, in_range, up, graded_at | trader-core A17 (NC-35) |
+
+`news_items` also carries `kind` (news, 8-K, rating, post) and `publisher` (the outlet behind the feed, NC-3). `trader migrate` adds new nullable columns to existing tables; it never drops, renames or retypes one.
 
 **Retention:** journal kept for 7 years (tax records). Raw news text may be pruned after 90 days; headlines and scores are kept.
 

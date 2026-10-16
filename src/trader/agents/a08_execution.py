@@ -92,6 +92,29 @@ def build_legs(proposal_id: str, symbol: str, qty: int, entry: Decimal, stop: De
     return legs
 
 
+def order_sanity(cfg: Config, symbol: str, qty: int, entry: Decimal, stop: Decimal,
+                 t1: Decimal, t2: Decimal, last_price: Decimal | None, adv: float | None
+                 ) -> str | None:
+    """OC-1..OC-4: the last independent check before an order leaves (fat-finger guard, in
+    the spirit of SEC Rule 15c3-5 pre-trade controls). Returns why it failed, or None."""
+    ex = cfg.execution
+    if qty < 1 or entry <= 0 or stop <= 0:
+        return f"OC-3 bad order: qty {qty}, entry {entry}, stop {stop}"
+    if not stop < entry < t1 <= t2:   # long-only stock (ADR-008)
+        return f"OC-3 prices out of order: stop {stop} < entry {entry} < T1 {t1} <= T2 {t2}"
+    if last_price is not None and last_price > 0:
+        dev = abs(entry - last_price) / last_price * 100
+        if dev > Decimal(str(ex.max_price_deviation_pct)):
+            return (f"OC-1 limit {entry} is {dev:.2f}% from the last trade {last_price} "
+                    f"(max {ex.max_price_deviation_pct}%)")
+    if adv is not None and adv > 0 and qty > adv * ex.max_adv_pct / 100:
+        return (f"OC-2 {qty} shares is {qty / adv * 100:.2f}% of {symbol}'s 20-day average "
+                f"volume (max {ex.max_adv_pct}%)")
+    if ex.max_order_notional > 0 and entry * qty > Decimal(str(ex.max_order_notional)):
+        return f"OC-4 order value ${entry * qty:,.2f} > cap ${ex.max_order_notional:,.0f}"
+    return None
+
+
 class ExecutionAgent:
     def __init__(self, cfg: Config, broker: Broker, journal: SqlJournal | None,
                  paper_broker: Broker | None = None) -> None:
@@ -103,6 +126,8 @@ class ExecutionAgent:
         self.order_index: dict[str, tuple[str, str]] = {}   # order id -> (proposal, leg)
         self.rate = RateGuard()
         self.failures = 0
+        self.adv: dict[str, float] = {}   # OC-2, set each morning from the daily bars
+        self.last_sanity = ""
 
     def broker_for(self, route: str) -> Broker:
         if route == "paper" and self.paper_broker is not None:
@@ -116,14 +141,20 @@ class ExecutionAgent:
             return bool(self.journal.rows(s.orders, {"proposal_id": proposal_id}, limit=1))
         return False
 
-    async def execute(self, d: Decision, setup: SetupTriggered, now: datetime, planned: bool
-                      ) -> tuple[str, EntryTicket | None]:
+    async def execute(self, d: Decision, setup: SetupTriggered, now: datetime, planned: bool,
+                      last_price: Decimal | None = None) -> tuple[str, EntryTicket | None]:
         """Submit the bracket legs for an approved decision. Returns (reason code, ticket)."""
         if d.result != "APPROVE":
             return Reason.EXEC_REJECTED, None
         if self.seen(d.proposal_id):   # A8-2: never send the same proposal twice
             log.warning("duplicate_proposal", proposal_id=d.proposal_id)
             return Reason.EXEC_DUPLICATE, None
+        why = order_sanity(self.cfg, setup.ticker, d.qty, d.entry, d.stop, d.t1, d.t2,
+                           last_price, self.adv.get(self.cfg.canonical(setup.ticker)))
+        if why is not None:
+            log.error("order_sanity_failed", proposal_id=d.proposal_id, why=why)
+            self.last_sanity = why
+            return Reason.EXEC_SANITY, None
         tif: Literal["day", "gtc"] = "gtc" if setup.style == "swing" else "day"
         legs = build_legs(d.proposal_id, setup.ticker, d.qty, d.entry, d.stop, d.t1, d.t2, tif)
         if not self.rate.allow(now, len(legs)):

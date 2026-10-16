@@ -21,7 +21,9 @@ One YAML file controls every tunable value. It is loaded once at start, snapshot
 | `filters` | QQQ/SMH checks, `min_rvol`, `max_spread_pct`, halt look-back | `min_rvol` ≥ 1.0 |
 | `entries` | Chase limit, stop width, minimum R, confidence, unplanned size factor, cancel rules | `min_reward_risk` ≥ 1.5; `min_confidence` ≥ 0.5 |
 | `exits` | Targets, partial size, trail method, time stops, swing hold limit | `t1_fraction` between 0 and 1 |
-| `risk` | All loss limits and behaviour limits from REQUIREMENTS.md section 6 | `risk_per_trade_pct` ≤ 1.0; `daily_loss_limit_pct` ≤ 3.0; `max_leverage` ≤ 1.0 |
+| `risk` | All loss limits and behaviour limits from REQUIREMENTS.md section 6, including the portfolio limits `max_open_risk_pct`, `max_pair_correlation`, `correlation_lookback`, `max_beta_exposure_pct`, `max_gap_loss_pct`, `gap_percentile` (PF-1..PF-4) | `risk_per_trade_pct` ≤ 1.0; `daily_loss_limit_pct` ≤ 3.0; `max_leverage` ≤ 1.0; `max_open_risk_pct` between `risk_per_trade_pct` and 5; correlation 0.3–1.0; beta exposure 25–300%; gap loss 0–5% |
+| `execution` | Slippage feedback (EXQ-1); pre-trade order checks `max_price_deviation_pct`, `max_adv_pct`, `max_order_notional` (OC-1..OC-4) | price band 0.1–5%; volume share 0–10%; notional ≥ 0 (0 = off) |
+| `catalyst` | News catalysts (NEWS_CATALYST_REQUIREMENTS.md §10): horizons, story thresholds, strength and alert thresholds, half-life, IV weight, shrinkage, stance probability, social sources, `telegram`, history universe, gate, models, source weights, report files | thresholds 0–100 with min ≤ alert; IV weight 0–1; stance 0.5–1; known social sources and adjustments; horizons 1–63 sessions |
 | `wash_sale` | `policy`, `lock_days`, balanced threshold, year-end date | `lock_days` ≥ 31 for strict |
 | `data` | Feed, staleness, polling, subreddits, SEC User-Agent | SEC User-Agent contains an email |
 | `llm` | Ollama URL, pinned model tag, temperature, timeout, prompt versions | `temperature` = 0; prompt files exist |
