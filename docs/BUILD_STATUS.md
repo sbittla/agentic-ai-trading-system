@@ -1,6 +1,6 @@
 # Build Status
 
-**As of:** October 11, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
+**As of:** October 15, 2026 · Companion to [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [TEST_PLAN.md](TEST_PLAN.md)
 
 Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (small live) need the owner's accounts, keys and the local model, and real trading days.
 
@@ -20,6 +20,7 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 | Options layer (OPTIONS_REQUIREMENTS.md) | Done, advisory | `agents/a04_bearish.py` (BR-1..4), `options/` (A13 data, A14 strategist, A15 risk, A16 monitor, desk), OP-14 line in the alerts bot, Grafana **7. Options** dashboard. Option order placement (§9 paper/live) is not built |
 | Owner Console (UI_REQUIREMENTS.md) | Done | `console/` (Starlette app; `render.py` components, `pages.py` page layouts, Ask tools, SVG charts), `services/core_api.py` (trader-core internal read-only API, incl. options board and preview), `console` container on 127.0.0.1:8080 |
 | Analyst ratings, recap, backfill (UI-33..36) | Done (offline) | `news/ratings.py` (Finnhub upgrade-downgrade + Yahoo/Google News RSS headline rules, `analyst_actions`), `agents/recap.py` (`trader recap`, `RECAP N`, `market_recap`), `NewsAgent.backfill` (`trader backfill-news`), `./run.sh backfill [days]`, console Market recap / Analyst ratings / News pages, options board and preview |
+| Technical scanner (SCANNER_REQUIREMENTS.md) | Done, advisory | `scanner/` (TA-Lib-identical indicators and candlestick patterns, 9 swing techniques long and short, day watchlist, score with measured edge, walk-forward grading), `trader scan` / `scan-eval`, `./run.sh scan`, trader-core 16:20 ET Telegram scan |
 | M8 Backtest + paper | Ready to start | Needs keys, history download, and 20+ paper days |
 | M9 Small live | Not started | After the M8 gates |
 
@@ -27,8 +28,10 @@ Milestones M0–M7 are built and tested offline. M8 (paper trading) and M9 (smal
 
 | Check | Result |
 | --- | --- |
-| `pytest` | 451 passed, including the Postgres integration tests against a real Postgres 16 initialised with `init.sql` + `upgrade.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not downloaded in CI) |
-| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 252 of 252 automated requirement IDs covered |
+| `pytest` | 451 passed (October 11), including the Postgres integration tests against a real Postgres 16 initialised with `init.sql` + `upgrade.sql` (skipped without `TEST_PG_*` env vars); 1 real-Ollama test skipped (model not downloaded in CI) |
+| `python tools/check_traceability.py docs/TRACEABILITY.md tests` | 268 of 268 automated requirement IDs covered (16 technical-scanner IDs added) |
+| Technical scanner tests (October 15, local venv) | 34 new tests pass (`tests/unit/test_scanner.py`, `tests/replay/test_technical_scan_job.py`); full suite 460 passed with no new failures (the console tests need `starlette`, absent from that venv) |
+| Scanner vs TA-Lib (TS-2, TS-3) | 18 indicator outputs and 8 candlestick patterns identical to TA-Lib on the stored history; walk-forward results in SCANNER_REQUIREMENTS.md §6 |
 | `ruff check src tests` (incl. bandit `S` rules) | Clean |
 | `mypy` (strict) | Clean, 105 files |
 | Console role on real Postgres | Every page renders as `console_rw`; it may publish only `inbound_cmd` (source forced to `console`), insert notes/chats/LLM logs, and is refused on every other write |

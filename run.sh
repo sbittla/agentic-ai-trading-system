@@ -21,6 +21,9 @@
 #   ./run.sh test            lint, type check, tests and traceability in the dev container
 #   ./run.sh backfill [days] last N days (default 30) of news + analyst ratings, a recap and
 #                            watchlist to Telegram, then next-session ideas (PLAN)
+#   ./run.sh scan [--telegram] [--date D] [--all]   technical scanner: swing ideas + day
+#                            watchlist from stored daily bars (docs/SCANNER_REQUIREMENTS.md)
+#   ./run.sh scan-eval       grade every technique walk-forward; writes reports/scanner_eval.json
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -360,6 +363,8 @@ case "$cmd" in
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
   backfill) cmd_backfill "$@" ;;
+  scan|scan-eval) check_docker   # trader-core has the bar store; --telegram goes via the notifier
+           "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader "$cmd" "$@" ;;
   test)    check_docker   # developers too: nothing runs from a host venv
            "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
            "${COMPOSE[@]}" --profile dev run --rm -T --user "$HOST_UID:$HOST_GID" \
@@ -367,6 +372,6 @@ case "$cmd" in
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
-  help|-h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac
