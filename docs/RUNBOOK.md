@@ -33,6 +33,7 @@ Optional: `./run.sh alerts` starts the standalone price-alert bot when it has it
 | 3:00–4:00 | Approvals as above |
 | 4:15 | Read the **next-day ideas** alert: up to 4 picks per window with trigger, stop and T1, built from today's close (code screen + Qwen review), plus how the previous ideas played out. Grafana **6. Next-day ideas** shows every ticker's screen. Ideas are refreshed at 9:00 and 2:45 with gap and pre-market data; they mark trades as planned (full size), they never place orders |
 | Evening / weekend | `RECAP 5` (week) or `RECAP 21` (month) on Telegram, or the buttons on the console's Market recap page: leaders and laggards against QQQ, analyst actions, events, and a watchlist with levels for the next session. Levels to watch, not orders |
+| 4:20 | Read the **technical scan**: swing ideas with a verdict (go, caution, blocked with the rule, bearish views as options) and a size, plus tomorrow's day watchlist. Console: Technical scan page |
 | 4:15 | Options ideas (advisory, OPTIONS_REQUIREMENTS.md) arrive with the next-day ideas; follow-ups for open ideas come during the windows |
 | 4:30 | Read the daily review (now with latency, slippage, strict paper fills and the options section); note any rule breach or incident |
 | Any time | Owner Console http://localhost:8080: cockpit, stock lookup with the live checklist ("why isn't it buying NVDA?"), Ask, trade stories, journal notes and tags |
@@ -48,6 +49,7 @@ The Owner Console sends the same commands through the same checks (Controls page
 | --- | --- | --- |
 | Status | `STATUS` | `./run.sh status` |
 | Recap of the last N sessions and next-session watchlist | `RECAP 5` / `RECAP 21` | `./run.sh backfill [days]` (news, ratings, recap and plan) or `docker compose -f docker/docker-compose.yml exec trader-core trader recap --days 5 [--no-send]` |
+| Technical scan now: swing ideas with every decision check, day watchlist ([SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md)) | `SCAN` (or **Run scan now** on the console's Technical scan page) | `./run.sh scan [--telegram]`; grade the techniques with `./run.sh scan-eval` |
 | Rebuild next-day ideas (outside market hours) | `PLAN` | `docker compose -f docker/docker-compose.yml exec trader-core trader plan` |
 | Kill switch (cancel entries, block new ones, keep stops) | `KILL` | `docker compose -f docker/docker-compose.yml exec trader-core trader kill` (instant) |
 | Resume after kill | `RESUME`, then the confirmation code (only after the cause is understood) | `docker compose -f docker/docker-compose.yml exec trader-core trader resume` |

@@ -332,6 +332,7 @@ class ScannerCfg(_Frozen):
                                  "TREND_PULLBACK:short", "BEAR_FLAG")
     eval_file: str = "reports/scanner_eval.json"
     alert_after_close: bool = True       # trader-core sends the scan at 16:20 ET
+    latest_file: str = "reports/technical_scan.json"   # newest scan, read by the console
 
     @field_validator("symbols", mode="before")
     @classmethod

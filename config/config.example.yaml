@@ -157,3 +157,4 @@ scanner:                           # docs/SCANNER_REQUIREMENTS.md (advisory: ide
   disabled: [REVERSAL_CANDLE:long, RSI2_REVERSION:short, TREND_PULLBACK:short, BEAR_FLAG]
   eval_file: reports/scanner_eval.json   # written by `trader scan-eval`, read by the scan
   alert_after_close: true          # trader-core sends the scan to Telegram at 16:20 ET
+  latest_file: reports/technical_scan.json   # newest scan, for the console's Technical scan page

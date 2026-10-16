@@ -22,7 +22,8 @@ from trader.timeutil import to_et
 NAV: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("Overview", (("/", "Today"), ("/market", "Market recap"), ("/scanner", "Scanner"))),
     ("Research", (("/stock", "Stock lookup"), ("/ratings", "Analyst ratings"),
-                  ("/news", "News"), ("/ideas", "Next-day ideas"), ("/options", "Options"),
+                  ("/news", "News"), ("/technical", "Technical scan"),
+                  ("/ideas", "Next-day ideas"), ("/options", "Options"),
                   ("/ask", "Ask"))),
     ("Trading", (("/approvals", "Approvals"), ("/controls", "Controls"),
                  ("/copilot", "Co-pilot"), ("/stories", "Trades"))),

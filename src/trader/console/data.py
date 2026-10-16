@@ -44,6 +44,7 @@ ALLOWED = {
     "OPT",
     "OPTIONS",
     "RECAP",
+    "SCAN",
 }
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 ARG_RE = re.compile(r"^[A-Za-z0-9 .@:_-]{0,40}$")
@@ -383,6 +384,24 @@ class ConsoleData:
             if f.is_file() and f.suffix in (".md", ".txt", ".csv", ".json", ".html")
         ]
         return sorted(out, key=lambda r: r["mtime"], reverse=True)[:300]
+
+    def _report_json(self, configured: str) -> dict[str, Any] | None:
+        p = self.paths.reports / Path(configured).name
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def technical_scan(self) -> dict[str, Any] | None:
+        """TS-19: the newest technical scan (reports/technical_scan.json)."""
+        sc = getattr(self.cfg, "scanner", None)
+        return self._report_json(sc.latest_file if sc else "technical_scan.json")
+
+    def scanner_eval(self) -> dict[str, Any] | None:
+        """TS-12: the newest walk-forward grades (reports/scanner_eval.json)."""
+        sc = getattr(self.cfg, "scanner", None)
+        return self._report_json(sc.eval_file if sc else "scanner_eval.json")
 
     def report_path(self, name: str) -> Path | None:
         root = self.paths.reports.resolve()

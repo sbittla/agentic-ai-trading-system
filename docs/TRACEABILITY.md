@@ -4,7 +4,7 @@
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 204 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned; 16 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md)).
+**Totals:** 208 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned; 19 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md); UI-37).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -301,6 +301,7 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `UI-34` | Recap of the last N sessions, next-session watchlist, ./run.sh backfill | trader-core, news, console | unit/test_ratings_recap.py, unit/test_console.py | — |
 | `UI-35` | Empty sections say why and what to do | console | unit/test_console.py | — |
 | `UI-36` | Options board (IV, IV rank, expected move, structures) and side-effect-free preview | options desk, core API, console | unit/test_options.py, unit/test_console.py | — |
+| `UI-37` | Technical scan page: ideas by verdict with every decision check, bearish views linked to the options preview, blocked reasons, day watchlist, technique scorecard; Today card; Run scan now | console | unit/test_scanner_checks.py | — |
 | `TS-1` | Deterministic engine: same bars, same ideas; no LLM computes a number or a signal | scanner | unit/test_scanner.py | — |
 | `TS-2` | Indicators identical to TA-Lib (SMA, EMA, RSI, MACD, BBANDS, ATR, ADX/DI, STOCH, OBV, ROC) | scanner.ta | unit/test_scanner.py | — |
 | `TS-3` | Candlestick patterns identical to TA-Lib; inside bar and NR7 fixtures | scanner.patterns | unit/test_scanner.py | — |
@@ -317,6 +318,9 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `TS-14` | trader scan / scan-eval, ./run.sh scan, Telegram; trader-core sends the scan at 16:20 ET | cli, trader-core | unit/test_scanner.py, replay/test_technical_scan_job.py | — |
 | `TS-15` | scanner config section with validated disabled names (optional :long/:short) | config | unit/test_scanner.py | — |
 | `TS-16` | Daily bars from the Parquet store; short or missing history skipped with the reason | scanner.data | unit/test_scanner.py | — |
+| `TS-17` | Decision checks on every idea (hard: long-only, list, earnings, locks, held, correlation, size; soft: macro, trend, weekly, market, sector, RS, room, ADX, edge); unknown never passes | scanner.checks | unit/test_scanner_checks.py | — |
+| `TS-18` | Size by RiskManager.size; verdict go/caution/blocked/watch/options; bearish ideas options-only (ADR-008) | scanner.checks, trader-core | unit/test_scanner_checks.py, replay/test_technical_scan_job.py | — |
+| `TS-19` | reports/technical_scan.json from trader-core and the CLI; SCAN command | trader-core, cli, console | unit/test_scanner_checks.py, replay/test_technical_scan_job.py | — |
 
 ## How to use
 

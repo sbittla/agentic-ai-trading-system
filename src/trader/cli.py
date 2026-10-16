@@ -566,10 +566,19 @@ def _scan_inputs(cfg: config_mod.Config) -> tuple[Path, dict[str, Any], Any]:
     return root, series, spy
 
 
+def _sector_series(cfg: config_mod.Config) -> Any:
+    from trader.data.store import resolve_bars_path
+    from trader.scanner.data import load_daily
+
+    return load_daily(resolve_bars_path(cfg.storage.bars_path), ["SMH"]).get("SMH")
+
+
 def cmd_scan(a: argparse.Namespace) -> int:
     """TS-14: swing ideas and the next-session day watchlist from stored daily bars."""
+    from trader.calendar import MacroCalendar, MarketCalendar
     from trader.notify.telegram import TelegramNotifier
     from trader.scanner import report
+    from trader.scanner.checks import apply_checks, base_context, simple_sizer
     from trader.scanner.evaluate import load_edges
     from trader.scanner.inplay import in_play
     from trader.scanner.techniques import scan
@@ -586,8 +595,31 @@ def cmd_scan(a: argparse.Namespace) -> int:
     edges, edges_src = load_edges(sc.eval_file)
     ideas, skipped = scan(series, spy, asof, frozenset(sc.disabled), edges)
     plays = in_play(series, asof)
+    day = asof or max(s.dates[-1] for s in series.values())
+    sector = _sector_series(cfg)
+    if sector is not None:
+        sector = sector.upto(sum(1 for d in sector.dates if d <= day))
+    try:
+        base = Path(a.config or os.environ.get("TRADER_CONFIG") or "config/config.yaml"
+                    ).resolve().parent.parent
+        macro: Any = MacroCalendar.load(base / cfg.windows.macro_calendar_file)
+    except Exception:   # noqa: BLE001 - the macro check then shows "unknown"
+        macro = None
+    ctx = base_context(cfg, asof=day, edges=edges, macro=macro, sector=sector,
+                       calendar=MarketCalendar())
+    if a.equity:
+        ctx.sizer = simple_sizer(a.equity, cfg.risk.risk_per_trade_pct,
+                                 cfg.risk.max_position_pct, cfg.risk.max_leverage)
+    ideas = apply_checks(ideas, ctx)
+    payload = report.as_json(day, ideas, plays, skipped, generated=datetime.now(UTC),
+                             source="cli", edges_from=edges_src, min_score=sc.min_score,
+                             top_n=sc.top_n, context_note=(
+                                 "CLI run: earnings, locks and positions are known only to "
+                                 "trader-core; those checks show as unknown."))
+    if a.date is None and not a.no_write:
+        report.write_latest(sc.latest_file, payload)
     if a.json:
-        print(json.dumps(report.as_json(asof, ideas, plays, skipped), indent=1, default=str))
+        print(json.dumps(payload, indent=1, default=str))
         return 0
     summary = None
     if a.explain:
@@ -1133,6 +1165,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--json", action="store_true")
     sc.add_argument("--telegram", action="store_true", help="also send the text to Telegram")
     sc.add_argument("--explain", action="store_true", help="add a Qwen summary (TS-13)")
+    sc.add_argument("--equity", type=float, help="size ideas for this account equity ($)")
+    sc.add_argument("--no-write", action="store_true",
+                    help="do not update scanner.latest_file (the console's copy)")
     sc.add_argument("--env-file", action="append", help="load KEY=value file(s) first")
     sc.set_defaults(fn=cmd_scan)
     se = sub.add_parser("scan-eval", help="walk-forward grading of the scanner (TS-11/12)")
