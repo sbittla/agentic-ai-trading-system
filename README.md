@@ -39,6 +39,8 @@ Milestones M0–M7 plus REQUIREMENTS 1.3, the options layer and the Owner Consol
 ./run.sh backfill 30  # once: last month's news, analyst ratings, recap and next-day ideas
 ```
 
+From a Windows Command Prompt or PowerShell, `run.cmd` takes the same commands (`run.cmd setup`, `run.cmd`, `run.cmd status`, `run.cmd help`); it runs `tools/run.ps1` and needs only Docker Desktop, not WSL.
+
 Full procedure: [docs/RUNBOOK.md](docs/RUNBOOK.md) §1. The Owner Console (http://localhost:8080) shows today's cockpit, a market recap, analyst ratings, news, next-day ideas, the options board and the controls.
 
 ## Quick start (development)
