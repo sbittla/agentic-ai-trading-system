@@ -23,6 +23,7 @@ NAV: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("Overview", (("/", "Today"), ("/market", "Market recap"), ("/scanner", "Scanner"))),
     ("Research", (("/stock", "Stock lookup"), ("/ratings", "Analyst ratings"),
                   ("/news", "News"), ("/technical", "Technical scan"),
+                  ("/catalysts", "Catalysts"),
                   ("/ideas", "Next-day ideas"), ("/options", "Options"),
                   ("/ask", "Ask"))),
     ("Trading", (("/approvals", "Approvals"), ("/controls", "Controls"),

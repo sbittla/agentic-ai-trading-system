@@ -159,6 +159,13 @@ class RiskCfg(_Frozen):
     ticker_loss_streak_lock: LossStreakLock = LossStreakLock()
     setup_disable_after_trades: int = 20
     recovery_trades: int = 10          # RC-2
+    # portfolio risk (PF-1..PF-4): limits across positions, not just per trade
+    max_open_risk_pct: float = 1.5     # PF-1: open risk to stops + the new trade, % of equity
+    max_pair_correlation: float = 0.8  # PF-2: 60-day return correlation counted as one bet
+    correlation_lookback: int = 60
+    max_beta_exposure_pct: float = 150  # PF-3: sum(beta x market value), % of equity
+    max_gap_loss_pct: float = 1.5      # PF-4: swing loss if the stop gaps by the 99th pct gap
+    gap_percentile: float = 99.0
 
 
 class WashSaleCfg(_Frozen):
@@ -245,6 +252,10 @@ class ExecutionCfg(_Frozen):
 
     slippage_switch_r: float = 0.1
     slippage_window: int = 10
+    # pre-trade order sanity, the last check before an order leaves (OC-1..OC-4)
+    max_price_deviation_pct: float = 1.0   # OC-1: limit price vs last trade
+    max_adv_pct: float = 1.0               # OC-2: order shares vs 20-day average volume
+    max_order_notional: float = 0.0        # OC-4: absolute $ cap per order; 0 = off
 
 
 class ShadowCfg(_Frozen):
@@ -340,6 +351,51 @@ class ScannerCfg(_Frozen):
         return tuple(str(t).upper().strip() for t in v)
 
 
+class CatalystCfg(_Frozen):
+    """News catalysts (NEWS_CATALYST_REQUIREMENTS.md §10). Advisory only: nothing here can
+    place an order (ADR-006)."""
+
+    enabled: bool = True
+    horizons: tuple[int, ...] = (1, 5, 10, 21)          # sessions
+    story_join: float = 0.75            # NC-1: cosine similarity, sentence embeddings
+    story_join_hash: float = 0.45       # NC-1: same, word-hash vectors (no model loaded)
+    story_window_h: int = 72
+    novelty_days: int = 30              # NC-2
+    min_strength: float = 40            # NC-4
+    alert_strength: float = 60          # NC-28
+    half_life_h: float = 24             # NC-7
+    iv_weight: float = 0.6              # NC-18
+    shrink_k: float = 30                # NC-19
+    stance_p: float = 0.56              # NC-24
+    stance_min_edge: float = 0.25       # NC-24: median move >= this x the horizon's sigma
+    max_posts_per_author: int = 3       # NC-12
+    social_sources: tuple[str, ...] = ("reddit",)   # + stocktwits, apewisdom once verified
+    telegram: bool = False              # NC-28; the gate (NC-34) must pass as well
+    history_universe: Literal["universe", "extended"] = "extended"
+    adjustments: tuple[str, ...] = ()   # NC-20/NC-33: set by catalyst-eval, not by hand
+    gate_min_graded: int = 100          # NC-34
+    gate_coverage: tuple[float, float] = (0.75, 0.85)
+    embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    social_model: str = "StephanAkkerman/FinTwitBERT-sentiment"
+    source_weights: dict[str, float] = Field(default_factory=lambda: {
+        "sec": 1.0, "business wire": 1.0, "pr newswire": 1.0, "globenewswire": 1.0,
+        "reuters": 0.8, "bloomberg": 0.8, "dow jones": 0.8, "wsj": 0.8, "cnbc": 0.8,
+        "marketwatch": 0.8, "financial times": 0.8, "barron": 0.8, "associated press": 0.8,
+        "benzinga": 0.6, "rss": 0.6, "yahoo": 0.4, "seekingalpha": 0.4, "motley fool": 0.4,
+        "zacks": 0.4, "tipranks": 0.4, "investorplace": 0.4, "insidermonkey": 0.4,
+        "reddit": 0.0, "stocktwits": 0.0})
+    default_source_weight: float = 0.6
+    eval_file: str = "reports/catalyst_eval.json"
+    latest_file: str = "reports/catalysts.json"
+
+    @field_validator("horizons")
+    @classmethod
+    def _horizons(cls, v: tuple[int, ...]) -> tuple[int, ...]:
+        if not v or any(h < 1 or h > 63 for h in v):
+            raise ValueError("catalyst.horizons: 1-63 sessions each")
+        return tuple(sorted(set(v)))
+
+
 class Config(_Frozen):
     mode: ModeCfg = ModeCfg()
     universe: UniverseCfg
@@ -363,6 +419,7 @@ class Config(_Frozen):
     tax: TaxCfg = TaxCfg()
     options: OptionsCfg = OptionsCfg()
     scanner: ScannerCfg = ScannerCfg()
+    catalyst: CatalystCfg = CatalystCfg()
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
@@ -432,6 +489,22 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
         p.append("scanner.min_score: 0-100")
     if sc.top_n < 1 or sc.in_play_top_n < 1 or sc.max_hold_days < 1 or sc.min_samples < 1:
         p.append("scanner: top_n, in_play_top_n, max_hold_days and min_samples >= 1")
+    ca = cfg.catalyst
+    if not (0 < ca.story_join <= 1 and 0 < ca.story_join_hash <= 1):
+        p.append("catalyst.story_join and story_join_hash: 0-1 (NC-1)")
+    if not 0 <= ca.min_strength <= ca.alert_strength <= 100:
+        p.append("catalyst: 0 <= min_strength <= alert_strength <= 100 (NC-4, NC-28)")
+    if not (0 <= ca.iv_weight <= 1 and ca.shrink_k >= 0 and 0.5 < ca.stance_p < 1):
+        p.append("catalyst: iv_weight 0-1, shrink_k >= 0, stance_p 0.5-1 (NC-18..NC-24)")
+    lo_cov, hi_cov = ca.gate_coverage
+    if not 0 < lo_cov < hi_cov <= 1 or ca.gate_min_graded < 30:
+        p.append("catalyst: gate_coverage low < high within 0-1, gate_min_graded >= 30 (NC-34)")
+    bad_src = set(ca.social_sources) - {"reddit", "stocktwits", "apewisdom"}
+    if bad_src:
+        p.append(f"catalyst.social_sources: unknown {sorted(bad_src)}")
+    bad_adj = set(ca.adjustments) - {"pead", "priced_in", "crowding", "trend"}
+    if bad_adj:
+        p.append(f"catalyst.adjustments: unknown {sorted(bad_adj)} (NC-20)")
     from trader.scanner.techniques import technique_names
     known = set(technique_names())
     for name in sc.disabled:
@@ -489,6 +562,19 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
         p.append("risk.risk_per_trade_pct <= 1.0")
     if not 0 < r.drawdown_risk_per_trade_pct <= r.risk_per_trade_pct:
         p.append("risk.drawdown_risk_per_trade_pct <= risk.risk_per_trade_pct (RC-1)")
+    if not r.risk_per_trade_pct <= r.max_open_risk_pct <= 5.0:
+        p.append("risk.max_open_risk_pct between risk_per_trade_pct and 5.0 (PF-1)")
+    if not 0.3 <= r.max_pair_correlation <= 1.0 or r.correlation_lookback < 20:
+        p.append("risk.max_pair_correlation 0.3-1.0, correlation_lookback >= 20 (PF-2)")
+    if not 25 <= r.max_beta_exposure_pct <= 300:
+        p.append("risk.max_beta_exposure_pct 25-300 (PF-3)")
+    if not 0 < r.max_gap_loss_pct <= 5.0 or not 90 <= r.gap_percentile < 100:
+        p.append("risk.max_gap_loss_pct 0-5, gap_percentile 90-99.9 (PF-4)")
+    ex = cfg.execution
+    if not 0.1 <= ex.max_price_deviation_pct <= 5.0 or not 0 < ex.max_adv_pct <= 10.0 \
+            or ex.max_order_notional < 0:
+        p.append("execution: max_price_deviation_pct 0.1-5, max_adv_pct 0-10, "
+                 "max_order_notional >= 0 (OC-1..OC-4)")
     if not 0 < r.daily_loss_limit_pct <= 3.0:
         p.append("risk.daily_loss_limit_pct <= 3.0")
     if not 0 < r.max_leverage <= 1.0:

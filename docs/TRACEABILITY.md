@@ -4,7 +4,7 @@
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 208 requirement IDs (44 added in REQUIREMENTS 1.3, most of them planned; 19 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md); UI-37).
+**Totals:** 272 requirement IDs (16 from [GAP_REVIEW.md](GAP_REVIEW.md) and 48 news-catalyst IDs added in REQUIREMENTS 1.4; 44 added in REQUIREMENTS 1.3, most of them planned; 19 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md); UI-37).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -321,6 +321,71 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `TS-17` | Decision checks on every idea (hard: long-only, list, earnings, locks, held, correlation, size; soft: macro, trend, weekly, market, sector, RS, room, ADX, edge); unknown never passes | scanner.checks | unit/test_scanner_checks.py | — |
 | `TS-18` | Size by RiskManager.size; verdict go/caution/blocked/watch/options; bearish ideas options-only (ADR-008) | scanner.checks, trader-core | unit/test_scanner_checks.py, replay/test_technical_scan_job.py | — |
 | `TS-19` | reports/technical_scan.json from trader-core and the CLI; SCAN command | trader-core, cli, console | unit/test_scanner_checks.py, replay/test_technical_scan_job.py | — |
+
+| `PF-1` | Open risk to stops across the book plus the new trade ≤ 1.5% of equity; size down to fit | A7 | unit/test_portfolio_risk.py | SIZE_TOO_SMALL |
+| `PF-2` | Measured 60-session correlation ≥ 0.8 with an open position refuses the entry | A7 | unit/test_portfolio_risk.py | NT_PF_CORRELATION |
+| `PF-3` | Beta-weighted exposure ≤ 150% of equity; size down to fit | A7 | unit/test_portfolio_risk.py | SIZE_TOO_SMALL |
+| `PF-4` | Swing size capped by stop distance + 99th-percentile adverse overnight gap | A7 | unit/test_portfolio_risk.py | SIZE_TOO_SMALL |
+| `OC-1` | Limit price within 1% of the last trade | A8 | unit/test_portfolio_risk.py | EXEC_SANITY |
+| `OC-2` | Order shares ≤ 1% of 20-day average volume | A8 | unit/test_portfolio_risk.py | EXEC_SANITY |
+| `OC-3` | Order shape: qty ≥ 1, stop < entry < T1 ≤ T2 | A8 | unit/test_portfolio_risk.py | EXEC_SANITY |
+| `OC-4` | Optional absolute order-value cap | A8 | unit/test_portfolio_risk.py | EXEC_SANITY |
+| `PA-1` | Sharpe, Sortino, Calmar, SQN, longest losing streak | metrics, A11 | unit/test_analytics.py | — |
+| `PA-2` | SPY benchmark and excess return for the period | metrics, A11 | unit/test_analytics.py | — |
+| `PA-3` | Weekly and monthly reviews carry PA-1, PA-2 and SV-3 | A11 | unit/test_a11_reporter.py | — |
+| `SV-1` | Seeded bootstrap 95% interval of expectancy | metrics | unit/test_analytics.py | — |
+| `SV-2` | Monte Carlo 95th-percentile drawdown over 100 resampled trades | metrics | unit/test_analytics.py | — |
+| `SV-3` | Statistical gate in the walk-forward pass bar and the reviews | backtest, A11 | unit/test_analytics.py | — |
+| `MR-1` | Model inventory: what each model may and may never decide, checks, fallback | owner | Manual: GAP_REVIEW.md review | — |
+| `MR-2` | A new model or adjustment needs an inventory entry, a test that it helps, a safe fallback | owner | Manual: code review | — |
+| `NC-1` | Every cleaned news item is embedded (MiniLM) and joined to an open story for the same ti… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-2` | Novelty 0–1 = 1 − max similarity to the ticker's stories in the prior 30 days. A rehash | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-3` | Source weight: SEC filing and company press release 1.0; major wire and outlet 0.8; othe… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-4` | A story is a catalyst when its strength (§5.3) is ≥ catalyst.min_strength (default 40) | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-5` | Each story gets one type from the table below and a direction (positive, negative or mix… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-6` | The type, the rule or model that set it, and the prompt version are journaled so a grade… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-7` | Strength 0–100 per story and per ticker-day (max over live stories, decayed with catalys… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-8` | Factors and starting weights (tuned by §6, then frozen in config): type materiality (0–2… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-9` | Labels: 0–39 WEAK, 40–59 MODERATE, 60–79 STRONG, 80–100 MAJOR. The direction is sep | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-10` | Priced-in check: when the day-0 move already exceeds 1.5× the implied move (A13) or 3 AT… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-11` | Per ticker and day, from Reddit (and Stocktwits/ApeWisdom when enabled): mention volume … | A3 (news-sentiment) | unit/test_catalyst.py | — |
+| `NC-12` | Guards against noise and manipulation: one vote per author per day; posts shorter than 2… | A3 (news-sentiment) | unit/test_catalyst.py | — |
+| `NC-13` | Agreement with the news: AGREES, DISAGREES or QUIET (z < 1). Disagreement is shown pr | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-14` | Crowding warning: mention z ≥ 3 with bull share ≥ 80% and price ≥ 2 ATR above EMA20 ( | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-15` | With no social source configured, the indicator shows "no social data (set Reddit keys: … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-16` | Each outlook carries a confluence panel of independent checks, each marked supports / ag… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-17` | For each horizon h ∈ {1, 5, 10, 21} sessions, from the close of the as-of day: P(up), th… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-18` | Width (volatility for h): the implied move to the matching expiry when A13 has it, else … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-19` | Tilt (drift and skew): a pooled event study over the history store: for every past stor | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-20` | Adjustments, each used only if §6 shows it improves grading: PEAD (earnings surprise sig… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-21` | Ranges are percentiles of the pooled, vol-scaled outcome distribution times the width, s… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-22` | Scenarios in words, from code: base, bull and bear cases, each with a price level that c… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-23` | Every outlook says "not a prediction of a certain outcome" and shows the track record (§… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-24` | Stance from the outlook: BULLISH when P(up) ≥ catalyst.stance_p (default 0.56) at the | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-25` | Vehicle (suggestion only): bullish → stock (long, ADR-008) or a call debit spread when I… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-26` | Plan numbers by code: entry trigger above the day-0 high (bullish) or below the day-0 lo… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-41` | Point in time. News published at or after the 4 PM close belongs to the next session (it… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-42` | One event per ticker per day 0 (the strongest story) in the event study; the evaluation … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-43` | Abnormal return = return − beta × SPY return, with a 120-session beta from the bars befo… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-44` | When an adjustment applies, the range shape comes from past events that share the flag (… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-45` | Items flagged as instruction-like by A3 (A3-4) never become stories. / | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-46` | Stories store their item ids, whether a rule or the model typed them, and the prompt ver… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-47` | Relevance. An item counts only if its headline or first 400 characters name the company … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-48` | Non-events. Previews ("to report", "what to expect"), opinion and listicles ("should you… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-27` | Console: a Catalysts page (live catalysts ranked by strength, filters by type and direc | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-28` | Telegram: a message when a catalyst ≥ catalyst.alert_strength (default 60) appears on a | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-29` | CLI: run.sh catalyst [TICKER] [--date D] [--telegram], run.sh catalyst-eval, run.sh ba | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-30` | History backfill: backfill-catalysts 365 pulls up to a year of Finnhub news and EDGAR 8-… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-31` | Walk-forward: outlooks for each past day use only data before that day (no look-ahead, t… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-32` | Metrics per horizon: Brier score of P(up) vs the 50/50 and the "same as SPY" baselines; … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-33` | Feature gate: a strength factor or adjustment (NC-8, NC-20) stays in only if it improves… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-34` | Alert gate: Telegram alerts (NC-28) and the "calibrated" label switch on only after ≥ 10… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-35` | Every live outlook is stored and graded when its horizon ends (like A16 for options), so… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-36` | Resources: +≤ 0.8 GB RAM in news-sentiment (both models loaded once, threads capped as F… | A17 (trader-core) | Manual: news-sentiment RAM after start (docs/HARDWARE.md) | — |
+| `NC-37` | Latency: a story's strength within 2 minutes of its first item; run.sh catalyst NVDA ans… | A17 (trader-core) | Manual: time `./run.sh catalyst NVDA` | — |
+| `NC-38` | Determinism: the same inputs give the same scores and ranges; models pinned by hash; Qwe… | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-39` | Security: social text is untrusted (DQ-4); cleaned before any model; never shown raw in … | A17 (trader-core) | unit/test_catalyst.py | — |
+| `NC-40` | Tests: unit tests per factor and the event-study math; a look-ahead test; injection test… | A17 (trader-core) | Manual: CI runs ruff, mypy, pytest | — |
 
 ## How to use
 

@@ -238,7 +238,8 @@ def create_app(
             recap_rows=recap, recap_at=run_at, ratings=ratings_q(data, 14),
             news=news_q(data, 3, limit=8), events=upcoming_events(data),
             quotes={x: q for x, q in zip(("SPY", "QQQ", "SMH"), qs, strict=True) if q},
-            csrf=ses.csrf, now=data.now(), technical=data.technical_scan())
+            csrf=ses.csrf, now=data.now(), technical=data.technical_scan(),
+            catalysts=data.catalysts())
         return await html(req, ses, "Today", body)
 
     @page
@@ -530,6 +531,13 @@ def create_app(
         return await html(req, ses, "Technical scan", body)
 
     @page
+    async def catalysts(req: Request, ses: Session) -> Response:
+        from trader.console import catalysts as cat
+
+        return await html(req, ses, "News catalysts",
+                          cat.page(data.catalysts(), data.catalyst_eval(), ses.csrf))
+
+    @page
     async def reports(req: Request, ses: Session) -> Response:
         name = req.query_params.get("name")
         if name:
@@ -797,6 +805,7 @@ def create_app(
         Route("/alerts", alerts),
         Route("/ideas", ideas),
         Route("/technical", technical),
+        Route("/catalysts", catalysts),
         Route("/reports", reports),
         Route("/compliance", compliance),
         Route("/notes", notes_get),

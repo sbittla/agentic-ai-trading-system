@@ -80,6 +80,9 @@ class Reason(StrEnum):
     HALT_LL9 = "HALT_LL9"
     HALT_LL10 = "HALT_LL10"
     HALT_LL11 = "HALT_LL11"
+    NT_PF_CORRELATION = "NT_PF_CORRELATION"        # PF-2: measured correlation with an open one
+    # execution
+    EXEC_SANITY = "EXEC_SANITY"                    # OC-1..OC-4: order failed the last check
     # approvals
     APPROVED = "APPROVED"
     NEEDS_APPROVAL = "NEEDS_APPROVAL"

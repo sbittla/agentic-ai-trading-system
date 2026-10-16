@@ -47,27 +47,45 @@ class FinnhubNews:
         self._transport = transport
 
     async def _get(self, path: str, params: dict[str, Any]) -> Any:
-        await self.limiter.wait()
-        async with httpx.AsyncClient(base_url=self.BASE, timeout=15,
-                                     transport=self._transport) as c:
-            r = await c.get(path, params={**params, "token": self.token})
+        for attempt in range(2):
+            await self.limiter.wait()
+            async with httpx.AsyncClient(base_url=self.BASE, timeout=15,
+                                         transport=self._transport) as c:
+                r = await c.get(path, params={**params, "token": self.token})
+            if r.status_code == 429 and attempt == 0:   # rate limited: wait once, then retry
+                await asyncio.sleep(30)
+                continue
             r.raise_for_status()
             return r.json()
+        return None
 
     async def fetch(self, symbols: Sequence[str], since: datetime) -> list[NewsItem]:
         out: list[NewsItem] = []
         frm, to = since.astimezone(UTC).date(), datetime.now(UTC).date()
+        # a long range in one call comes back truncated: ask month by month (NC-30 backfill)
+        windows, a = [], frm
+        while a <= to:
+            b = min(to, a + timedelta(days=29))
+            windows.append((a, b))
+            a = b + timedelta(days=1)
         for sym in symbols:
-            rows = await self._get("/company-news", {"symbol": sym, "from": frm.isoformat(),
-                                                     "to": to.isoformat()})
-            for r in rows or []:
+            rows: list[Any] = []
+            for a, b in windows:
+                rows += await self._get("/company-news", {"symbol": sym, "from": a.isoformat(),
+                                                          "to": b.isoformat()}) or []
+            seen: set[str] = set()
+            for r in rows:
+                if str(r.get("id")) in seen:
+                    continue
+                seen.add(str(r.get("id")))
                 ts = datetime.fromtimestamp(int(r.get("datetime", 0)), UTC)
                 if ts < since:
                     continue
                 out.append(NewsItem(id=f"fh-{r.get('id')}", ticker=sym, source="finnhub",
                                     published_at=ts, headline=str(r.get("headline", ""))[:500],
                                     text=str(r.get("summary", ""))[:5000],
-                                    url=str(r.get("url", "")), kind="news"))
+                                    url=str(r.get("url", "")), kind="news",
+                                    meta={"publisher": str(r.get("source", ""))[:64]}))
         out += await self.earnings(symbols)
         return out
 
@@ -135,18 +153,21 @@ class EdgarFilings:
                 continue
             js = await self._get(f"https://data.sec.gov/submissions/CIK{cik}.json")
             recent = js.get("filings", {}).get("recent", {})
-            for form, fdate, acc, doc in zip(recent.get("form", []), recent.get("filingDate", []),
-                                             recent.get("accessionNumber", []),
-                                             recent.get("primaryDocDescription", []),
-                                             strict=False):
+            forms = recent.get("form", [])
+            items = recent.get("items", []) or [""] * len(forms)
+            for form, fdate, acc, doc, its in zip(forms, recent.get("filingDate", []),
+                                                  recent.get("accessionNumber", []),
+                                                  recent.get("primaryDocDescription", []),
+                                                  items, strict=False):
                 if form not in ("8-K", "6-K"):
                     continue
                 ts = datetime.combine(date.fromisoformat(fdate), datetime.min.time(), UTC)
                 if ts < since - timedelta(days=1):
                     break
+                head = f"{form} filed: {doc or ''}" + (f" (items {its})" if its else "")
                 out.append(NewsItem(id=f"sec-{acc}", ticker=sym, source="edgar",
-                                    published_at=ts, headline=f"{form} filed: {doc or ''}"[:300],
-                                    kind="8-K"))
+                                    published_at=ts, headline=head[:300], kind="8-K",
+                                    meta={"publisher": "SEC", "items": its or ""}))
         return out
 
     async def shares_outstanding(self, symbol: str) -> float | None:

@@ -105,3 +105,20 @@ async def test_weekly_and_monthly_with_standards(rep: Reporter) -> None:
 async def test_morning_summary_covers_until_1030(rep: Reporter) -> None:
     data = await rep.daily(PLAIN_DAY, "morning")
     assert data["metrics"]["trades"] == 2 and data["text"].startswith("[PAPER] Morning summary")
+
+
+@pytest.mark.rule("PA-3")
+async def test_reports_carry_risk_adjusted_benchmark_and_statistics(
+        rep: Reporter, journal: SqlJournal) -> None:
+    for k, eq in enumerate([25000, 25100, 24950, 25200, 25300]):
+        journal.upsert(s.daily_metrics, {"date": PLAIN_DAY - timedelta(days=4 - k)},
+                       {"trades": 0, "equity": str(eq)})
+    for k, px in enumerate([500.0, 505.0]):
+        journal.insert(s.levels, {"date": PLAIN_DAY - timedelta(days=3 - 3 * k),
+                                  "ticker": "SPY", "prior_close": px})
+    w = await rep.weekly(PLAIN_DAY)
+    assert {"risk_adjusted", "benchmark", "statistical"} <= set(w)
+    assert w["benchmark"]["spy_return_pct"] == 1.0
+    assert w["statistical"]["checks"]["trades_ge_100"] is False    # 2 trades: no evidence
+    m = await rep.monthly(2026, 10)
+    assert "risk_adjusted" in m and "statistical" in m["text"]

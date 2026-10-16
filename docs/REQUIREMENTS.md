@@ -1,6 +1,6 @@
 # Trading Agents: Requirements Specification
 
-**Version:** 1.3 (October 10, 2026)
+**Version:** 1.4 (October 16, 2026)
 **Owner:** Srinivasa Rao Bittla
 **Status:** Draft for build
 
@@ -9,6 +9,16 @@ The system trades only a fixed list of 10 large-cap US stocks, through Alpaca, u
 > No system can guarantee it will not lose money. These requirements are built to make losses small, rare and capped, and to stop trading before a bad day becomes a bad month. This is a design for personal research and automation, not financial or tax advice.
 
 **Related documents:** [Architecture](ARCHITECTURE.md) · [Data spec](DATA_SPEC.md) · [Agent prompts](AGENT_PROMPTS.md) · [Config reference](CONFIG_REFERENCE.md) · [Test plan](TEST_PLAN.md) · [Runbook](RUNBOOK.md) · [Decisions](DECISIONS.md) · [Strategy spec](STRATEGY_SPEC.md) · [Security](SECURITY.md) · [Interfaces](INTERFACES.md) · [Implementation plan](IMPLEMENTATION_PLAN.md) · [Traceability](TRACEABILITY.md)
+
+### What changed in 1.4
+
+Gaps against professional practice ([GAP_REVIEW.md](GAP_REVIEW.md)) are now requirements:
+
+- **Risk across the book:** total open risk to stops, measured correlation, beta-weighted exposure and overnight-gap stress for swings (PF-1..PF-4, §6.7).
+- **Independent order controls:** price band, volume, order shape and notional checks before any order leaves (OC-1..OC-4, §6.8).
+- **Evidence:** Sharpe, Sortino, Calmar and SQN; SPY benchmark; bootstrap interval of the edge; Monte Carlo drawdown; a statistical go-live gate (PA-1..PA-3, SV-1..SV-3, §6.4).
+- **Governance:** a model inventory and a rule for adding models (MR-1, MR-2, GAP_REVIEW.md).
+- **News catalysts:** a new advisory agent A17 ([NEWS_CATALYST_REQUIREMENTS.md](NEWS_CATALYST_REQUIREMENTS.md)).
 
 ### What changed in 1.3
 
@@ -305,6 +315,15 @@ These rules are hard limits enforced by code (A7). No agent and no prompt can ch
 | Rule breaches | 0 |
 | Max drawdown | Inside the 6% monthly limit |
 
+Reported with them, so the averages are not read alone:
+
+- **PA-1** Risk-adjusted return: Sharpe and Sortino (daily returns, annualised, risk-free 0), Calmar (annual return / max drawdown), SQN (√n × mean R / sd R) and the longest losing streak. Shown as "—" until 20 days of data.
+- **PA-2** Benchmark: SPY's return over the same period and the excess over it.
+- **PA-3** Both are in the weekly and monthly reviews.
+- **SV-1** Confidence: a seeded bootstrap 95% interval of expectancy (mean R).
+- **SV-2** Drawdown from luck alone: the 95th-percentile max drawdown over 100 trades resampled from the observed R at the configured risk.
+- **SV-3** Statistical gate: at least 100 trades, the lower end of the SV-1 interval above zero, and the SV-2 drawdown inside the monthly limit. Part of the walk-forward pass bar (TEST_PLAN stage 3) and shown in every weekly review.
+
 ### 6.5 Account type and settlement
 
 - **AC-1 Cash account:**
@@ -319,6 +338,28 @@ These rules are hard limits enforced by code (A7). No agent and no prompt can ch
   - Expectancy per setup is always computed after actual slippage (entry fill against trigger; stop fill against stop).
   - When a setup's average entry slippage over its last 10 trades is above 0.1R, it switches to a passive limit at the trigger. If slippage is still above 0.1R after 10 more trades, it returns to paper (like RC-3).
   - Entries cancelled under EX-3 count as missed trades in the fill-rate statistics.
+
+### 6.7 Portfolio risk (across open positions)
+
+Each limit applies to the whole book on the same route (broker or paper), with statistics computed every morning from daily bars before today.
+
+| ID | Limit | Value | What happens |
+| --- | --- | --- | --- |
+| PF-1 | Open risk ("heat"): the sum of (last price − stop) × shares over open positions, plus the new trade | 1.5% of equity | The new trade is sized down to fit (`PF-1 open risk` binding); a stop above the price adds nothing |
+| PF-2 | Measured correlation with an open position | 60-session return correlation ≥ 0.8 | Entry refused, `NT_PF_CORRELATION`. Works on top of LL-10's configured groups |
+| PF-3 | Beta-weighted exposure: sum of beta (vs SPY, 60 sessions) × market value | 150% of equity | Sized down (`PF-3 beta exposure`); an unknown beta counts as 1.0 |
+| PF-4 | Overnight gap stress for swing trades: stop distance + the stock's 99th-percentile adverse overnight gap over the last year | Loss ≤ 1.5% of equity | Sized down (`PF-4 gap risk`); day trades are flat overnight and skip it |
+
+### 6.8 Pre-trade order controls
+
+A8 checks every order once more, independently of the strategy and A7, just before it leaves (a fat-finger guard in the spirit of SEC Rule 15c3-5). A failure refuses the order (`EXEC_SANITY`), journals an `ORDER_SANITY` incident and tells the owner.
+
+| ID | Check | Default |
+| --- | --- | --- |
+| OC-1 | Limit price within a band of the last trade | 1.0% |
+| OC-2 | Shares at most a share of the 20-day average daily volume | 1.0% |
+| OC-3 | Order shape: quantity ≥ 1, stop < entry < T1 ≤ T2, all prices positive | always |
+| OC-4 | Absolute order value cap | off (`execution.max_order_notional: 0`) |
 
 ---
 
@@ -396,6 +437,8 @@ flowchart TD
 | A12 | Compliance guard | Code | Before every entry and loss exit; monthly | Lock decisions, wash-sale report |
 
 Planned (draft): A13 Options data, A14 Options strategist, A15 Options risk & compliance, A16 Options monitor & grader, and bearish setups in A4 for options only. See [OPTIONS_REQUIREMENTS.md](OPTIONS_REQUIREMENTS.md) §12.
+
+Advisory (built, never on the order path): **A17 News catalyst**, which gives catalyst strength, a 1-day to 1-month outlook and a position view. A3 collects its embeddings, social scores and fundamentals. See [NEWS_CATALYST_REQUIREMENTS.md](NEWS_CATALYST_REQUIREMENTS.md) §7.
 
 ---
 

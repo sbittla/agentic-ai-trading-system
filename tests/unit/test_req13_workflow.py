@@ -249,7 +249,7 @@ def test_copilot_routes_are_reconciled_like_broker_positions(tmp_path: Path) -> 
     from trader.agents.a09_positions import MANUAL_ROUTES
 
     assert "manual" in MANUAL_ROUTES and "manual_ext" in MANUAL_ROUTES
-    src = (Path(__file__).resolve().parents[2] / "src/trader/engine.py").read_text()
+    src = (Path(__file__).resolve().parents[2] / "src/trader/engine.py").read_text(encoding="utf-8")
     assert 'p.route in ("broker", "manual")' in src   # Alpaca-held owner buys reconcile
 
 

@@ -84,6 +84,7 @@ from trader.models.messages import (
 from trader.models.reasons import Reason
 from trader.notify.chart import approval_chart
 from trader.notify.commands import CommandAuthority
+from trader.portfolio import compute as portfolio_stats
 from trader.timeutil import ET, et_date, et_datetime, to_et
 
 log = structlog.get_logger(__name__)
@@ -200,6 +201,8 @@ class TradingEngine:
         self.snapshots: Any = None        # UN-1: async (symbols) -> Alpaca snapshots
         self.sip_history: Any = None      # DQ-6: HistoricalData on the SIP feed
         self.in_play_today: list[dict[str, Any]] = []
+        self._catalyst: Any = None                  # A17, built on first use
+        self._catalyst_sent: set[str] = set()       # NC-28: one alert per story
         self._setup_jobs()
 
     # ===================================================================================
@@ -239,6 +242,16 @@ class TradingEngine:
             if self.cfg.scanner.alert_after_close:
                 sch.add("technical_scan", time(16, 20), self.job_technical_scan,
                         until=time(23, 59), retry_min=10)
+            if self.cfg.catalyst.enabled:                                       # A17
+                for at in (time(8, 45), time(10, 45), time(12, 15), time(13, 45)):
+                    sch.add(f"catalyst_{at.hour:02d}{at.minute:02d}", at,
+                            lambda now: self.job_catalysts(now, alert=False))
+                sch.add("catalyst_close", time(16, 25),
+                        lambda now: self.job_catalysts(now, alert=True), until=time(23, 59))
+                sch.add("catalyst_grade", time(16, 40), self.job_catalyst_grade,
+                        until=time(23, 59))                                      # NC-35
+                sch.add("catalyst_eval", time(18, 30), self.job_catalyst_eval,
+                        when="sunday", until=time(23, 59))                       # NC-33/34
             # after the 4:30-5:30 reports: free the GPU and ~3 GB RAM overnight; QW-4 reloads
             # the model at 8:55 and the news service loads it on its first call from 7:15
             sch.add("llm_unload", LLM_UNLOAD_AT, self._unload_llm, when="daily",
@@ -480,14 +493,18 @@ class TradingEngine:
             return
         hist_days: dict[str, int] = {}
         self._spy_daily: list[Bar] = []
+        dailies: dict[str, list[Bar]] = {}
         for t in list(self.cfg.universe.tickers) + list(self.cfg.universe.context_symbols):
             try:
-                daily = await self.history.daily_bars(t, d - timedelta(days=200), d)
+                daily = await self.history.daily_bars(t, d - timedelta(days=400), d)
             except Exception as exc:   # noqa: BLE001
                 log.warning("levels_history_failed", ticker=t, error=str(exc))
                 continue
             if t == "SPY":
                 self._spy_daily = daily
+            elif t in self.cfg.universe.tickers:
+                dailies[t] = daily   # a year for PF-4 gaps; the level map keeps 200 days
+            daily = [b for b in daily if et_date(b.ts) >= d - timedelta(days=200)]
             st = self.md.state.get(t)
             lv = compute_levels(t, d, daily, st.pm_high if st else None,
                                 st.pm_low if st else None)
@@ -503,6 +520,11 @@ class TradingEngine:
                     "ema50d": lv.ema50d, "atr14d": lv.atr14d,
                     "json": lv.model_dump(mode="json")})
         self._classify_regime(now, use_open=False)
+        rk = self.cfg.risk   # PF-1..PF-4, OC-2: book statistics from bars before today
+        self.risk.state.portfolio = portfolio_stats(
+            dailies, self._spy_daily, d, lookback=rk.correlation_lookback,
+            gap_pct=rk.gap_percentile)
+        self.exec.adv = dict(self.risk.state.portfolio.adv)
         # UR-3: history check (tradability is checked against the broker in live pre-flight)
         need = self.cfg.universe.min_history_days
         for t in self.cfg.universe.tickers:
@@ -778,6 +800,62 @@ class TradingEngine:
         except OSError as exc:
             log.warning("scan_write_failed", error=str(exc))
         await self.say(text, kind="scan")
+        return True
+
+    # -- A17 news catalysts (NEWS_CATALYST_REQUIREMENTS.md) -------------------------------
+    def catalyst_agent(self) -> Any:
+        if getattr(self, "_catalyst", None) is None:
+            from trader.catalyst.agent import CatalystAgent, history_loader
+
+            async def none(symbols: Any, until: date) -> dict[str, Any]:
+                return {}
+            load = history_loader(self.history) if self.history is not None else none
+            self._catalyst = CatalystAgent(self.cfg, self.journal, load, self.llm, self.now,
+                                           self.cal, self.macro)
+        return self._catalyst
+
+    def _catalyst_sizer(self) -> Any:
+        """The plan is sized by the live risk rules, never by the model (NC-26)."""
+        open_pos = self.pm.open_positions()
+        exposure = sum((p.cost * p.qty_open / p.qty_filled for p in open_pos
+                        if p.qty_filled and p.route == "broker"), D0)
+
+        def sizer(entry: float, stop: float) -> tuple[int, float, str]:
+            qty, risk_usd, _, why = self.risk.size(
+                Decimal(str(entry)), Decimal(str(stop)), self.equity, self.buying_power,
+                exposure, planned=True)
+            return qty, float(risk_usd), why
+        return sizer
+
+    async def job_catalysts(self, now: datetime, alert: bool = False,
+                            tickers: list[str] | None = None) -> bool:
+        """A17: live catalysts on the universe; the close run may alert (NC-28), only when
+        catalyst.telegram is on AND the walk-forward gate passes (NC-34)."""
+        from trader.catalyst import report
+
+        agent = self.catalyst_agent()
+        outs = await agent.run(tickers, sizer=self._catalyst_sizer())
+        if not alert:
+            return True
+        ca = self.cfg.catalyst
+        data = agent.load_eval() or {}
+        gate = bool((data.get("gate") or {}).get("pass"))
+        fresh = [o.as_dict() for o in outs if o.typed.strength.score >= ca.alert_strength
+                 and o.typed.story.story_id not in self._catalyst_sent]
+        if ca.telegram and gate and fresh:
+            for o in fresh:
+                self._catalyst_sent.add(o["story_id"])
+            await self.say(report.render(fresh, as_of=et_date(now).isoformat(),
+                                         track=data.get("horizons")), kind="catalyst")
+        return True
+
+    async def job_catalyst_grade(self, now: datetime) -> bool:
+        await self.catalyst_agent().grade()
+        return True
+
+    async def job_catalyst_eval(self, now: datetime) -> bool:
+        """Weekly walk-forward re-grade: refreshes the event list, adjustments and gate."""
+        await self.catalyst_agent().evaluate(365)
         return True
 
     def _scan_context(self, day: date, now: datetime, edges: dict[str, float] | None,
@@ -1605,7 +1683,14 @@ class TradingEngine:
         if chase:
             self._reject(s_, dec.proposal_id, Reason.NT_CHASE_AT_SEND, chase)
             return
-        code, ticket = await self.exec.execute(dec, s_, now, planned)
+        lp = self.md.state[s_.ticker].last_price if s_.ticker in self.md.state else None
+        code, ticket = await self.exec.execute(dec, s_, now, planned,
+                                               Decimal(str(lp)) if lp else None)
+        if code == Reason.EXEC_SANITY:                                          # OC-1..OC-4
+            self._reject(s_, dec.proposal_id, Reason.EXEC_SANITY, self.exec.last_sanity)
+            self.journal.incident(now, "ORDER_SANITY", f"{dec.proposal_id} "
+                                  f"{self.exec.last_sanity}")
+            return
         if code == Reason.EXEC_RATE_LIMIT:
             self.journal.incident(now, "RULE_BREACH", "order-rate guard tripped (SEC-12)")
             await self.kill("order-rate guard (SEC-12)", by="A8")
@@ -1994,6 +2079,26 @@ class TradingEngine:
                         await self.say(f"SCAN failed: {exc}", "command_reply")
                 self._spawn(_scan())
                 reply = "SCAN started: the technical scan follows"
+        elif action == "CATALYST":                                              # NC-28
+            tks = [arg.strip().upper()] if arg.strip() else None
+
+            async def _cat() -> None:
+                from trader.catalyst import report
+
+                try:
+                    agent = self.catalyst_agent()
+                    outs = await agent.run(tks, sizer=self._catalyst_sizer(),
+                                           write=tks is None)
+                    text = report.render([o.as_dict() for o in outs],
+                                         as_of=et_date(self.now()).isoformat(),
+                                         track=(agent.load_eval() or {}).get("horizons"),
+                                         top_n=3)
+                except Exception as exc:   # noqa: BLE001
+                    log.warning("catalyst_failed", error=str(exc))
+                    text = f"CATALYST failed: {exc}"
+                await self.say(text, "catalyst")
+            self._spawn(_cat())
+            reply = "CATALYST started: the outlook follows"
         elif action == "PLAN":
             if self.next_session_day(self.now()) is None:
                 reply = "PLAN runs outside market hours; the 9:00/2:45 plans cover the session"

@@ -128,7 +128,9 @@ news_items = Table("news_items", metadata, _id(),
                    Column("headline", Text), Column("cleaned_text", Text),
                    Column("raw_text", Text),
                    Column("finbert_score", Float),
-                   Column("suspicious", Boolean, default=False))
+                   Column("suspicious", Boolean, default=False),
+                   Column("kind", String(16)),          # news | 8-K | post | rating | form4
+                   Column("publisher", String(64)))     # NC-3: the outlet behind the feed
 
 event_flags = Table("event_flags", metadata, _id(),
                     Column("date", Date, nullable=False, index=True),
@@ -449,8 +451,71 @@ option_suggestions = Table("option_suggestions", metadata, _id(),  # A14, A16
                            Column("pnl", Money), Column("r_multiple", Float),
                            Column("stock_view_right", Boolean))
 
+# --- news catalysts (NEWS_CATALYST_REQUIREMENTS.md §8) ---------------------------------------
+news_embeddings = Table("news_embeddings", metadata, _id(),       # NC-1 (news writes)
+                        Column("item_id", String(128), unique=True),
+                        Column("ticker", String(12), index=True),
+                        Column("model", String(64)),
+                        Column("vec", Text))                     # base64 float16
+
+social_posts = Table("social_posts", metadata, _id(),             # NC-11 (news writes)
+                     Column("item_id", String(128), unique=True),
+                     Column("ticker", String(12), index=True),
+                     Column("ts", UtcDateTime, index=True),
+                     Column("source", String(16)),
+                     Column("author", String(64)),               # salted hash, never the name
+                     Column("score", Float),                     # -1..+1 from the social model
+                     Column("tag", String(8)),                   # user's own Bullish/Bearish
+                     Column("length", Integer),
+                     Column("text_hash", String(16)),
+                     Column("model", String(64)))
+
+fundamentals_daily = Table("fundamentals_daily", metadata, _id(),  # NC-16 (news writes)
+                           Column("date", Date, index=True),
+                           Column("ticker", String(12), index=True),
+                           Column("kind", String(24)),   # earnings|recommendation|insider|...
+                           Column("json", JSON))
+
+news_stories = Table("news_stories", metadata, _id(),             # NC-1..NC-6 (core writes)
+                     Column("story_id", String(64), unique=True),
+                     Column("ticker", String(12), index=True),
+                     Column("first_seen", UtcDateTime, index=True),
+                     Column("last_seen", UtcDateTime),
+                     Column("ctype", String(20)), Column("direction", String(8)),
+                     Column("type_source", String(8)), Column("prompt_version", String(16)),
+                     Column("novelty", Float), Column("items", Integer),
+                     Column("sources", Integer), Column("sentiment", Float),
+                     Column("strength", Float), Column("headline", Text),
+                     Column("item_ids", JSON))
+
+catalyst_outlooks = Table("catalyst_outlooks", metadata, _id(),   # NC-17..NC-26 (core)
+                          Column("outlook_id", String(64), unique=True),
+                          Column("ts", UtcDateTime, index=True),
+                          Column("as_of", Date, index=True),
+                          Column("ticker", String(12), index=True),
+                          Column("story_id", String(64)),
+                          Column("strength", Float), Column("label", String(10)),
+                          Column("direction", String(8)), Column("ctype", String(20)),
+                          Column("factors", JSON), Column("confluence", JSON),
+                          Column("social", JSON), Column("horizons", JSON),
+                          Column("stance", String(10)), Column("vehicle", String(24)),
+                          Column("plan", JSON), Column("calibrated", Boolean),
+                          Column("text", Text))
+
+catalyst_grades = Table("catalyst_grades", metadata, _id(),       # NC-35 (core writes)
+                        Column("outlook_id", String(64), index=True),
+                        Column("as_of", Date, index=True),
+                        Column("ticker", String(12)),
+                        Column("horizon", Integer),
+                        Column("p_up", Float), Column("p10", Float), Column("p90", Float),
+                        Column("median", Float), Column("stance", String(10)),
+                        Column("realized", Float), Column("realized_excess", Float),
+                        Column("in_range", Boolean), Column("up", Boolean),
+                        Column("graded_at", UtcDateTime))
+
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
-NEWS_WRITES = ("news_items", "event_flags", "llm_calls", "analyst_actions")
+NEWS_WRITES = ("news_items", "event_flags", "llm_calls", "analyst_actions", "news_embeddings",
+               "social_posts", "fundamentals_daily")
 NOTIFIER_WRITES = ("commands",)
 CONSOLE_WRITES = ("owner_notes", "console_chats", "llm_calls")   # llm_calls: UI-8c log
 NEWS_READS = ("positions", "game_plans")   # NW-1: tickers with a position or a plan setup

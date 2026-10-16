@@ -24,10 +24,14 @@
 #   ./run.sh scan [--telegram] [--date D] [--all]   technical scanner: swing ideas + day
 #                            watchlist from stored daily bars (docs/SCANNER_REQUIREMENTS.md)
 #   ./run.sh scan-eval       grade every technique walk-forward; writes reports/scanner_eval.json
+#   ./run.sh catalyst [TICKER] [--telegram]   news catalysts: strength, 1d-1m outlook, view
+#   ./run.sh catalyst-eval   grade past outlooks walk-forward; writes reports/catalyst_eval.json
+#   ./run.sh backfill-catalysts [days]   once: a year of news + bars, then catalyst-eval
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
 set -euo pipefail
+export MSYS_NO_PATHCONV=1   # Git Bash on Windows: keep container paths like /workspace as written
 
 cd "$(dirname "$(readlink -f "$0")")"
 COMPOSE=(docker compose -f docker/docker-compose.yml)
@@ -276,6 +280,31 @@ in_session() {   # true on weekdays 9:25-16:05 ET (do not restart trader-core th
   [ "${now:0:1}" -le 5 ] && [ "${now:1}" -ge 925 ] && [ "${now:1}" -le 1605 ]
 }
 
+cmd_backfill_catalysts() {   # NC-30: history for the catalyst event study, then grading
+  local days="${1:-365}"
+  [[ "$days" =~ ^[0-9]+$ ]] && [ "$days" -ge 30 ] && [ "$days" -le 730 ] \
+    || die "usage: ./run.sh backfill-catalysts [days 30-730]"
+  check_docker
+  step "Images for the current code"
+  "${COMPOSE[@]}" build -q trader-core news-sentiment console \
+    || die "image build failed (docker/Dockerfile); see the output above"
+  "${COMPOSE[@]}" up -d --wait postgres >/dev/null
+  db_upgrade
+  step "Journal tables and grants (idempotent)"
+  "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader migrate \
+    || die "trader migrate failed: ./run.sh logs postgres"
+  step "Daily bars for the history tickers (trader-core)"
+  "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader fetch-history --days "$((days + 420))" --daily-only \
+    || warn "bar download failed (Alpaca keys in .env.core?); grading uses what is stored"
+  step "News, filings and fundamentals: last $days days (news-sentiment; can take an hour)"
+  "${COMPOSE[@]}" run --rm -T --no-deps news-sentiment trader backfill-catalysts --days "$days" \
+    || warn "catalyst news backfill failed (FINNHUB_TOKEN in .env.news?)"
+  step "Walk-forward grading (trader-core)"
+  "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader catalyst-eval --days "$days" \
+    || die "catalyst-eval failed: see the output above"
+  ok "done: ./run.sh catalyst, or the console Catalysts page"
+}
+
 cmd_backfill() {   # cmd_backfill [days]: data for the past week/month, then ideas (UI-33/34)
   local days="${1:-30}"
   [[ "$days" =~ ^[0-9]+$ ]] && [ "$days" -ge 1 ] && [ "$days" -le 365 ] \
@@ -363,7 +392,8 @@ case "$cmd" in
            [ -f .env.replay ] || cp .env.replay.example .env.replay
            "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
   backfill) cmd_backfill "$@" ;;
-  scan|scan-eval) check_docker   # trader-core has the bar store; --telegram goes via the notifier
+  backfill-catalysts) cmd_backfill_catalysts "$@" ;;
+  scan|scan-eval|catalyst|catalyst-eval) check_docker   # trader-core has the bar store
            "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader "$cmd" "$@" ;;
   test)    check_docker   # developers too: nothing runs from a host venv
            "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
@@ -372,6 +402,6 @@ case "$cmd" in
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
-  help|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac

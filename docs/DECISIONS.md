@@ -22,6 +22,8 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-014 | 2026-10-01 | Telegram bot as the default notifier channel; WhatsApp kept as an option | Accepted |
 | ADR-015 | 2026-10-10 | Options: advisory first, defined risk only, bearish views via puts (no stock shorting) | Proposed |
 | ADR-016 | 2026-10-11 | Analyst ratings from public RSS headlines parsed by rules, not by the model | Accepted |
+| ADR-017 | 2026-10-16 | News catalyst outlooks from a pooled event study, not a forecasting model | Accepted |
+| ADR-018 | 2026-10-16 | Portfolio risk limits and an independent pre-trade order check | Accepted |
 
 ---
 
@@ -112,3 +114,16 @@ Short records of the main design decisions, so later changes can see why things 
 **Context:** The owner wants upgrades and downgrades per stock. Finnhub's `stock/upgrade-downgrade` endpoint is not in every free plan, and paid ratings feeds conflict with ADR-003.
 **Decision:** Use Finnhub when the key allows it (switch it off for the session on 401/403) and otherwise Yahoo Finance and Google News RSS headlines, parsed by regular expressions in `news/ratings.py`. A headline counts only when the ticker or company is its subject. Qwen is not used: headlines are untrusted text (A3-4) and the rules are testable.
 **Consequences:** Free and deterministic, with links to the source. Coverage depends on headline wording, so some actions are missed and price targets appear only when the headline states them. Every action is stored once (`action_hash`) in `analyst_actions` and raises the A3-3 rating-change flag.
+
+### ADR-017 News catalyst outlooks from a pooled event study
+
+**Context:** The owner wants, for each stock with news, the strength of the news, what may happen over 1 day to 1 month, the likely up/down range and a position view.
+**Decision:** Models read text, and statistics estimate moves. FinBERT (news), FinTwitBERT (social posts) and MiniLM (story grouping) run on CPU in news-sentiment; Qwen only types stories rules miss and never sets a number. Ranges come from implied and realized volatility. The tilt comes from a pooled event study of past stories, in volatility units, shrunk toward zero by sample size. Everything is graded walk-forward, and adjustments are kept only if they improve the result. Price-forecasting foundation models (Chronos, TimesFM) and a larger finance LLM were rejected: they ignore the news or do not fit the 8 GB GPU, and show no reliable edge on single-stock daily returns. A LightGBM quantile model may be added once there is graded history and it beats the event study.
+**Consequences:** Explainable, deterministic, no GPU change (+~0.6 GB RAM). Outlooks are labelled UNCALIBRATED, and alerts stay off, until the NC-34 gate passes. With little history the outlook is the volatility range with no tilt, and the view is NO_TRADE, which is the honest answer.
+
+### ADR-018 Portfolio risk limits and an independent pre-trade order check
+
+**Context:** The per-trade limits (LL-1..LL-11) did not cap risk across positions. Correlation was a hand-written list, and nothing checked an order's price, size and shape independently before it left ([GAP_REVIEW.md](GAP_REVIEW.md) G1-G5).
+**Decision:** A7 caps open risk to stops, beta-weighted exposure and swing gap stress, and refuses names that measurably move with an open position (PF-1..PF-4), using statistics computed each morning from bars before today. A8 checks the price band, volume share, order shape and an optional notional cap just before submitting (OC-1..OC-4).
+**Consequences:** Some trades will be smaller, and a few correlated entries refused, by design. The checks use only data already loaded each morning.
+

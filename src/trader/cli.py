@@ -299,6 +299,9 @@ def _bt6_breakdown(journal_path: Path) -> dict[str, Any]:
                 for k, v in d.items()} for g, d in groups.items()}
 
 
+WF_KEYS = ("oos", "unstable_params", "statistical", "pass_bar")   # SV-3 in the summary
+
+
 def cmd_backtest(a: argparse.Namespace) -> int:
     from trader.backtest.synthetic import generate
     from trader.backtest.walkforward import walk_forward
@@ -316,7 +319,7 @@ def cmd_backtest(a: argparse.Namespace) -> int:
                                            seed_minutes=seed))
             (out / "walk_forward.json").write_text(json.dumps(res, indent=1, default=str),
                                                    encoding="utf-8")
-            print(json.dumps({k: res[k] for k in ("oos", "unstable_params", "pass_bar")},
+            print(json.dumps({k: res[k] for k in WF_KEYS},
                              indent=1, default=str))
             return 0
         rr = asyncio.run(run_replay(cfg, minutes=minutes, daily=daily, llm=_llm("rules", cfg),
@@ -342,7 +345,7 @@ def cmd_backtest(a: argparse.Namespace) -> int:
                                        news=data.news, seed_minutes=data.seed_minutes))
         (out / "walk_forward.json").write_text(json.dumps(res, indent=1, default=str),
                                                encoding="utf-8")
-        print(json.dumps({k: res[k] for k in ("oos", "unstable_params", "pass_bar")}, indent=1,
+        print(json.dumps({k: res[k] for k in WF_KEYS}, indent=1,
                          default=str))
         return 0
     a.synthetic, a.llm, a.approvals, a.compare = a.synthetic, "rules", "yes", None
@@ -542,11 +545,17 @@ def cmd_fetch_history(a: argparse.Namespace) -> int:
     end = date.today()
 
     async def go() -> None:
+        from trader.catalyst.agent import SECTOR, extended_tickers
+
         syms = dict.fromkeys([*cfg.universe.tickers, *cfg.universe.context_symbols,
-                              *cfg.scanner.symbols])
+                              *cfg.scanner.symbols, *extended_tickers(cfg),
+                              *set(SECTOR.values())])   # NC-30: event-study history
         for sym in syms:
             daily = await hist.daily_bars(sym, end - timedelta(days=a.days), end)
             store.write("daily", sym, daily)
+            if a.daily_only:      # NC-30 history: leave the stored minute bars alone
+                print(f"{sym}: {len(daily)} daily bars")
+                continue
             mins = await hist.minute_bars(sym, datetime.now(UTC) - timedelta(days=a.minute_days),
                                           datetime.now(UTC))
             store.write("minute", sym, mins, keep_days=a.minute_days + 2)
@@ -692,6 +701,153 @@ def cmd_scan_eval(a: argparse.Namespace) -> int:
                    "edges": edges_from(graded), "report": rep, "in_play": ip}
         out.write_text(json.dumps(payload, indent=1, default=str), encoding="utf-8")
         print(f"wrote {out} (the scan's measured-edge input)")
+    return 0
+
+
+def _send_text(text: str, kind: str) -> bool:
+    """Telegram directly with bot env vars, else through the notifier via the outbox."""
+    from trader.notify.telegram import TelegramNotifier
+
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if token and chat:
+        return bool(asyncio.run(TelegramNotifier(token, chat).send(text, kind=kind)))
+    if os.environ.get("DATABASE_URL"):
+        from trader.bus import SqlOutbox
+        from trader.notify.whatsapp import OutboxNotifier
+
+        now = datetime.now(UTC)
+        asyncio.run(OutboxNotifier(SqlOutbox(_journal(create=False), "core"),
+                                   lambda: now).send(text, kind=kind))
+        return True
+    print("no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID and no DATABASE_URL")
+    return False
+
+
+def _catalyst_agent(a: argparse.Namespace, cfg: config_mod.Config, llm: bool = False) -> Any:
+    from trader.calendar import MacroCalendar, MarketCalendar
+    from trader.catalyst.agent import CatalystAgent, parquet_loader
+    from trader.data.store import resolve_bars_path
+
+    base = Path(a.config or os.environ.get("TRADER_CONFIG") or "config/config.yaml"
+                ).resolve().parent.parent
+    try:
+        macro: Any = MacroCalendar.load(base / cfg.windows.macro_calendar_file)
+    except Exception:   # noqa: BLE001 - macro events then show as unknown
+        macro = None
+    from trader.catalyst.agent import combined_loader, history_loader
+
+    fallback = None
+    key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get("ALPACA_PAPER_SECRET")
+    if key and secret:     # bars the store lacks come from Alpaca, as in trader-core
+        from trader.data.alpaca_data import AlpacaHistory
+
+        fallback = history_loader(AlpacaHistory(key, secret, feed=cfg.data.alpaca_feed))
+    loader = combined_loader(parquet_loader(resolve_bars_path(cfg.storage.bars_path)),
+                             fallback)
+    return CatalystAgent(cfg, _journal(create=False), loader,
+                         _llm("ollama", cfg) if llm else None, lambda: datetime.now(UTC),
+                         MarketCalendar(), macro)
+
+
+def cmd_catalyst(a: argparse.Namespace) -> int:
+    """NC-29: live catalysts with strength, outlook and position view (advisory)."""
+    from trader.catalyst import report
+    from trader.scanner.checks import simple_sizer
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = _catalyst_agent(a, cfg, llm=a.model)
+    sizer = simple_sizer(a.equity, cfg.risk.risk_per_trade_pct, cfg.risk.max_position_pct,
+                         cfg.risk.max_leverage) if a.equity else None
+    tickers = [a.ticker.upper()] if a.ticker else None
+    asof = date.fromisoformat(a.date) if a.date else None
+    outs = asyncio.run(agent.run(tickers, asof, sizer=sizer,
+                                 write=not a.no_write and asof is None,
+                                 llm_budget=20 if a.model else 0))
+    data = [o.as_dict() for o in outs]
+    ev = agent.load_eval() or {}
+    if a.json:
+        print(json.dumps(data, indent=1, default=str))
+        return 0
+    day = (asof or date.today()).isoformat()
+    text = report.render(data, as_of=day, track=ev.get("horizons"), top_n=len(data) or 1)
+    if not ev:
+        text += ("\n\nNo graded history yet: run `./run.sh backfill-catalysts 365`, then "
+                 "the ranges carry measured tilts instead of only the volatility range.")
+    print(text)
+    if a.telegram:
+        ok = _send_text(text, "catalyst")
+        print("sent to Telegram" if ok else "Telegram send failed")
+        return 0 if ok else 1
+    return 0
+
+
+def cmd_catalyst_eval(a: argparse.Namespace) -> int:
+    """NC-30..NC-34: walk-forward grading, feature and alert gates; writes the eval file."""
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = _catalyst_agent(a, cfg)
+    res = asyncio.run(agent.evaluate(a.days))
+    print(f"{res['events']} events on {res['tickers']} tickers, {res['from']} to {res['to']}")
+    for h, m in res["horizons"].items():
+        if m.get("graded"):
+            print(f"  {h:>2} sessions: {m['graded']} graded, Brier {m['brier']:.4f} (coin "
+                  f"0.25, climatology {m['brier_climatology']:.4f}), range hit "
+                  f"{m['coverage']:.0%}")
+        else:
+            print(f"  {h:>2} sessions: not enough history to grade yet")
+    print(f"adjustments kept (NC-33): {', '.join(res['adjustments']) or 'none'}")
+    print(f"alert gate (NC-34): {'PASS' if res['gate']['pass'] else 'not passed'}")
+    print(f"wrote {cfg.catalyst.eval_file}")
+    return 0
+
+
+def cmd_backfill_catalysts(a: argparse.Namespace) -> int:
+    """NC-30: news history for the event study plus today's fundamentals (news container)."""
+    from trader.agents.a03_news import make_scorer
+    from trader.catalyst.agent import extended_tickers
+    from trader.catalyst.collect import (
+        Enricher,
+        FundamentalsFeed,
+        backfill_news,
+        embed_backlog,
+    )
+    from trader.catalyst.text import make_embedder
+    from trader.news.sources import EdgarFilings, FinnhubNews
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    j = _journal(create=False)
+    tickers = extended_tickers(cfg)
+    ua = os.environ.get("SEC_USER_AGENT") or cfg.data.sec_user_agent
+    sources: list[Any] = [EdgarFilings(ua)]
+    token = os.environ.get("FINNHUB_TOKEN")
+    if token:
+        sources.insert(0, FinnhubNews(token))
+    else:
+        print("  FINNHUB_TOKEN not set: company news skipped (SEC filings still run)")
+    embedder = make_embedder(cfg.catalyst.embed_model)
+    print(f"{len(tickers)} tickers, {a.days} days; embeddings: {embedder.name}")
+    counts = asyncio.run(backfill_news(j, sources, tickers, a.days, make_scorer(),
+                                       Enricher(j, embedder, None)))
+    print("news: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    n = asyncio.run(embed_backlog(j, embedder, datetime.now(UTC) - timedelta(days=a.days)))
+    print(f"embedded {n} older items")
+    if not a.skip_fundamentals:
+        feed = FundamentalsFeed(j, token, ua)
+        today = date.today()
+
+        async def fund() -> dict[str, int]:
+            ciks = await EdgarFilings(ua).cik_map()
+            return {"finnhub": await feed.finnhub(tickers, today),
+                    "insiders": await feed.insiders(tickers, today, ciks),
+                    "short_volume": await feed.short_volume(tickers, today)}
+        got = asyncio.run(fund())
+        print("fundamentals: " + ", ".join(f"{k} {v}" for k, v in got.items()))
+        for name, err in feed.errors.items():
+            print(f"  {name}: {err}")
+        if feed.off:
+            print(f"  not on this plan (skipped): {', '.join(sorted(feed.off))}")
     return 0
 
 
@@ -1142,6 +1298,7 @@ def build_parser() -> argparse.ArgumentParser:
     fh = sub.add_parser("fetch-history")
     fh.add_argument("--days", type=int, default=730)
     fh.add_argument("--minute-days", type=int, default=60)
+    fh.add_argument("--daily-only", action="store_true", help="skip minute bars")
     fh.set_defaults(fn=cmd_fetch_history)
     bk = sub.add_parser("backup")
     bk.add_argument("--daily-at", default="18:00")
@@ -1177,6 +1334,23 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--top", type=int, default=None, help="day watchlist size to grade")
     se.add_argument("--no-write", action="store_true", help="do not write scanner.eval_file")
     se.set_defaults(fn=cmd_scan_eval)
+    ca = sub.add_parser("catalyst", help="news catalysts: strength, outlook, view (NC-29)")
+    ca.add_argument("ticker", nargs="?", help="one ticker (default: the universe)")
+    ca.add_argument("--date", help="as of this session (replays stored data)")
+    ca.add_argument("--json", action="store_true")
+    ca.add_argument("--telegram", action="store_true", help="also send the text to Telegram")
+    ca.add_argument("--equity", type=float, help="size the plan for this account equity ($)")
+    ca.add_argument("--model", action="store_true", help="let Qwen type stories rules miss")
+    ca.add_argument("--no-write", action="store_true",
+                    help="do not store stories/outlooks or update catalyst.latest_file")
+    ca.set_defaults(fn=cmd_catalyst)
+    ce = sub.add_parser("catalyst-eval", help="walk-forward grading of catalyst outlooks")
+    ce.add_argument("--days", type=int, default=365)
+    ce.set_defaults(fn=cmd_catalyst_eval)
+    cb = sub.add_parser("backfill-catalysts", help="news history + fundamentals (NC-30)")
+    cb.add_argument("--days", type=int, default=365)
+    cb.add_argument("--skip-fundamentals", action="store_true")
+    cb.set_defaults(fn=cmd_backfill_catalysts)
     tc = sub.add_parser("telegram-chats", help="show chat ids that messaged the bot")
     tc.add_argument("--env-file", action="append")
     tc.set_defaults(fn=cmd_telegram_chats)
