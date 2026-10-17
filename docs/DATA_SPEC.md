@@ -76,7 +76,7 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | --- | --- | --- |
 | `config_snapshots` | id, effective_date, yaml_hash, yaml_text | A10 at start |
 | `universe` | effective_date, ticker, rank, market_cap, on_owner_list | A1 |
-| `bars_1m`, `bars_1d` | ticker, ts, o, h, l, c, v, vwap, source | A2 (Parquet for history) |
+| `bars_1m` | ticker, ts, o, h, l, c, v, vwap, source | A2 (daily history is Parquet, not a table) |
 | `levels` | date, ticker, prior_high, prior_low, prior_close, pm_high, pm_low, ema20d, ema50d, atr14d | A4 |
 | `news_items` | id, ticker, source, published_at, headline, cleaned_text, finbert_score | A3 |
 | `analyst_actions` | ts, ticker, firm, action (upgrade, downgrade, initiate, reiterate, pt_raise, pt_cut), from_rating, to_rating, pt_old, pt_new, headline, source, url, action_hash (unique) | A3 ratings feed (UI-33) |

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from decimal import Decimal
 from typing import Any
 
 
@@ -69,10 +68,6 @@ def standards(trades: Sequence[Mapping[str, Any]], breaches: int, max_dd_pct: fl
         "drawdown_inside_limit": max_dd_pct < monthly_limit_pct,
     }
     return {"summary": s, "checks": checks, "pass": all(checks.values())}
-
-
-def dec_sum(values: Iterable[Any]) -> Decimal:
-    return sum((Decimal(str(v)) for v in values if v is not None), Decimal(0))
 
 
 # --- risk-adjusted performance and statistical validation (PA-1..PA-3, SV-1..SV-3) ----------

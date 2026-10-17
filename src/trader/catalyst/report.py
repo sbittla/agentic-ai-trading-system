@@ -98,9 +98,10 @@ def write_latest(path: str, payload: Mapping[str, Any]) -> None:
 
 def as_json(outlooks: Sequence[Mapping[str, Any]], *, as_of: str, generated: datetime,
             source: str, gate: Mapping[str, Any] | None, track: Mapping[str, Any] | None,
-            notes: Sequence[str] = ()) -> dict[str, Any]:
+            notes: Sequence[str] = (), live: Mapping[str, Any] | None = None) -> dict[str, Any]:
     return {"as_of": as_of, "generated": generated.isoformat(), "source": source,
-            "outlooks": list(outlooks), "gate": gate, "track": track, "notes": list(notes)}
+            "outlooks": list(outlooks), "gate": gate, "track": track, "live": live,
+            "notes": list(notes)}
 
 
 def load_json(path: str) -> dict[str, Any] | None:

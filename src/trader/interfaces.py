@@ -9,23 +9,19 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from trader.calendar import Session
 from trader.models.messages import (
     Account,
     ApprovalResponse,
     Bar,
     BracketRequest,
     BrokerPosition,
-    Command,
     NewsItem,
     Order,
     OrderUpdate,
-    Quote,
-    TradingStatus,
 )
 
 
@@ -43,30 +39,6 @@ class BrokerUnavailable(TraderError):
 
 class BrokerRejected(TraderError):
     pass
-
-
-class LLMTimeout(TraderError):
-    pass
-
-
-class LLMInvalidOutput(TraderError):
-    pass
-
-
-@runtime_checkable
-class Clock(Protocol):
-    def now(self) -> datetime: ...
-    def is_trading_day(self, d: date) -> bool: ...
-    def session(self, d: date) -> Session: ...
-    async def sleep_until(self, t: datetime) -> None: ...
-
-
-class MarketDataFeed(Protocol):
-    async def subscribe(self, symbols: Sequence[str]) -> None: ...
-    def bars(self) -> AsyncIterator[Bar]: ...
-    def quotes(self) -> AsyncIterator[Quote]: ...
-    def statuses(self) -> AsyncIterator[TradingStatus]: ...
-    def last_message_at(self) -> datetime | None: ...
 
 
 class HistoricalData(Protocol):
@@ -118,4 +90,3 @@ class Notifier(Protocol):
     async def send(self, text: str, *, kind: str) -> None: ...
     async def request_approval(self, proposal_id: str, text: str, code: str,
                                timeout_s: int) -> ApprovalResponse: ...
-    def commands(self) -> AsyncIterator[Command]: ...

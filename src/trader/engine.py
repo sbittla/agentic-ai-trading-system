@@ -13,12 +13,12 @@ import asyncio
 import base64
 import contextlib
 import os
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 
@@ -57,13 +57,19 @@ from trader.agents.speed import LatencyTracker, PreArmCache, PreArmed, expected_
 from trader.bus import EventBus
 from trader.calendar import MacroCalendar, MarketCalendar, TradingWindows
 from trader.config import Config
-from trader.interfaces import Broker, BrokerRejected, BrokerUnavailable, HistoricalData, LLMClient
+from trader.interfaces import (
+    Broker,
+    BrokerRejected,
+    BrokerUnavailable,
+    HistoricalData,
+    LLMClient,
+    Notifier,
+)
 from trader.journal import schema as s
 from trader.journal.store import JournalUnavailable, SqlJournal
 from trader.models.messages import (
     AFTERNOON_SETUPS,
     MORNING_SETUPS,
-    ApprovalResponse,
     Bar,
     ChecklistItem,
     Command,
@@ -95,14 +101,6 @@ SCAN_HISTORY_DAYS = 560         # calendar days of daily bars for the scanner (S
 D0 = Decimal(0)
 
 
-class ApprovalNotifier(Protocol):
-    """What the engine needs from a notifier (INTERFACES.md Notifier)."""
-
-    async def send(self, text: str, *, kind: str) -> None: ...
-    async def request_approval(self, proposal_id: str, text: str, code: str,
-                               timeout_s: int) -> ApprovalResponse: ...
-
-
 @dataclass
 class Candidate:
     """Closest candidate per window for the NT-1 'no qualifying setup' log."""
@@ -127,7 +125,7 @@ class EngineStats:
 class TradingEngine:
     def __init__(self, cfg: Config, *, now: Callable[[], datetime], calendar: MarketCalendar,
                  macro: MacroCalendar, broker: Broker, journal: SqlJournal, llm: LLMClient,
-                 notifier: ApprovalNotifier, history: HistoricalData | None = None,
+                 notifier: Notifier, history: HistoricalData | None = None,
                  paper_broker: Broker | None = None, require_quotes: bool = True,
                  reports_dir: str | Path = "reports", sim_mode: bool = False) -> None:
         self.cfg = cfg
@@ -546,13 +544,7 @@ class TradingEngine:
             gap_pct=rk.gap_percentile)
         self.exec.adv = dict(self.risk.state.portfolio.adv)
         # UR-3: history check (tradability is checked against the broker in live pre-flight)
-        need = self.cfg.universe.min_history_days
-        for t in self.cfg.universe.tickers:
-            if hist_days.get(t, 0) < need:
-                self.universe.blocked[t] = f"{t}: {hist_days.get(t, 0)} days of history < " \
-                                           f"{need} (UR-3)"
-            else:
-                self.universe.blocked.pop(t, None)
+        self.universe.check_tradable(None, hist_days)
 
     def _classify_regime(self, now: datetime, use_open: bool) -> None:
         """RG-1 at 8:30 (pre-market price) and again at the 9:30 open."""
@@ -1135,6 +1127,12 @@ class TradingEngine:
                                                  self.cfg.tax.set_aside_rate_pct)  # TX-1
             for line in ops_mod.ops_overdue(self.journal, now):                  # OPS-1/2
                 text += f"\n  DUE: {line}"
+            held = {p.symbol: p.qty for p in await self.broker.positions()}
+            problems = self.compliance.reconcile_lots(held)                     # WS-7
+            text += "\nTax lots vs broker: " + ("match" if not problems else
+                                                "; ".join(problems))
+            if problems:
+                self.journal.incident(now, "LOT_MISMATCH", "; ".join(problems))
         except Exception as exc:   # noqa: BLE001
             log.warning("monthly_extras_failed", error=str(exc))
         await self.say(text, "report_monthly")
@@ -1439,7 +1437,7 @@ class TradingEngine:
             positions=positions, filters=filters, planned=planned, health_ok=not blocked,
             health_detail=why, data_stale=self.md.is_stale(now) or st.incomplete,
             news_available=self.sup.news_ok() and self.ta.news_available,
-            approvals_available=self.sup.notifier_ok())
+            approvals_available=self.sup.notifier_ok(), settled_cash=self.settled_cash)
 
     def _note_candidate(self, s_: SetupTriggered, items: list[ChecklistItem], reason: str
                         ) -> None:
@@ -2315,7 +2313,8 @@ class TradingEngine:
         pos = ", ".join(f"{p.ticker} {p.qty_open}sh stop {p.stop}" for p in
                         self.pm.open_positions()) or "none"
         return (f"Status {to_et(self.now()):%H:%M} · health {self.sup.overall()} · kill "
-                f"{'ON' if rs.kill_switch else 'off'} · equity ${self.equity:,.2f} · day P&L "
+                f"{f'ON ({self.sup.kill_reason})' if rs.kill_switch else 'off'} · equity "
+                f"${self.equity:,.2f} · day P&L "
                 f"${rs.day_pnl:+.2f} · trades {rs.trades_total_today} · halted "
                 f"{rs.halted or 'no'} · positions: {pos}")
 
@@ -2393,7 +2392,6 @@ def _cfg_hash(cfg: Config) -> str:
     return hashlib.sha256(cfg.model_dump_json().encode()).hexdigest()
 
 
-AsyncFn = Callable[[datetime], Awaitable[None]]
 
 
 def idea_views(plans: dict[str, GamePlan], screens: dict[str, dict[str, Any]],

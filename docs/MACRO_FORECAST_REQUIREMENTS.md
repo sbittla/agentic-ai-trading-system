@@ -60,7 +60,7 @@ All of it is advisory. Nothing here sizes or places an order (ADR-006). The regi
 
 | ID | Requirement |
 | --- | --- |
-| `TS-20` | **Accumulation / distribution.** Per bar: OBV slope over 20 sessions vs price slope, the Accumulation/Distribution line and Chaikin Money Flow (20). The idea context carries `accumulation` (+1 accumulation, −1 distribution, 0) and `cmf20`; shown on the idea, measured by `scan-eval`, not scored until it shows an edge (TS-8). |
+| `TS-20` | **Accumulation / distribution.** Per bar: the 20-session OBV slope and Chaikin Money Flow (20); accumulation is CMF > 0.05 with OBV rising, distribution the mirror. The idea context carries `accumulation` (+1 accumulation, −1 distribution, 0) and `cmf20`; shown on the idea, measured by `scan-eval`, not scored until it shows an edge (TS-8). |
 | `TS-21` | **Base breakout (VCP).** A swing technique: a base of 20–60 sessions no deeper than 25% from its high, with contracting ranges (the last 10 sessions' range ≤ 60% of the base's range) and volume drying up (last 10 sessions' average ≤ 80% of the 50-day), then a close above the base high on ≥ 1.5× volume. Trigger above the bar's high; stop below the last 10 sessions' low. Mirrored as `BASE_BREAKDOWN` (bearish view, options only). Graded by `scan-eval` like every technique. |
 | `TS-22` | **Distribution days.** For SPY: sessions in the last 25 that closed down ≥ 0.2% on higher volume than the session before (IBD's definition). Shown in the macro regime (MA-5) and the scanner context. |
 | `TS-23` | **No look-ahead** for TS-20..TS-22, tested as TS-10. |

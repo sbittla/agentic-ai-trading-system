@@ -383,6 +383,23 @@ def cmd_import_trades(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tax_export(a: argparse.Namespace) -> int:
+    """WS-7: the year's closed lots as CSV for tax software (Form 8949-style columns)."""
+    from trader.agents.a12_compliance import ComplianceGuard
+    from trader.calendar import MarketCalendar
+
+    cfg = _cfg(a.config)
+    guard = ComplianceGuard(cfg, MarketCalendar(), _journal_from_env(a))
+    guard.load_from_journal(datetime.now(UTC))
+    text = guard.year_end_export(a.year)
+    if a.out:
+        Path(a.out).write_text(text, encoding="utf-8")
+        print(f"wrote {a.out} ({max(0, text.count(chr(10)) - 1)} lots)")
+    else:
+        print(text, end="")
+    return 0
+
+
 def cmd_restore_test(a: argparse.Namespace) -> int:
     """OPS-1: compare a scratch restore (JSON from the restore-test container) with
     production and record the result."""
@@ -1506,6 +1523,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="BT-6: real minute bars from the bar store instead of synthetic")
     bt.add_argument("--days", type=int, default=500)
     bt.set_defaults(fn=cmd_backtest)
+    tx = sub.add_parser("tax-export", help="WS-7: the year's closed lots as CSV")
+    tx.add_argument("year", type=int)
+    tx.add_argument("--out", help="write to this file instead of stdout")
+    tx.add_argument("--env-file", action="append")
+    tx.set_defaults(fn=cmd_tax_export)
     it = sub.add_parser("import-trades", help="WS-9: other-broker trades for wash sales")
     it.add_argument("file")
     it.add_argument("--broker", default="generic",

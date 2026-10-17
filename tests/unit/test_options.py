@@ -22,7 +22,6 @@ from trader.options.data import (
     events_in,
     expected_move,
     iv_rank,
-    occ_symbol,
     parse_occ,
     quote_from_snapshot,
     vol_context,
@@ -72,6 +71,11 @@ def chain(spot: float, now: datetime, iv: float = 0.35, step: float = 1.0,
                                        oi, v, g.delta, g.gamma, g.theta, g.vega, now))
             k += step
     return out
+
+
+def occ_symbol(underlying: str, expiry: date, kind: str, strike: float) -> str:
+    """Build an OCC option symbol for fixtures (production only parses them)."""
+    return f"{underlying}{expiry:%y%m%d}{kind}{round(strike * 1000):08d}"
 
 
 class FakeClient:
@@ -138,7 +142,8 @@ def test_black_scholes_parity_greeks_and_implied_vol() -> None:
 @pytest.mark.rule("A13-2")
 async def test_chain_and_snapshots_parse_with_oi_and_cache() -> None:
     assert parse_occ("NVDA261024C00130000") == ("NVDA", date(2026, 10, 24), "C", 130.0)
-    assert occ_symbol("NVDA", date(2026, 10, 24), "P", 127.5) == "NVDA261024P00127500"
+    assert parse_occ(occ_symbol("NVDA", date(2026, 10, 24), "P", 127.5)) == (
+        "NVDA", date(2026, 10, 24), "P", 127.5)
     assert parse_occ("garbage") is None
     clock = [NOW]
     fake = FakeClient(chain(100, NOW))

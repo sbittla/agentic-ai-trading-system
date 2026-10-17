@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from trader.journal import schema as s
@@ -285,7 +285,3 @@ def promotion_status(rows: list[dict[str, Any]], min_n: int = 40, min_exp: float
         out[k] = (ok, f"{n}/{min_n} graded, {exp:+.2f}R (>= {min_exp}), PF {pf:.2f} "
                       f"(>= {min_pf}), {sessions}/{min_sessions} sessions")
     return out
-
-
-def session_of(r: dict[str, Any]) -> date | None:
-    return to_et(r["ts"]).date() if r.get("ts") is not None else None

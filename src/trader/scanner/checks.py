@@ -30,7 +30,6 @@ Sizer = Callable[[float, float], tuple[int, float, str]]   # (entry, stop) -> qt
 EARNINGS_BLOCK_SESSIONS = 3        # swing entries never hold into earnings (CK-1, XR-6)
 ROOM_MIN_R = 1.5                   # nearest resistance >= 1.5R (CK-8)
 
-VERDICTS = ("go", "caution", "blocked", "watch", "options")
 
 
 @dataclass(frozen=True)

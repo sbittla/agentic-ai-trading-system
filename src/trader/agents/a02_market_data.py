@@ -14,7 +14,7 @@ import structlog
 
 from trader.indicators import Ema, RvolProfile, SessionVwap, WilderAtr
 from trader.models.messages import Bar, Quote, TradingStatus
-from trader.timeutil import ET, et_datetime, minutes_since_open, to_et
+from trader.timeutil import et_datetime, minutes_since_open, to_et
 
 log = structlog.get_logger(__name__)
 
@@ -63,16 +63,12 @@ class SymbolState:
     quote: Quote | None = None
     halted: bool = False
     last_halt_event: datetime | None = None
-    resumed_at: datetime | None = None
     prior_close: float | None = None
 
     # -- derived -------------------------------------------------------------------------
     @property
     def vwap_value(self) -> float | None:
         return self.vwap.value
-
-    def minute_index(self, now: datetime) -> int:
-        return minutes_since_open(now)
 
     def rvol(self) -> float | None:
         if self.last_bar_end is None:
@@ -182,7 +178,6 @@ class MarketDataAgent:
             st.last_halt_event = s.ts
         elif s.kind == "resume":
             st.halted = False
-            st.resumed_at = s.ts
             st.last_halt_event = s.ts
         else:   # LULD band event
             st.last_halt_event = s.ts
@@ -295,11 +290,6 @@ class MarketDataAgent:
     def is_stale(self, now: datetime) -> bool:
         return self.last_message_at is None or now - self.last_message_at > self.stale_after
 
-    def symbol_stale(self, symbol: str, now: datetime) -> bool:
-        st = self.state[symbol]
-        return st.last_bar_end is None or now - st.last_bar_end > max(self.stale_after,
-                                                                      timedelta(minutes=5))
-
     def recent_halt(self, symbol: str, now: datetime, lookback_min: int) -> bool:
         st = self.state[symbol]
         if st.halted:
@@ -319,12 +309,3 @@ class MarketDataAgent:
             if b.symbol in self.state:
                 self.state[b.symbol].incomplete = False
         return out
-
-    def today_daily_bar(self, symbol: str) -> Bar | None:
-        st = self.state[symbol]
-        if st.open_price is None or st.hod is None or st.lod is None or st.last_price is None:
-            return None
-        if st.day is None:
-            return None
-        return Bar(symbol=symbol, ts=et_datetime(st.day, OPEN).astimezone(ET), timeframe="1Day",
-                   o=st.open_price, h=st.hod, l=st.lod, c=st.last_price, v=int(st.cum_vol))

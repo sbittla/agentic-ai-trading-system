@@ -166,10 +166,6 @@ class MacroCalendar:
             return True
         return bool(self.release_1000) and max(self.release_1000) >= d
 
-    def next_fomc(self, d: date) -> date | None:
-        future = sorted(x for x in self.fomc if x >= d)
-        return future[0] if future else None
-
 
 class TradingWindows:
     """Entry and flatten rules per window (TW-1..TW-5)."""
@@ -275,6 +271,3 @@ class TradingWindows:
             d, time(16, 0))
         flat = et_datetime(d, self.a_flatten)
         return min(flat, close - timedelta(minutes=5))
-
-    def is_in_any_window(self, now: datetime) -> bool:
-        return self.window_at(now) is not None

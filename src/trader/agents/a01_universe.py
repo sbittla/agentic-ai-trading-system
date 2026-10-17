@@ -35,11 +35,6 @@ class UniverseAgent:
         self.now = now
         self.blocked: dict[str, str] = {}
 
-    def is_allowed(self, ticker: str) -> bool:
-        """UR-1 / UR-2: only the configured share class of an on-list company."""
-        t = ticker.upper()
-        return t in self.cfg.universe.tickers and t not in self.blocked
-
     def check(self, ticker: str) -> tuple[bool, str]:
         t = ticker.upper()
         if t not in self.cfg.universe.tickers:
@@ -74,13 +69,14 @@ class UniverseAgent:
         latest = max(r["effective_date"] for r in rows)
         return [r["ticker"] for r in rows if r["effective_date"] == latest]
 
-    def check_tradable(self, assets: dict[str, bool], history_days: dict[str, int]
+    def check_tradable(self, assets: dict[str, bool] | None, history_days: dict[str, int]
                        ) -> dict[str, str]:
-        """UR-3: tradable on Alpaca with at least ``min_history_days`` of history."""
+        """UR-3: tradable on Alpaca with at least ``min_history_days`` of history.
+        ``assets`` None: tradability is checked elsewhere (the live pre-flight), history only."""
         self.blocked = {}
         need = self.cfg.universe.min_history_days
         for t in self.cfg.universe.tickers:
-            if not assets.get(t, False):
+            if assets is not None and not assets.get(t, False):
                 self.blocked[t] = f"{t} not tradable on Alpaca (UR-3)"
             elif history_days.get(t, 0) < need:
                 self.blocked[t] = f"{t} has {history_days.get(t, 0)} days of history < {need} " \
@@ -89,15 +85,23 @@ class UniverseAgent:
             log.warning("ticker_blocked", ticker=t, reason=why)
         return self.blocked
 
-    def weekly_compare(self, market_caps: dict[str, float], d: date) -> dict[str, Any]:
-        """A1-2 / UR-4: current top 10 by market cap next to the owner's list. Never edits it."""
+    def weekly_compare(self, market_caps: dict[str, float], d: date,
+                       vendor_shares: dict[str, float] | None = None,
+                       edgar_shares: dict[str, float] | None = None) -> dict[str, Any]:
+        """A1-2 / UR-4: current top 10 by market cap next to the owner's list. Never edits it.
+        With both share counts, names whose Finnhub and SEC EDGAR shares outstanding differ by
+        more than 10% are listed (the cap ranking may rest on a bad number)."""
         ranked = sorted(((t, c) for t, c in market_caps.items() if c), key=lambda x: -x[1])
         top10 = [t for t, _ in ranked[:10]]
         owner = list(self.cfg.universe.tickers)
-        report = {"date": d.isoformat(), "top10": top10, "owner_list": owner,
+        report: dict[str, Any] = {"date": d.isoformat(), "top10": top10, "owner_list": owner,
                   "not_in_top10": [t for t in owner if t not in top10],
                   "top10_not_on_list": [t for t in top10 if t not in owner],
                   "market_caps": {t: c for t, c in ranked[:15]}}
+        vs, es = vendor_shares or {}, edgar_shares or {}
+        check = {t: round(abs(vs[t] / es[t] - 1) * 100, 1) for t in vs if es.get(t, 0) > 0}
+        report["share_check"] = check
+        report["share_mismatch"] = sorted(t for t, pct in check.items() if pct > 10)
         if self.journal is not None:
             self.journal.insert_many(s.universe, [
                 {"effective_date": d, "ticker": t, "rank": i + 1, "market_cap": c,

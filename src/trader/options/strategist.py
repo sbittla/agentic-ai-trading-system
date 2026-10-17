@@ -24,7 +24,6 @@ from trader.options import pricing
 from trader.options.data import OptionQuote, years_to
 from trader.timeutil import ET, to_et
 
-STRUCTURES = ("long_call", "long_put", "call_debit", "put_debit", "put_credit", "call_credit")
 LEVEL_NEEDED = {"long_call": 2, "long_put": 2, "call_debit": 3, "put_debit": 3,
                 "put_credit": 3, "call_credit": 3}                             # A15-4
 IDEA_QUOTE_AGE_S = 20 * 3600     # next-day ideas use the session's last quotes

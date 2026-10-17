@@ -419,7 +419,3 @@ class PositionMonitor:
         for p in done:
             del self.positions[p.position_id]
         return done
-
-    def convert_to_swing(self, position_id: str) -> None:
-        """DR-6: not allowed, ever."""
-        raise PermissionError("DR-6: a day trade can never be converted into a swing trade")

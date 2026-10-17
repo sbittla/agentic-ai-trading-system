@@ -52,9 +52,6 @@ class ReplayClock:
     def set(self, t: datetime) -> None:
         self._now = t
 
-    async def sleep_until(self, t: datetime) -> None:
-        self.advance_to(t)
-
 
 class InMemoryHistory:
     """HistoricalData fake backed by lists of bars (no look-ahead: callers pass ``end``)."""

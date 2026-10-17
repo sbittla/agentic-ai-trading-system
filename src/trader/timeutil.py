@@ -7,7 +7,7 @@ every price that reaches a proposal, decision, order or P&L is converted here.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
@@ -30,20 +30,12 @@ def to_et(dt: datetime) -> datetime:
     return require_aware(dt).astimezone(ET)
 
 
-def to_utc(dt: datetime) -> datetime:
-    return require_aware(dt).astimezone(UTC)
-
-
 def et_datetime(d: date, t: time) -> datetime:
     return datetime.combine(d, t, tzinfo=ET)
 
 
 def et_date(dt: datetime) -> date:
     return to_et(dt).date()
-
-
-def et_time(dt: datetime) -> time:
-    return to_et(dt).time()
 
 
 def minutes_since_open(dt: datetime) -> int:
@@ -66,7 +58,3 @@ def cents(value: float | int | str | Decimal) -> Decimal:
 def cents_down(value: float | int | str | Decimal) -> Decimal:
     """Round down to the cent (stops are always rounded down, STRATEGY_SPEC §1)."""
     return dec(value).quantize(CENT, rounding=ROUND_FLOOR)
-
-
-def add_trading_minutes(dt: datetime, minutes: int) -> datetime:
-    return dt + timedelta(minutes=minutes)

@@ -151,7 +151,6 @@ class Armed:
     window: str
     level: float
     stop_level: float      # structural level before the buffer
-    armed_at: datetime
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -500,7 +499,7 @@ class TechnicalAgent:
             if qqq is None or not qqq.above_vwap():   # MF-1, no exception for this setup
                 return
             td.armed["VWAP_RECLAIM"] = Armed("VWAP_RECLAIM", "morning", bar.h,
-                                             td.reclaim_dip_low, now)
+                                             td.reclaim_dip_low)
             td.reclaim_done = True
 
     def _track_pullback(self, st: SymbolState, td: TickerDay, bar: Bar, now: datetime
@@ -532,7 +531,7 @@ class TechnicalAgent:
                 return
             prev_high = b.h
         td.armed["FIRST_PULLBACK"] = Armed("FIRST_PULLBACK", "morning", seq[-1].h,
-                                           min(b.l for b in seq), now)
+                                           min(b.l for b in seq))
 
     # -- afternoon setups --------------------------------------------------------------------
     def _power_hour(self, t: str, st: SymbolState, td: TickerDay, bar: Bar, now: datetime
@@ -561,7 +560,7 @@ class TechnicalAgent:
                 td.armed.pop("VWAP_TREND", None)
                 return
         if bar.l <= vw + 0.1 * st.atr5.value and bar.c > vw:
-            td.armed["VWAP_TREND"] = Armed("VWAP_TREND", "afternoon", bar.h, vw, now)
+            td.armed["VWAP_TREND"] = Armed("VWAP_TREND", "afternoon", bar.h, vw)
             td.trend_done = True
 
     def _swing(self, t: str, st: SymbolState, td: TickerDay, now: datetime

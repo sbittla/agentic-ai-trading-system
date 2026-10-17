@@ -8,19 +8,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any
 
 from trader.catalyst.stories import Story, source_weight
 from trader.interfaces import LLMClient
 from trader.llm.base import load_prompt
 from trader.models.llm_schemas import CatalystTypeOut
-
-CatalystType = Literal["EARNINGS", "GUIDANCE", "ANALYST", "M_AND_A", "PRODUCT",
-                       "REGULATORY_LEGAL", "MANAGEMENT", "CAPITAL", "INSIDER", "MACRO_SECTOR",
-                       "SOCIAL_ONLY", "OTHER"]
-TYPES: tuple[str, ...] = ("EARNINGS", "GUIDANCE", "ANALYST", "M_AND_A", "PRODUCT",
-                          "REGULATORY_LEGAL", "MANAGEMENT", "CAPITAL", "INSIDER", "MACRO_SECTOR",
-                          "SOCIAL_ONLY", "OTHER")
 
 # order matters: the first match wins (guidance in an earnings release is EARNINGS)
 RULES: tuple[tuple[str, re.Pattern[str]], ...] = (

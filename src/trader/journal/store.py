@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -206,13 +206,6 @@ class SqlJournal:
     def record_event(self, ts: datetime, type_: str, payload: Mapping[str, Any]) -> int:
         eid = self.insert(s.events, {"ts": ts, "type": type_, "payload": payload})
         return eid or 0
-
-    def events(self, after_id: int = 0, types: Iterable[str] | None = None
-               ) -> list[dict[str, Any]]:
-        q = select(s.events).where(s.events.c.id > after_id).order_by(s.events.c.id)
-        if types is not None:
-            q = q.where(s.events.c.type.in_(list(types)))
-        return self.query(q)
 
     # -- helpers used by several agents ----------------------------------------------------
     def incident(self, ts: datetime, type_: str, detail: str) -> None:

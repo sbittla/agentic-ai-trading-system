@@ -89,8 +89,9 @@ def test_1000_events_survive_restart(tmp_path: Path) -> None:
         sent.append(ev)
     j.dispose()
     j2 = SqlJournal(f"sqlite:///{db.as_posix()}")
-    rebuilt = EventBus(j2, lambda: t0).replay({"LimitHit": LimitHit})
-    assert rebuilt == sent
+    rows = sorted(j2.rows(s.events), key=lambda r: r["id"])
+    assert [r["type"] for r in rows] == ["LimitHit"] * 1000
+    assert [LimitHit.model_validate(r["payload"]) for r in rows] == sent
 
 
 @pytest.mark.rule("SR-5")

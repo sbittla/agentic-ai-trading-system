@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -191,3 +192,23 @@ def test_locks_survive_restart(cfg: Config, cal: MarketCalendar, journal: SqlJou
     g2 = ComplianceGuard(cfg, cal, journal)
     g2.load_from_journal(et(PLAIN_DAY, "16:00"))
     assert not g2.check_entry("AAPL", et(PLAIN_DAY + timedelta(days=3), "09:40"), "day").ok
+
+
+@pytest.mark.rule("WS-7")
+def test_tax_export_command_writes_the_years_lots(tmp_path, monkeypatch, capsys,  # type: ignore[no-untyped-def]
+                                                 cfg: Config, cal: MarketCalendar) -> None:
+    from trader.cli import main
+
+    db = tmp_path / "j.db"
+    url = f"sqlite:///{db.as_posix()}"
+    g = ComplianceGuard(cfg, cal, SqlJournal(url))
+    round_trip(g, "p1", "AAPL", "250", "251", date(2026, 10, 5), r=0.5)
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfgp = Path(__file__).resolve().parents[2] / "config" / "config.example.yaml"
+    out = tmp_path / "2026.csv"
+    assert main(["--config", str(cfgp), "tax-export", "2026", "--out", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert text.splitlines()[0].startswith("description,date_acquired")
+    assert "AAPL" in text and "wrote" in capsys.readouterr().out
+    assert main(["--config", str(cfgp), "tax-export", "2025"]) == 0
+    assert "AAPL" not in capsys.readouterr().out          # nothing sold in 2025

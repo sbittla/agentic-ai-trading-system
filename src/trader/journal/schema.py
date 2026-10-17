@@ -106,12 +106,6 @@ bars_1m = Table("bars_1m", metadata, _id(),
                 Column("o", Float), Column("h", Float), Column("l", Float), Column("c", Float),
                 Column("v", BigInteger), Column("vwap", Float), Column("source", String(12)))
 
-bars_1d = Table("bars_1d", metadata, _id(),
-                Column("ticker", String(12), nullable=False, index=True),
-                Column("ts", UtcDateTime, nullable=False, index=True),
-                Column("o", Float), Column("h", Float), Column("l", Float), Column("c", Float),
-                Column("v", BigInteger), Column("vwap", Float), Column("source", String(12)))
-
 levels = Table("levels", metadata, _id(),
                Column("date", Date, nullable=False, index=True),
                Column("ticker", String(12), nullable=False),

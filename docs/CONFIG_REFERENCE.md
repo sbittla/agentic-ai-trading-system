@@ -47,7 +47,7 @@ Every field has a default (`src/trader/config.py`); add a section to `config/con
 | `regime` | `high_vol_atr_ratio` 1.5, `high_vol_gap_pct` 1.5, `risk_factor_high_vol` 0.5, `gap_and_go_max_normal_x` 2.0, `trend_day_vwap_pct` 80, `trend_day_high_after` 13:00 (RG-1..RG-3) | ratio ≥ 1.0; factor 0–1 |
 | `data` | `quote_max_age_s` 2 (DQ-8), `news_poll_open_s` 60 (NW-1), `sip_divergence_pct` 0.05, `sip_gate_days` 20 (DQ-6, DQ-7) | `news_poll_open_s` ≥ 30 (Finnhub limit); live on the IEX feed needs the `data_sip` gate |
 | `alerts` | `enabled` true, `schedule` `windows`/`all_day`, `per_symbol_cap` 3, `per_window_cap` 12, `top_n` 5, `digest_min` 10, `grade_window_min` 30, `min_hit_rate` 0.4, `min_graded` 50, `disabled_kinds` (AL-1..AL-7) | caps ≥ 1 |
-| `notifications` | `approval_chart` true, `approval_live_update_s` 5 (AP-1..AP-3), `notifier_down_after_s` 120 (NF-1) | — |
+| `notifications` | `approval_chart` true, `approval_live_update_s` 5 (AP-1..AP-3) (NF-1 uses `services.notifier_stale_after_min`) | — |
 | `execution` | `slippage_switch_r` 0.1, `slippage_window` 10 (EXQ-1); stops are always stop-market (EX-5, not configurable) | `slippage_switch_r` > 0 |
 | `shadow` | `enabled` true, `flag_after` 40 (SH-1, SH-2) | — |
 | `in_play` | `enabled` true, `top_n` 5, `rotation_days` 3, `rotation_lookback` 5, `symbols` (50 largest S&P 500 names) (UN-1, UN-2) | — |

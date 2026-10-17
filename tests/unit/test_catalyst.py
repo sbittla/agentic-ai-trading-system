@@ -657,3 +657,15 @@ async def test_stocktwits_rate_limit_and_budget():
         per_hour=3, pause=0)
     got = await ok.fetch(["A", "B", "C", "D"], now - timedelta(days=1))
     assert len(ok.calls) == 3 and {it.ticker for it in got} <= {"A", "B", "C"}
+
+
+@pytest.mark.rule("NC-35")
+def test_live_track_record_is_published_in_the_report() -> None:
+    from datetime import UTC, datetime
+
+    live = {"5": {"graded": 3, "brier": 0.21, "coverage": 0.667}}
+    out = report.as_json([], as_of="2026-10-16", generated=datetime(2026, 10, 16, tzinfo=UTC),
+                         source="test", gate=None, track=None, live=live)
+    assert out["live"] == live
+    assert report.as_json([], as_of="d", generated=datetime(2026, 10, 16, tzinfo=UTC),
+                          source="t", gate=None, track=None)["live"] is None

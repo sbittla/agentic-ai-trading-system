@@ -22,6 +22,9 @@ jobs:
         run: ruff check src tests
       - name: Type check
         run: mypy
+      - name: Dead code
+        # Anything vulture reports that is not in the reviewed whitelist must be removed or wired in
+        run: vulture src tools/vulture_whitelist.py --min-confidence 60
       - name: Unit, contract, replay and chaos tests
         run: pytest -q   # integration tests (real Postgres / Ollama) skip without their env vars
       - name: Requirement coverage

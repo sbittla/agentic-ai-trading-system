@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -173,7 +173,3 @@ def render(payload: dict[str, Any]) -> str:
         lines.append(n)
     lines.append("Advisory: the regime is a check next to each idea, never an order.")
     return "\n".join(lines)
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)

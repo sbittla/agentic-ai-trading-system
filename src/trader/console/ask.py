@@ -17,7 +17,7 @@ import asyncio
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Literal
 
 import structlog
@@ -505,7 +505,3 @@ def table_text(tool: str, rows: list[dict[str, Any]]) -> str:
     if not rows:
         return f"No rows from {tool}: the journal has nothing that answers this."
     return f"{len(rows)} row(s) from {tool} below."
-
-
-def now_et(dt: datetime) -> str:
-    return f"{to_et(dt):%H:%M:%S}"

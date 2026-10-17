@@ -84,7 +84,6 @@ class Frame:
         self.rng = h - l
         # TS-20 accumulation / distribution (on the mirrored series for shorts)
         self.obv_slope = ta.slope(ta.obv(c, s.v) / max(float(np.mean(s.v)) or 1.0, 1.0), 20)
-        self.px_slope = ta.slope(c / max(float(np.mean(np.abs(c))) or 1.0, 1e-9), 20)
         self.cmf20 = ta.cmf(h, l, c, s.v, 20)
         self.inside = pat.inside_bar(s.h, s.l)
         self.nr7 = pat.nr(s.h, s.l, 7)

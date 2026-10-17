@@ -105,14 +105,18 @@ class FinnhubNews:
         return out
 
     async def market_caps(self, symbols: Sequence[str]) -> dict[str, float]:
-        """A1-2: market cap in $ from profile2 (reported in millions)."""
+        """A1-2: market cap in $ from profile2 (reported in millions). The same call's shares
+        outstanding are kept in ``self.shares`` for the EDGAR cross-check."""
         out = {}
+        self.shares: dict[str, float] = {}
         for sym in symbols:
             try:
                 js = await self._get("/stock/profile2", {"symbol": sym})
                 cap = js.get("marketCapitalization")
                 if cap:
                     out[sym] = float(cap) * 1e6
+                if js.get("shareOutstanding"):
+                    self.shares[sym] = float(js["shareOutstanding"]) * 1e6
             except httpx.HTTPError as exc:
                 log.warning("profile_failed", symbol=sym, error=str(exc))
         return out
@@ -171,9 +175,10 @@ class EdgarFilings:
         return out
 
     async def shares_outstanding(self, symbol: str) -> float | None:
-        """A1-2 cross-check: latest dei:EntityCommonStockSharesOutstanding."""
+        """A1-2 cross-check: the latest dei:EntityCommonStockSharesOutstanding (None when the
+        company does not report it, e.g. foreign filers on 20-F)."""
         ciks = await self.cik_map()
-        cik = ciks.get(symbol)
+        cik = ciks.get(symbol.replace(".", "-"))
         if cik is None:
             return None
         js = await self._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")

@@ -506,6 +506,7 @@ switch ($cmd) {
         & docker @Compose --profile dev build -q dev | Out-Null
         Assert-Native 'dev image build failed'
         $script = Format-NativeArg ('ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy && ' +
+            'vulture src tools/vulture_whitelist.py --min-confidence 60 && ' +
             'pytest -q -p no:cacheprovider "$@" && ' +
             'python tools/check_traceability.py docs/TRACEABILITY.md tests')
         & docker @Compose --profile dev run --rm -T --user $HostUser -e HOME=/tmp -e PYTHONPATH=/workspace/src `

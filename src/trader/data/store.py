@@ -1,7 +1,6 @@
 """Parquet bar store and the recorded-day library (A2-3, M2, TEST_PLAN RP-1).
 
 - ``BarStore``: 2 years of daily and 60 days of 1-min bars per symbol (``data/bars``).
-- ``ParquetHistory``: HistoricalData fake reading the store (replay/backtest).
 - ``DayRecorder``: writes each live day's bars, quotes, statuses and news flags to
   ``recordings/YYYY-MM-DD/`` so it can be replayed later.
 - ``load_recorded_day``: reads a recorded day back.
@@ -9,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -85,24 +83,6 @@ class BarStore:
         return sorted(p.stem for p in d.glob("*.parquet")) if d.exists() else []
 
 
-class ParquetHistory:
-    def __init__(self, store: BarStore) -> None:
-        self.store = store
-        self._cache: dict[tuple[str, str], list[Bar]] = {}
-
-    def _get(self, kind: str, symbol: str) -> list[Bar]:
-        key = (kind, symbol)
-        if key not in self._cache:
-            self._cache[key] = self.store.read(kind, symbol)
-        return self._cache[key]
-
-    async def daily_bars(self, symbol: str, start: date, end: date) -> list[Bar]:
-        return [b for b in self._get("daily", symbol) if start <= et_date(b.ts) < end]
-
-    async def minute_bars(self, symbol: str, start: datetime, end: datetime) -> list[Bar]:
-        return [b for b in self._get("minute", symbol) if start <= b.ts < end]
-
-
 class DayRecorder:
     """Records a live day for the replay library."""
 
@@ -117,10 +97,6 @@ class DayRecorder:
     def add_bar(self, b: Bar) -> None:
         self.day = self.day or et_date(b.ts)
         self.bars.append(b)
-
-    def add_quote(self, q: Quote) -> None:
-        if len(self.quotes) < 2_000_000:
-            self.quotes.append(q)
 
     def add_status(self, s: TradingStatus) -> None:
         self.statuses.append(s)
@@ -161,7 +137,3 @@ def load_recorded_day(path: str | Path) -> dict[str, Any]:
             encoding="utf-8").splitlines() if x.strip()]
     return {"day": date.fromisoformat(d.name), "bars": bars, "news": news,
             "statuses": statuses}
-
-
-def dump_json(obj: Any, path: str | Path) -> None:
-    Path(path).write_text(json.dumps(obj, indent=1, default=str), encoding="utf-8")

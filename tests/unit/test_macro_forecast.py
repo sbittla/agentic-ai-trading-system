@@ -308,7 +308,6 @@ def test_accumulation_distribution_indicators() -> None:
     v = np.full(n, 1000.0)
     cmf = ta.cmf(h, lo, c, v, 20)
     assert math.isnan(cmf[18]) and cmf[-1] == pytest.approx(0.9)
-    assert ta.ad_line(h, lo, c, v)[-1] == pytest.approx(0.9 * 1000 * n)
     assert ta.slope(np.arange(30, dtype=np.float64), 20)[-1] == pytest.approx(1.0)
 
 

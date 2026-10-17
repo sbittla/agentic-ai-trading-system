@@ -63,10 +63,6 @@ class Gpu:
     total_gb: float
     used_gb: float
 
-    @property
-    def free_gb(self) -> float:
-        return self.total_gb - self.used_gb
-
 
 @dataclass(frozen=True)
 class Hardware:
@@ -126,7 +122,9 @@ def _ram_gb() -> float | None:
 
         st = MemStatus()
         st.dwLength = ctypes.sizeof(MemStatus)
-        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):   # type: ignore[attr-defined]
+        # windll exists only on Windows: needed on Linux, unused on Windows
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(  # type: ignore[attr-defined,unused-ignore]
+                ctypes.byref(st)):
             return round(float(st.ullTotalPhys) / 1024**3, 1)
         return None
     try:

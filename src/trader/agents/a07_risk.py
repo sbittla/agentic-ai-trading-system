@@ -134,6 +134,7 @@ class DecisionContext:
     data_stale: bool = False
     news_available: bool = True
     approvals_available: bool = True
+    settled_cash: Decimal | None = None      # AC-1: cash accounts size from settled cash only
 
 
 class RiskManager:
@@ -273,10 +274,11 @@ class RiskManager:
 
     def size(self, entry: Decimal, stop: Decimal, equity: Decimal, buying_power: Decimal,
              open_exposure: Decimal, planned: bool, *, ticker: str | None = None,
-             style: str | None = None, positions: list[OpenPositionView] | None = None
-             ) -> tuple[int, Decimal, Decimal, str]:
+             style: str | None = None, positions: list[OpenPositionView] | None = None,
+             settled_cash: Decimal | None = None) -> tuple[int, Decimal, Decimal, str]:
         """Returns (qty, risk_usd, risk_pct, binding constraint). With ``ticker`` and
-        ``positions`` the portfolio caps apply too (PF-1, PF-3, PF-4)."""
+        ``positions`` the portfolio caps apply too (PF-1, PF-3, PF-4); with ``settled_cash``
+        (a cash account) the settled-funds cap (AC-1)."""
         r = self.cfg.risk
         pct = self.risk_pct(planned)
         risk_usd = equity * pct / 100
@@ -289,6 +291,8 @@ class RiskManager:
         room = min(buying_power, equity * Decimal(str(r.max_leverage)) - open_exposure)  # LL-11
         qty_bp = max(0, math.floor(room / entry)) if room > 0 else 0
         caps = {"risk": qty_risk, "LL-9 position cap": qty_cap, "LL-11 leverage": qty_bp}
+        if settled_cash is not None:                                                   # AC-1
+            caps["AC-1 settled cash"] = max(0, math.floor(settled_cash / entry))
         if ticker is not None and positions is not None:
             caps.update(self.portfolio_caps(entry, stop, equity, ticker, style, positions))
         qty = min(caps.values())
@@ -340,10 +344,6 @@ class RiskManager:
                 or setup in st.slippage_paper):
             return "paper"
         return "broker"
-
-    def precheck(self, s: SetupTriggered, ctx: DecisionContext) -> list[ChecklistItem]:
-        """Code-only items CK-1..CK-8 (run before any Qwen call)."""
-        return self._items(s, ctx, None, None)[:8]
 
     def _items(self, s: SetupTriggered, ctx: DecisionContext, review: Review | None,
                comp: ComplianceResult | None) -> list[ChecklistItem]:
@@ -518,9 +518,12 @@ class RiskManager:
         qty, risk_usd, pct, binding = self.size(s.entry, s.stop, ctx.equity, ctx.buying_power,
                                                 exposure, ctx.planned,
                                                 ticker=self.cfg.canonical(s.ticker),
-                                                style=s.style, positions=book)
+                                                style=s.style, positions=book,
+                                                settled_cash=ctx.settled_cash)
         if ok and qty < 1:
-            ok, why = False, f"{Reason.SIZE_TOO_SMALL}: qty {qty} ({binding})"
+            code = Reason.NT_UNSETTLED_FUNDS if binding == "AC-1 settled cash" \
+                else Reason.SIZE_TOO_SMALL
+            ok, why = False, f"{code}: qty {qty} ({binding})"
         if ok and mode in ("approve", "copilot") and route == "broker" \
                 and not ctx.approvals_available:   # NF-1: no silent auto-reject
             ok, why = False, f"{Reason.NT_NOTIFIER_DOWN}: notifier down, {mode} mode blocked"
@@ -555,7 +558,3 @@ class RiskManager:
         st = self.state
         st.trades_today[s.window] = st.trades_today.get(s.window, 0) + 1
         st.window_entries.add((s.window, self.cfg.canonical(s.ticker)))
-
-    def validate_stop_move(self, old: Decimal, new: Decimal) -> bool:
-        """DR-2: a stop can only move toward profit."""
-        return new >= old

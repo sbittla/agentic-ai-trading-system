@@ -4,7 +4,6 @@
   API for replies (no inbound webhook); applies the sender allow-list.
 - ``OutboxNotifier`` (trader-core): publishes messages/approvals to ``outbound_msg``; approval
   answers arrive as inbound commands and resolve the waiting future.
-- ``ConsoleNotifier``: local development.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ import html
 import json
 import re
 import time
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,20 +22,6 @@ from trader.models.messages import ApprovalResponse
 from trader.notify.telegram import HTML_KINDS
 
 log = structlog.get_logger(__name__)
-
-
-class ConsoleNotifier:
-    def __init__(self) -> None:
-        self.sent: list[str] = []
-
-    async def send(self, text: str, *, kind: str) -> None:
-        self.sent.append(text)
-        log.info("notify", kind=kind, text=text)
-
-    async def request_approval(self, proposal_id: str, text: str, code: str,
-                               timeout_s: int) -> ApprovalResponse:
-        await self.send(text, kind="approval")
-        return ApprovalResponse(proposal_id=proposal_id, answer="timeout")
 
 
 class OutboxNotifier:
@@ -164,7 +148,3 @@ class WhatsAppNotifier:
                                timeout_s: int) -> ApprovalResponse:
         await self.send(text, kind="approval")
         return ApprovalResponse(proposal_id=proposal_id, answer="timeout")
-
-    async def commands(self) -> AsyncIterator[Any]:   # pragma: no cover - see notifier_main
-        if False:
-            yield None

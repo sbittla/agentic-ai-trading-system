@@ -412,6 +412,7 @@ case "$cmd" in
            "${COMPOSE[@]}" --profile dev run --rm -T --user "$HOST_UID:$HOST_GID" \
              -e HOME=/tmp -e PYTHONPATH=/workspace/src -w /workspace dev sh -c \
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
+              vulture src tools/vulture_whitelist.py --min-confidence 60 &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
   help|-h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//' ;;

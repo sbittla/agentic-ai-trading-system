@@ -159,7 +159,13 @@ class NewsService:
                     last_universe = local.date()
                     caps = await finnhub.market_caps(sorted(set(MEGA_CAP_CANDIDATES)
                                                             | set(cfg.universe.tickers)))
-                    rep = universe.weekly_compare(caps, local.date())
+                    edgar, top = EdgarFilings(ua), sorted(caps, key=lambda t: -caps[t])[:15]
+                    sec: dict[str, float] = {}
+                    for t in top:   # A1-2 cross-check; one failing filer never stops the report
+                        with contextlib.suppress(Exception):
+                            if (n := await edgar.shares_outstanding(t)) is not None:
+                                sec[t] = n
+                    rep = universe.weekly_compare(caps, local.date(), finnhub.shares, sec)
                     await outbox.publish("news_flags", {"type": "universe_report", **rep})
                 wait = cfg.data.news_poll_min * 60 if active else 15 * 60
                 await asyncio.sleep(_until_next(now, wait))

@@ -10,7 +10,7 @@ How to set up a development environment, the coding rules for this repo, and the
 
 Nothing in this repo runs on the host: every service, helper and check runs in a container.
 
-**Checks from WSL (repo root):** `./run.sh test` builds the `dev` image and runs `ruff`, `mypy`, `pytest` and the traceability check against the working tree (mounted at `/workspace`, with `PYTHONPATH=/workspace/src`). Extra pytest arguments pass through: `./run.sh test tests/unit/test_options.py -k payoff`.
+**Checks from WSL (repo root):** `./run.sh test` builds the `dev` image and runs `ruff`, `mypy`, `vulture` (dead code), `pytest` and the traceability check against the working tree (mounted at `/workspace`, with `PYTHONPATH=/workspace/src`). Extra pytest arguments pass through: `./run.sh test tests/unit/test_options.py -k payoff`.
 
 **Editing in VS Code:** open the repo in the dev container (`.devcontainer/devcontainer.json`, *Reopen in Container*). It uses the same image as production (`dev` target) with Postgres and Ollama from Compose, so nothing but Docker Desktop and VS Code is installed on Windows.
 
@@ -35,6 +35,7 @@ Postgres integration tests run when the `TEST_PG_*` URLs are set (one per role, 
 - **DV-6:** No `print`; structured logging with `structlog`, never logging secrets (SEC-6).
 - **DV-7:** Pure functions for calculations (indicators, sizing, checklist) so they test without I/O.
 - **DV-8:** Async I/O with explicit timeouts on every external call (IF-4).
+- **No dead code.** Production modules hold only code reachable from a production entry point, plus the documented test doubles and the TA-Lib parity set (TS-2, TS-3). A feature that only a test reaches is either wired in or removed; a duplicate of a rule is replaced by a call to the one implementation. `vulture src tools/vulture_whitelist.py --min-confidence 60` runs in CI and `./run.sh test`; a new whitelist entry needs the reason it is not dead.
 
 ## 3. Branches, commits, reviews
 

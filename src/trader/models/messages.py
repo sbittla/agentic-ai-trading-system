@@ -15,9 +15,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 Timeframe = Literal["1Min", "5Min", "1Day"]
 Style = Literal["day", "swing"]
 Window = Literal["morning", "afternoon"]
-SetupName = Literal["ORB", "GAP_AND_GO", "GAP_AND_GO_NO_PM", "VWAP_RECLAIM", "FIRST_PULLBACK",
-                    "POWER_HOUR_BREAKOUT", "VWAP_TREND", "SWING_CLOSE_NEAR_HIGH",
-                    "SWING_BASE_BREAKOUT"]
 SETUP_NAMES: tuple[str, ...] = ("ORB", "GAP_AND_GO", "GAP_AND_GO_NO_PM", "VWAP_RECLAIM",
                                 "FIRST_PULLBACK", "POWER_HOUR_BREAKOUT", "VWAP_TREND",
                                 "SWING_CLOSE_NEAR_HIGH", "SWING_BASE_BREAKOUT")
@@ -324,13 +321,6 @@ class Decision(Msg):
     override: bool = False
 
 
-class ApprovalRequest(Msg):
-    proposal_id: str
-    code: str
-    text: str
-    expires_at: datetime
-
-
 class ApprovalResponse(Msg):
     proposal_id: str
     answer: Literal["yes", "no", "timeout"]
@@ -406,12 +396,6 @@ class LockCreated(Msg):
     start: datetime
     until: datetime
     reason: str
-
-
-class ReportPublished(Msg):
-    kind: str
-    path: str
-    ts: datetime
 
 
 class NoTrade(Msg):

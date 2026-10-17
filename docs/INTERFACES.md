@@ -6,15 +6,15 @@ Every external dependency sits behind a small Python interface (`typing.Protocol
 
 | Interface | Real implementation | Fake for tests and replay |
 | --- | --- | --- |
-| `Clock` | `MarketClock` (system time, NTP-checked, Alpaca calendar) | `ReplayClock` (driven by recorded bars) |
-| `MarketDataFeed` | `AlpacaIEXFeed` | `RecordedFeed` (Parquet) |
-| `HistoricalData` | `AlpacaHistory` | `ParquetHistory` |
+| Time | `now` callable + `MarketCalendar` (XNYS sessions) | `ReplayClock` (driven by recorded bars) |
+| Market data stream | `AlpacaStream` (`MarketDataAgent` consumes it) | recorded days replayed by the backtest engine |
+| `HistoricalData` | `AlpacaHistory` | `InMemoryHistory` |
 | `NewsSource` | `FinnhubNews`, `EdgarFilings`, `RedditPosts` | `RecordedNews` |
 | `Broker` | `AlpacaBroker` | `SimBroker` (see BACKTEST_ENGINE.md) |
 | `LLMClient` | `OllamaClient` | `CachedLLM` (responses keyed by input hash) |
-| `Notifier` | `WhatsAppNotifier` | `ConsoleNotifier` |
+| `Notifier` | `OutboxNotifier` (to the notifier container: Telegram, WhatsApp) | `ScriptedApprovals` |
 | `Journal` | `SqlJournal` on Postgres | `SqlJournal` on a per-run SQLite file |
-| `OutboxBus` | `PgOutboxBus` (Postgres `LISTEN/NOTIFY`) | `InMemoryOutbox` |
+| Outbox bus | `SqlOutbox` (Postgres) | `InMemoryOutbox` |
 
 ---
 
@@ -24,18 +24,6 @@ Every external dependency sits behind a small Python interface (`typing.Protocol
 from typing import Protocol, AsyncIterator, Sequence
 from datetime import datetime, date
 from decimal import Decimal
-
-class Clock(Protocol):
-    def now(self) -> datetime: ...                       # timezone-aware, ET
-    def is_trading_day(self, d: date) -> bool: ...
-    def session(self, d: date) -> "Session": ...          # open, close, early_close flag
-    async def sleep_until(self, t: datetime) -> None: ...
-
-class MarketDataFeed(Protocol):
-    async def subscribe(self, symbols: Sequence[str]) -> None: ...
-    def bars(self) -> AsyncIterator["Bar"]: ...           # closed 1-min bars
-    def quotes(self) -> AsyncIterator["Quote"]: ...
-    def last_message_at(self) -> datetime | None: ...     # for staleness (A2-4)
 
 class HistoricalData(Protocol):
     async def daily_bars(self, symbol: str, start: date, end: date) -> list["Bar"]: ...
@@ -113,7 +101,7 @@ Other types (`Bar`, `Quote`, `NewsItem`, `Account`, `Position`, `Order`, `OrderU
 | [`docker/docker-compose.yml`](../docker/docker-compose.yml) | Six services (postgres, ollama, trader-core, news-sentiment, notifier, backup) plus replay, dev and monitoring profiles |
 | [`docker/Dockerfile`](../docker/Dockerfile) | One multi-stage file with targets `core`, `news`, `notifier`, `tools`, `dev` |
 | [`docker/postgres/init.sql`](../docker/postgres/init.sql) | Per-service roles and the outbox bus table |
-| [`tools/devcontainer.json`](../tools/devcontainer.json) | VS Code dev container; copy to `.devcontainer/devcontainer.json` |
+| [`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json) | VS Code dev container (the production image's `dev` target) |
 | [`pyproject.toml`](../pyproject.toml) | Package metadata, pinned dependencies, tool config |
-| [`tools/ci.yml`](../tools/ci.yml) | Lint, type check, unit and contract tests, secret scan on every push. Move to `.github/workflows/ci.yml` to enable |
+| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Lint, type check, all tests, traceability, image builds and a secret scan on every push |
 | `.env.<name>.example` | One template per container env file (`.env.core`, `.env.news`, `.env.notifier`, …), no values; `trader init-env` creates the real files |

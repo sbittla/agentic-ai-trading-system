@@ -98,7 +98,7 @@ If Postgres is down, `trader-core` blocks new entries (no journal, no trade) whi
 ```
 agentic-ai-trading-system/
 ├── README.md
-├── .devcontainer/devcontainer.json   # from tools/devcontainer.json (protected folder; copy manually)
+├── .devcontainer/devcontainer.json   # VS Code dev container (image target dev)
 ├── config/
 │   ├── config.example.yaml           # documented defaults (CONFIG_REFERENCE.md)
 │   ├── macro_calendar_2026_2027.yaml

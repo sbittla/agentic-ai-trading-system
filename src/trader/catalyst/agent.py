@@ -141,7 +141,6 @@ class CatalystAgent:
         from trader.news.names import COMPANY_NAMES
 
         self.names = COMPANY_NAMES
-        self.dropped_irrelevant = 0
 
     # -- inputs -----------------------------------------------------------------------------
     def items(self, tickers: Sequence[str], since: datetime, until: datetime) -> list[Item]:
@@ -158,7 +157,6 @@ class CatalystAgent:
                     s.news_embeddings.c.item_id.in_(ids[i:i + 2000]))):
                 vecs[r["item_id"]] = decode_vec(r["vec"])
         out = []
-        self.dropped_irrelevant = 0
         for r in rows:
             if r["suspicious"]:
                 continue                 # A3-4: instruction-like text never becomes a story
@@ -173,7 +171,6 @@ class CatalystAgent:
                       publisher=r["publisher"] or r["source"],
                       sentiment=float(r["finbert_score"] or 0.0), vec=vecs.get(r["item_id"]))
             if not relevant(it, self.names):
-                self.dropped_irrelevant += 1
                 continue
             out.append(it)
         return out
@@ -403,7 +400,8 @@ class CatalystAgent:
             track = (data or {}).get("horizons")
             report.write_latest(self.ca.latest_file, report.as_json(
                 [o.as_dict() for o in outs], as_of=day.isoformat(), generated=now,
-                source="trader-core", gate=gate, track=track, notes=self.notes(pool, inp)))
+                source="trader-core", gate=gate, track=track, notes=self.notes(pool, inp),
+                live=self.live_track()))                                       # NC-35
         return outs
 
     def notes(self, pool: Pool, inp: Inputs) -> list[str]:

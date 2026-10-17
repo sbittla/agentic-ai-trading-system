@@ -1,7 +1,7 @@
 """In-process event bus and the cross-container outbox bus (ARCHITECTURE §1, ADR-012).
 
 ``EventBus``: every event is written to the journal *before* it is delivered (SR-4).
-``InMemoryOutbox`` / ``SqlOutbox`` / ``PgOutboxBus``: cross-container messages as rows in
+``InMemoryOutbox`` / ``SqlOutbox``: cross-container messages as rows in
 ``journal.outbox``; Postgres adds ``LISTEN/NOTIFY`` and a role/channel guard (SEC-17).
 """
 
@@ -58,16 +58,6 @@ class EventBus:
                     await res
             delivered += 1
         return delivered
-
-    def replay(self, types: dict[str, type[BaseModel]], after_id: int = 0
-               ) -> list[BaseModel]:
-        """Rebuild typed events from the journal (restart recovery)."""
-        if self.journal is None:
-            return []
-        out: list[BaseModel] = []
-        for row in self.journal.events(after_id, types=types.keys()):
-            out.append(types[row["type"]].model_validate(row["payload"]))
-        return out
 
 
 # --- outbox ---------------------------------------------------------------------------------
@@ -231,4 +221,3 @@ class SqlOutbox:
             backoff = min(60.0, backoff * 2)
 
 
-PgOutboxBus = SqlOutbox

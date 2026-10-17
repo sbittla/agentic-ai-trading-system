@@ -467,3 +467,17 @@ def test_import_trades_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     assert main(["--config", str(cfgp), "import-trades", str(f), "--broker", "robinhood"]) == 0
     out = capsys.readouterr().out
     assert "3 trades read (3 new" in out and "lock" in out
+
+
+@pytest.mark.rule("WS-7")
+async def test_monthly_report_reconciles_lots_with_the_broker(tmp_path: Path) -> None:
+    h = Harness(default_config(), PLAIN_DAY, tmp_path)
+    await h.start()
+    await h.engine.job_monthly(et(PLAIN_DAY, "17:30"))
+    text = next(m for _, m in h.notifier.sent if "Tax lots vs broker" in m)
+    assert "Tax lots vs broker: match" in text
+    h.engine.compliance.on_buy_fill("x1", "NVDA", 5, Decimal("100"), et(PLAIN_DAY, "10:00"))
+    await h.engine.job_monthly(et(PLAIN_DAY, "17:31"))
+    last = [m for _, m in h.notifier.sent if "Tax lots vs broker" in m][-1]
+    assert "NVDA: lots 5 vs broker 0" in last
+    assert any(r["type"] == "LOT_MISMATCH" for r in h.journal.rows(s.incidents))

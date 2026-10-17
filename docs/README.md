@@ -66,8 +66,8 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [`config/config.example.yaml`](../config/config.example.yaml) | All settings with v1 defaults |
 | [`config/macro_calendar_2026_2027.yaml`](../config/macro_calendar_2026_2027.yaml) | CPI, jobs report and FOMC dates (2027 CPI and jobs dates still to add) |
 | [`docker/`](../docker/) | `docker-compose.yml` (six services + profiles), multi-stage `Dockerfile`, `postgres/init.sql` |
-| [`tools/devcontainer.json`](../tools/devcontainer.json) | VS Code dev container; copy to `.devcontainer/devcontainer.json` |
+| [`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json) | VS Code dev container (the production image's `dev` target) |
 | [`pyproject.toml`](../pyproject.toml) | Package and tool configuration |
-| [`tools/ci.yml`](../tools/ci.yml) | CI workflow: lint, types, tests, traceability, secret scan. Move it to `.github/workflows/ci.yml` to enable it |
+| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | CI workflow: lint, types, tests, traceability, image builds, secret scan |
 | [`tools/check_traceability.py`](../tools/check_traceability.py) | Fails CI when a rule ID has no test |
 | `.env.<name>.example`, [`docker/.env.example`](../docker/.env.example), [`secrets/README.md`](../secrets/README.md) | Templates for every local setup file; `trader init-env` creates the real ones ([ACCOUNT_SETUP.md](ACCOUNT_SETUP.md)) |

@@ -7,10 +7,9 @@ are seeded, so the same seed always produces identical bars.
 
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, time, timedelta
 
 from trader.calendar import MarketCalendar
 from trader.models.messages import Bar, EventFlags
@@ -166,12 +165,3 @@ def generate(start: date, n_days: int, seed: int = 7, symbols: list[str] | None 
         out.news[dd] = news
         out.day_types[dd] = types
     return out
-
-
-def utc(dt: datetime) -> datetime:
-    return dt.astimezone(UTC)
-
-
-def sanity(data: SyntheticData) -> bool:
-    return all(not math.isnan(b.c) and b.l <= min(b.o, b.c) and b.h >= max(b.o, b.c)
-               for bars in data.minutes.values() for b in bars)

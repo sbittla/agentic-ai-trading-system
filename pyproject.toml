@@ -23,7 +23,7 @@ news = ["praw>=7.7", "transformers>=4.44", "torch>=2.3"]   # news-sentiment imag
 notifier = ["twilio>=9.0"]                                  # notifier image only
 console = ["starlette>=0.40", "uvicorn>=0.30", "python-multipart>=0.0.9"]  # console image only
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6", "ruff>=0.5", "mypy>=1.10",
-       "pip-tools>=7.4", "types-PyYAML", "pandas-stubs"]
+       "pip-tools>=7.4", "types-PyYAML", "pandas-stubs", "vulture>=2.11"]
 
 [project.scripts]
 trader = "trader.cli:main"

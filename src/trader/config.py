@@ -189,7 +189,6 @@ class DataCfg(_Frozen):
 
 
 class LlmCfg(_Frozen):
-    provider: Literal["ollama"] = "ollama"
     base_url: str = "http://ollama:11434"
     model: str = "qwen3:8b"
     temperature: float = 0
@@ -204,11 +203,9 @@ class LlmCfg(_Frozen):
 
 
 class NotificationsCfg(_Frozen):
-    whatsapp_enabled: bool = True
     approval_timeout_sec: int = 90
     approval_chart: bool = True            # AP-1
     approval_live_update_s: int = 5        # AP-3
-    notifier_down_after_s: int = 120       # NF-1
 
 
 class LatencyCfg(_Frozen):
@@ -312,7 +309,6 @@ class OptionsCfg(_Frozen):
 class StorageCfg(_Frozen):
     journal_url_env: str = "DATABASE_URL"
     bars_path: str = "data/bars"
-    backup_daily_at: str = "18:00"
 
 
 class PollCfg(_Frozen):
@@ -537,15 +533,6 @@ class Config(_Frozen):
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
-
-    def identical_group(self, ticker: str) -> frozenset[str]:
-        """All symbols treated as the same stock as ``ticker`` (UR-2, WS-4)."""
-        t = ticker.upper()
-        for primary, others in self.universe.substantially_identical.items():
-            group = {primary.upper(), *(o.upper() for o in others)}
-            if t in group:
-                return frozenset(group)
-        return frozenset({t})
 
     def canonical(self, ticker: str) -> str:
         """The configured share class for a symbol (GOOG -> GOOGL)."""

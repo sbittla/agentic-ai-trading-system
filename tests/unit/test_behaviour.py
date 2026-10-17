@@ -36,7 +36,6 @@ def test_stop_never_widened(cfg, windows, cal) -> None:  # type: ignore[no-untyp
     with pytest.raises(StopWidenError):
         pm.apply_stop_move(StopMove(p.position_id, p.stop - D("0.10"), "XR-3 trail"))
     pm.apply_stop_move(StopMove(p.position_id, p.stop + D("0.10"), "XR-3 trail"))
-    assert RiskManager(cfg, windows).validate_stop_move(D("10"), D("9.99")) is False
 
 
 @pytest.mark.rule("DR-3")
@@ -90,10 +89,9 @@ def test_day_trade_never_becomes_swing(cfg, windows, cal) -> None:  # type: igno
     from tests.unit.test_exits import open_position
 
     pm = PositionMonitor(cfg, windows, cal)
-    p = open_position(pm)
-    with pytest.raises(PermissionError):
-        pm.convert_to_swing(p.position_id)
-    # and a day trade still open on a later day is closed at the first tick
+    open_position(pm)
+    # no conversion path exists: a day trade still open on a later day is closed at the
+    # first tick
     acts = pm.on_tick(et(PLAIN_DAY, "09:31") + timedelta(days=3))
     assert acts and acts[0].reason == "EXIT_TIME_STOP_1555"
 

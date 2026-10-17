@@ -110,7 +110,6 @@ data:
   sec_user_agent: "agentic-ai-trading-system your-name your-email@example.com"
 
 llm:
-  provider: ollama
   base_url: http://ollama:11434
   model: qwen3:8b               # fits an 8 GB GPU (reference: RTX 4060 Laptop, docs/HARDWARE.md)
                                 # `trader select-model` recommends one for your GPU and, with
@@ -122,13 +121,11 @@ llm:
   prompt_versions: {a03: v1, a05_plan: v1, a05_proposal: v1, a06: v1, a11: v1, catalyst: v1}
 
 notifications:
-  whatsapp_enabled: true
   approval_timeout_sec: 90      # unanswered approval = no trade
 
 storage:
   journal_url_env: DATABASE_URL     # Postgres URL comes from each container's env file
   bars_path: /app/data/bars
-  backup_daily_at: "18:00"
 
 catalyst:                         # NEWS_CATALYST_REQUIREMENTS.md (advisory, A17)
   enabled: true

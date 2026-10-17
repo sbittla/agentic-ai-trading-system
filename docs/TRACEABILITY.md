@@ -45,7 +45,7 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `XR-4` | Failed-trade exit | A9 | unit/test_exits.py | EXIT_* |
 | `XR-5` | Time stop | A9 | unit/test_exits.py | EXIT_* |
 | `XR-6` | Event exit | A9 | unit/test_exits.py | EXIT_* |
-| `LL-1` | Risk per trade | A7 | unit/test_loss_limits.py | HALT_LL1 |
+| `LL-1` | Risk per trade | A7 | unit/test_loss_limits.py | SIZE_TOO_SMALL (risk binds) |
 | `LL-2` | Max trades per day | A7 | unit/test_loss_limits.py | HALT_LL2 |
 | `LL-3` | Daily loss limit | A7 | unit/test_loss_limits.py | HALT_LL3 |
 | `LL-4` | Two losses in a row | A7 | unit/test_loss_limits.py | HALT_LL4 |
@@ -53,21 +53,21 @@ Every rule ID maps to the agent that enforces it, the test that proves it, and t
 | `LL-6` | Monthly drawdown limit | A7 | unit/test_loss_limits.py | HALT_LL6 |
 | `LL-7` | Profit give-back | A7 | unit/test_loss_limits.py | HALT_LL7 |
 | `LL-8` | Max open positions | A7 | unit/test_loss_limits.py | HALT_LL8 |
-| `LL-9` | Max one position | A7 | unit/test_loss_limits.py | HALT_LL9 |
+| `LL-9` | Max one position | A7 | unit/test_loss_limits.py | SIZE_TOO_SMALL (LL-9 position cap) |
 | `LL-10` | Correlated names (NVDA, AVGO, TSM) | A7 | unit/test_loss_limits.py | HALT_LL10 |
-| `LL-11` | Margin | A7 | unit/test_loss_limits.py | HALT_LL11 |
+| `LL-11` | Margin | A7 | unit/test_loss_limits.py | SIZE_TOO_SMALL (LL-11 leverage) |
 | `DR-1` | No adding to a losing position, ever. | A7, A9 | unit/test_behaviour.py | NT_DR1 |
-| `DR-2` | A stop can only move toward profit. | A7, A9 | unit/test_behaviour.py | NT_DR2 |
+| `DR-2` | A stop can only move toward profit. | A7, A9 | unit/test_behaviour.py | StopWidenError (move refused) |
 | `DR-3` | After a loss, the same ticker is locked for the rest of the window; after a stop-out, the… | A7, A9 | unit/test_behaviour.py | NT_DR3 |
 | `DR-4` | Re-entering the same ticker in the same window is not allowed. | A7, A9 | unit/test_behaviour.py | NT_DR4 |
 | `DR-5` | , and only after the first target is hit, with the stop on the whole position at… | A7, A9 | unit/test_behaviour.py | NT_DR5 |
-| `DR-6` | A day trade can never be converted into a swing trade to avoid taking a loss. | A7, A9 | unit/test_behaviour.py | NT_DR6 |
-| `DR-7` | Setups not in the morning game plan trade at half risk. | A7, A9 | unit/test_behaviour.py | NT_DR7 |
-| `DR-8` | Any trade the owner forces through the kill switch or approval flow is tagged and… | A7, A9 | unit/test_behaviour.py | NT_DR8 |
-| `RC-1` | When equity is 3% or more below its high-water mark, risk per trade halves to 0.25%. | A7 | unit/test_recovery.py | SIZE_REDUCED / SETUP_DISABLED |
-| `RC-2` | Full size returns only after a new equity high, or 10 trades with positive expectancy at… | A7 | unit/test_recovery.py | SIZE_REDUCED / SETUP_DISABLED |
-| `RC-3` | Any setup with negative expectancy over its last 20 trades is disabled for live trading… | A7 | unit/test_recovery.py | SIZE_REDUCED / SETUP_DISABLED |
-| `RC-4` | A ticker with 3 losing trades in a row is locked for 5 trading days. | A7 | unit/test_recovery.py | SIZE_REDUCED / SETUP_DISABLED |
+| `DR-6` | A day trade can never be converted into a swing trade to avoid taking a loss. | A7, A9 | unit/test_behaviour.py | EXIT_TIME_STOP_1555 (no conversion path) |
+| `DR-7` | Setups not in the morning game plan trade at half risk. | A7, A9 | unit/test_behaviour.py | half size (no code) |
+| `DR-8` | Any trade the owner forces through the kill switch or approval flow is tagged and… | A7, A9 | unit/test_behaviour.py | manual tag |
+| `RC-1` | When equity is 3% or more below its high-water mark, risk per trade halves to 0.25%. | A7 | unit/test_recovery.py | SIZE_REDUCED |
+| `RC-2` | Full size returns only after a new equity high, or 10 trades with positive expectancy at… | A7 | unit/test_recovery.py | SIZE_REDUCED |
+| `RC-3` | Any setup with negative expectancy over its last 20 trades is disabled for live trading… | A7 | unit/test_recovery.py | paper route |
+| `RC-4` | A ticker with 3 losing trades in a row is locked for 5 trading days. | A7 | unit/test_recovery.py | NT_CK1 (loss-streak lock) |
 | `WS-1` | After a position in a ticker is closed at a loss, that ticker is locked for new entries… | A12 | unit/test_wash_sale.py | NT_WASH_LOCK |
 | `WS-2` | Before any entry, A12 checks the last 30 days for realized losses in that ticker; if… | A12 | unit/test_wash_sale.py | NT_WASH_LOCK |
 | `WS-3` | Before closing a position at a loss, A12 checks whether shares of that ticker were bought… | A12 | unit/test_wash_sale.py | NT_WASH_LOCK |
@@ -166,8 +166,8 @@ Rows marked **Planned** are specified but not built yet; CI counts them but does
 | `TW-6` | 10:00 AM releases and Fed speakers: The macro calendar also lists the 10:00 AM releas… | A7, A10 | unit/test_req13_core.py | NT_MACRO_RELEASE |
 | `MF-6` | Reliable quote: the spread check (MF-4) uses only a two-sided quote less than 2 seconds o… | A4, A7 | unit/test_req13_core.py | NT_NO_RELIABLE_QUOTE |
 | `RG-1` | Daily regime: at 8:30 AM, classify the day as `normal` or `high-vol` from SPY's ATR(14-da… | A4 | unit/test_req13_core.py | — |
-| `RG-2` | High-vol rules: risk per trade halves (like RC-1, not stacked below 0.25%); no gap-and-go… | A7 | unit/test_req13_core.py | NT_REGIME |
-| `RG-3` | Trend day, defined: by 3:00 PM, at least 80% of 5-minute closes since 9:30 are above VWAP… | A4 | unit/test_req13_core.py | NT_NOT_TREND_DAY |
+| `RG-2` | High-vol rules: risk per trade halves (like RC-1, not stacked below 0.25%); no gap-and-go… | A7 | unit/test_req13_core.py | half size; gap-and-go not detected |
+| `RG-3` | Trend day, defined: by 3:00 PM, at least 80% of 5-minute closes since 9:30 are above VWAP… | A4 | unit/test_req13_core.py | setup not detected off trend days |
 | `EX-5` | Stop order type: Broker-side stops are stop-market orders, so a fast move or a halt c… | A8, A9 | unit/test_req13_core.py | EXIT_GAP_BELOW_STOP |
 | `LAT-1` | Latency budget: from the trigger candle's close to the order sent, p95 ≤ 10 s in auto… | A10, engine | unit/test_req13_core.py | — |
 | `LAT-2` | Pre-arming: When price is within 0.3 ATR(5-min) of a game-plan trigger, A5 writes the… | A4, A5, A6 | unit/test_req13_core.py | — |

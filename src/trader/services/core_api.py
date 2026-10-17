@@ -108,8 +108,6 @@ class CoreApi:
         return d
 
     # -- UI-4 quote, bars ------------------------------------------------------------------------
-    def in_universe(self, sym: str) -> bool:
-        return sym in self.engine.cfg.universe.tickers or sym in self.engine.md.state
 
     async def quote(self, sym: str) -> dict[str, Any]:
         st = self.engine.md.state.get(sym)

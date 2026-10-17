@@ -39,7 +39,7 @@ From October 17, 2026, the remaining work, including M8 (backlog B10) and M9 (B1
 - [ ] CI workflow green on an empty test suite; gitleaks secret scan on
 - [ ] Config loader with every validation rule in CONFIG_REFERENCE.md; `trader validate-config`
 - [ ] `docker compose up` starts all six services healthy: `postgres` with per-service roles, `ollama` with the GPU visible, and stub `trader-core`, `news-sentiment`, `notifier`, `backup` that report health
-- [ ] Dev container opens in VS Code (copy `tools/devcontainer.json`); CI workflow copied to `.github/workflows/`
+- [ ] Dev container opens in VS Code (`.devcontainer/devcontainer.json`); CI runs from `.github/workflows/ci.yml`
 - **Done when:** a bad config value (for example `risk_per_trade_pct: 2`) makes `trader validate-config` fail with the rule name.
 
 ### M1 — Journal, message models, event bus (2 weeks)
@@ -53,10 +53,10 @@ From October 17, 2026, the remaining work, including M8 (backlog B10) and M9 (B1
 
 ### M2 — Market data, clock and calendar (2 weeks)
 
-- [ ] `AlpacaIEXFeed` streaming 13 symbols; reconnect and REST back-fill (A2-4, DQ-5)
+- [ ] `AlpacaStream` streaming 13 symbols; reconnect and REST back-fill (A2-4, DQ-5)
 - [ ] Bar store (Parquet) with 2 years daily and 60 days of 1-min history
 - [ ] Indicators in DATA_SPEC.md §2 (VWAP, OR, RVOL by time of day, ATRs, EMAs)
-- [ ] `MarketClock` with Alpaca calendar, macro calendar file, NTP drift check
+- [ ] `MarketCalendar` (XNYS) with, macro calendar file, NTP drift check
 - [ ] Start recording full days (bars, quotes, news) for the replay library
 - **Done when:** a week of live recording has no unrecovered gaps and indicators match a reference calculation to the cent.
 

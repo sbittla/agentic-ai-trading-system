@@ -422,3 +422,24 @@ async def test_negative_8k_on_held_ticker_blocks_new_entries(tmp_path: Path) -> 
     ok, why = eng.risk._limits(setup_at(now), ctx)
     assert not ok and why.startswith(Reason.NT_NEWS_SHOCK)
     assert any("NEWS SHOCK NVDA" in m for _, m in h.notifier.sent)
+
+
+@pytest.mark.rule("AC-1")
+def test_entry_needing_unsettled_funds_is_rejected_with_its_code(cfg: Config,
+                                                                windows: TradingWindows) -> None:
+    from tests.conftest import AGREE, make_ctx, make_setup
+    from trader.models.messages import ComplianceResult
+
+    rm = RiskManager(cfg, windows)
+    rm.start_day(PLAIN_DAY, Decimal("25000"))
+    ok = ComplianceResult(proposal_id="p1", ok=True)
+    poor = rm.evaluate(make_setup(), make_ctx(settled_cash=Decimal("50")), AGREE, ok, "p1")
+    assert poor.result == "REJECT" and poor.reason_code == Reason.NT_UNSETTLED_FUNDS
+    qty, _, _, binding = rm.size(Decimal("100"), Decimal("99"), Decimal("25000"),
+                                 Decimal("25000"), Decimal("0"), True,
+                                 settled_cash=Decimal("50"))
+    assert qty == 0 and binding == "AC-1 settled cash"
+    rich = rm.evaluate(make_setup(), make_ctx(settled_cash=Decimal("25000")), AGREE, ok, "p1")
+    assert rich.reason_code != Reason.NT_UNSETTLED_FUNDS
+    margin = rm.evaluate(make_setup(), make_ctx(), AGREE, ok, "p1")   # no settled cap
+    assert margin.reason_code != Reason.NT_UNSETTLED_FUNDS

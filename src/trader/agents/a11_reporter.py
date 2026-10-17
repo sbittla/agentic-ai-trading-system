@@ -36,7 +36,7 @@ from trader.metrics import (
     summarize,
 )
 from trader.models.llm_schemas import ReportNarrativeOut
-from trader.timeutil import ET, et_datetime, to_et
+from trader.timeutil import ET, et_datetime
 
 log = structlog.get_logger(__name__)
 NUM_RE = re.compile(r"[-+]?\$?\d[\d,]*\.?\d*%?")
@@ -312,7 +312,3 @@ class Reporter:
 
 def _money(x: float) -> str:
     return f"{'-' if x < 0 else '+'}${abs(x):,.2f}"
-
-
-def to_et_date(dt: datetime) -> date:
-    return to_et(dt).date()

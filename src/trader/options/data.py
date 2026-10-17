@@ -18,7 +18,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -44,10 +44,6 @@ def parse_occ(symbol: str) -> tuple[str, date, str, float] | None:
         return None
     u, ymd, kind, k = m.groups()
     return u, date(2000 + int(ymd[:2]), int(ymd[2:4]), int(ymd[4:])), kind, int(k) / 1000
-
-
-def occ_symbol(underlying: str, expiry: date, kind: str, strike: float) -> str:
-    return f"{underlying}{expiry:%y%m%d}{kind}{round(strike * 1000):08d}"
 
 
 @dataclass(frozen=True)
@@ -372,7 +368,3 @@ class OptionsData:
             "date": d, "ticker": ctx.ticker, "atm_iv_30d": ctx.atm_iv_30d,
             "iv_rank": ctx.iv_rank, "iv_pct": ctx.iv_pct, "expected_move_30d": near30,
             "history_days": ctx.history_days + 1})
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)

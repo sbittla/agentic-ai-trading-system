@@ -40,25 +40,18 @@ class Reason(StrEnum):
     NT_STYLE_PAUSED = "NT_STYLE_PAUSED"
     NT_APPROVAL_REJECTED = "NT_APPROVAL_REJECTED"
     NT_APPROVAL_TIMEOUT = "NT_APPROVAL_TIMEOUT"
-    NT_DUPLICATE = "NT_DUPLICATE"
     NT_INVALID_PROPOSAL = "NT_INVALID_PROPOSAL"
     NT_NEWS_UNAVAILABLE = "NT_NEWS_UNAVAILABLE"
     NT_DR1 = "NT_DR1"
-    NT_DR2 = "NT_DR2"
     NT_DR3 = "NT_DR3"
     NT_DR4 = "NT_DR4"
     NT_DR5 = "NT_DR5"
-    NT_DR6 = "NT_DR6"
-    NT_DR7 = "NT_DR7"
-    NT_DR8 = "NT_DR8"
     # REQUIREMENTS 1.3
     NT_CHASE_AT_SEND = "NT_CHASE_AT_SEND"          # LAT-3
     NT_MODEL_TIMEOUT = "NT_MODEL_TIMEOUT"          # LAT-4
     NT_LIMIT = "NT_LIMIT"                          # LAT-4 (generic limit block)
     NT_NO_RELIABLE_QUOTE = "NT_NO_RELIABLE_QUOTE"  # DQ-8 / MF-6
     NT_MACRO_RELEASE = "NT_MACRO_RELEASE"          # TW-6
-    NT_REGIME = "NT_REGIME"                        # RG-2
-    NT_NOT_TREND_DAY = "NT_NOT_TREND_DAY"          # RG-3
     NT_UNSETTLED_FUNDS = "NT_UNSETTLED_FUNDS"      # AC-1
     NT_ACCOUNT_MISMATCH = "NT_ACCOUNT_MISMATCH"    # AC-2
     NT_NEWS_SHOCK = "NT_NEWS_SHOCK"                # NW-2
@@ -67,9 +60,7 @@ class Reason(StrEnum):
     COPILOT_PLAN = "COPILOT_PLAN"                  # CP-1: plan sent, no order
     SIZE_TOO_SMALL = "SIZE_TOO_SMALL"
     SIZE_REDUCED = "SIZE_REDUCED"
-    SETUP_DISABLED = "SETUP_DISABLED"
     # halts (limits)
-    HALT_LL1 = "HALT_LL1"
     HALT_LL2 = "HALT_LL2"
     HALT_LL3 = "HALT_LL3"
     HALT_LL4 = "HALT_LL4"
@@ -77,9 +68,7 @@ class Reason(StrEnum):
     HALT_LL6 = "HALT_LL6"
     HALT_LL7 = "HALT_LL7"
     HALT_LL8 = "HALT_LL8"
-    HALT_LL9 = "HALT_LL9"
     HALT_LL10 = "HALT_LL10"
-    HALT_LL11 = "HALT_LL11"
     NT_PF_CORRELATION = "NT_PF_CORRELATION"        # PF-2: measured correlation with an open one
     # execution
     EXEC_SANITY = "EXEC_SANITY"                    # OC-1..OC-4: order failed the last check
@@ -110,7 +99,6 @@ class Reason(StrEnum):
     EXIT_FLATTEN_CMD = "EXIT_FLATTEN_CMD"
     EXIT_DAILY_LIMIT = "EXIT_DAILY_LIMIT"
     EXIT_YEAR_END_WASH = "EXIT_YEAR_END_WASH"
-    EXIT_RECONCILE = "EXIT_RECONCILE"
     EXIT_GAP_BELOW_STOP = "EXIT_GAP_BELOW_STOP"    # EX-5
     STOP_SHOCK = "STOP_SHOCK"                      # NW-2 stop move
     STOP_MACRO_BREAKEVEN = "STOP_MACRO_BREAKEVEN"  # TW-6 stop move
@@ -118,5 +106,3 @@ class Reason(StrEnum):
     CMD_ACCEPTED = "CMD_ACCEPTED"
     CMD_REJECTED = "CMD_REJECTED"
 
-
-CHECKLIST_REASON = {i: Reason(f"NT_CK{i}") for i in range(1, 11)}

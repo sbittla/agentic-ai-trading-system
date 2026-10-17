@@ -178,13 +178,6 @@ def obv(close: Arr, volume: Arr) -> Arr:
     return np.cumsum(sign * volume)
 
 
-def ad_line(high: Arr, low: Arr, close: Arr, volume: Arr) -> Arr:
-    """TA-Lib AD (Chaikin Accumulation/Distribution line); flat bars add nothing."""
-    rng = high - low
-    mfm = np.where(rng > 0, ((close - low) - (high - close)) / np.where(rng > 0, rng, 1.0), 0.0)
-    return np.cumsum(mfm * volume)
-
-
 def cmf(high: Arr, low: Arr, close: Arr, volume: Arr, n: int = 20) -> Arr:
     """Chaikin Money Flow: sum of money-flow volume / sum of volume over ``n`` bars (TS-20)."""
     rng = high - low

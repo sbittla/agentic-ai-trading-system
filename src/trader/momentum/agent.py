@@ -7,7 +7,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 from typing import Any
@@ -716,7 +716,3 @@ def render(payload: Mapping[str, Any], *, show_unproven: bool = False, n_board: 
         lines.append("Setups not graded yet: run `./run.sh momentum-eval`; until then no "
                      "entry alert is sent (MO-14).")
     return "\n".join(lines)
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)

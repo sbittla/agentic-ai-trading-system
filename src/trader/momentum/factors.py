@@ -160,7 +160,6 @@ class MomFrame:
         self.dollar20 = ta.sma(c * v, 20)
         self.hi252 = ta.rolling_max(h, 252)
         self.lo252 = ta.rolling_min(lo, 252)
-        self.hh55 = ta.shift(ta.rolling_max(h, 55))
         self.ll20 = ta.shift(ta.rolling_min(lo, 20))
         lr = np.diff(np.log(c), prepend=np.nan)
         self.vol60 = _roll_std(lr, 60) * math.sqrt(252)
