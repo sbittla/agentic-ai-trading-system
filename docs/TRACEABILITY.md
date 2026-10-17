@@ -623,6 +623,14 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `LN-17` | Weekly learning report: R by cause class, and the decision-quality 2×2 (LN-5). The marg… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 | `LN-18` | Narrative, with citations. Qwen may write a plain summary per trade and per week from t… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 | `LN-19` | Monthly behaviour review per ticker: the LN-10 profile changes, the tickers whose recen… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-1` | A confidence grade on every alert, by code from the evidence: A: forward record passed… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-2` | Size follows the evidence. Risk per trade = base risk (risk.risk_per_trade_pct) × a gra… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-3` | Statistics that respect clustering. The intervals of SV-1, MO-11, TS-12 and EV-5 resamp… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-4` | Regime coverage before high confidence. A grade-A stream needs its backtest to include… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-5` | Re-validate choices made after seeing both halves. Every default chosen with both halve… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-6` | A capital plan. Config states the split of the account between the rotation model, swin… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-7` | Compared with doing nothing. Every alert stream reports its after-tax return and Sharpe… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `DC-8` | Expectations before the first trade. For each stream, the console and the first alert o… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 
 ## How to use
 

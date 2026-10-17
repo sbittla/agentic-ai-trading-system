@@ -9,6 +9,7 @@ This document specifies what the system needs to become a **reliable and consist
 3. **The trade lifecycle from the trader's side:** entering or avoiding (§6), stop-loss alerts (§7) and riding a winner (§8), with the human factors that decide whether the plan is followed (§9).
 4. **Analysis gaps:** what is still missing to analyse a stock fully (§10).
 5. **Learning from outcomes:** every trade gets a cause. It may be a technical error, an execution or human mistake, stock news, a sector, macro or market event, a regime mismatch, a stock that did not behave as predicted, or plain variance. Lessons become tested rules, never silent tuning (§11).
+6. **Decision confidence:** a confidence grade on every alert, size that follows the evidence, statistics that respect clustering, a capital plan, a comparison with doing nothing, and the expected range of outcomes before the first trade (§12).
 
 **Scope.** The engine's own trades already have most lifecycle protections: the entry checklist CK-1..CK-10, no-chase CK-6 and LAT-3, bracket orders EX-2, stop-market stops EX-5, exit rules XR-1..XR-6, co-pilot tracking CP-2, and shadow trades SH-1. The main gap is that **the advisory alerts the owner trades by hand** do not get the same protection: momentum (A19), the scanner, events (A20), catalysts (A17) and options suggestions. These requirements apply to every alert source unless a row says otherwise. Where an existing rule already covers a case, it is cited, not repeated.
 
@@ -308,14 +309,29 @@ Every closed trade, theoretical and actual, wins as well as losses, gets a cause
 | `LN-18` | P1 | **Narrative, with citations.** Qwen may write a plain summary per trade and per week from the attribution records. Every number in it must match a record (the TS-13 number check), and every cause it mentions must be the record's class. It explains; it does not decide. |
 | `LN-19` | P2 | **Monthly behaviour review per ticker:** the LN-10 profile changes, the tickers whose recent behaviour departs from their history (a regime change for that stock), and whether ideas on them should carry a caution. |
 
-## 12. Order of work
+## 12. Decision confidence (DC)
+
+How confident a trader can be in an alert depends on the strength of the evidence behind it, not on the setup's average alone. On October 17, 2026, no single trade's odds are better than about 42–58% (MOMENTUM §9.2, SCANNER §6). Even a real +0.15R edge leaves roughly a 1-in-6 chance of being down after 100 trades. These requirements make that visible on every alert, and make size and capital follow the evidence.
+
+| ID | Pri | Requirement |
+| --- | --- | --- |
+| `DC-1` | P0 | **A confidence grade on every alert**, by code from the evidence: **A**: forward record passed (RL-3), the 95% interval of mean net R above 0 in the backtest's both halves and in the forward period, ≥ 100 backtest and ≥ 30 forward trades, the regime coverage of DC-4, and analysis coverage complete (TA-19). **B**: the backtest criteria of A, but forward record still in progress. **C**: positive mean but the interval includes 0, or under 100 trades. **D**: research only (not alerted). The alert shows the grade, the win rate and mean R **with their intervals and sample sizes**, and the share of trades the setup lost. It never states a probability without its n (FR-003 of the owner's supplement). |
+| `DC-2` | P0 | **Size follows the evidence.** Risk per trade = base risk (`risk.risk_per_trade_pct`) × a grade factor (A 1.0, B 0.75, C 0.5). For A and B it is capped by a quarter of the Kelly fraction computed from the **shrunk** expectancy (the lower half of its interval, not the point estimate). The existing halvings stack below it (high-vol RG-2, regime `CAUTION` MO-6, loss streak RC-1), down to a floor of 0.25%. The alert shows the factor and the reason. |
+| `DC-3` | P0 | **Statistics that respect clustering.** The intervals of SV-1, MO-11, TS-12 and EV-5 resample whole weeks (block bootstrap), not single trades. Each result reports its **effective sample size**: trades corrected for overlap in time and correlation between names. Gates (MO-14, RL-3, DC-1) use the block interval and the effective size. |
+| `DC-4` | P1 | **Regime coverage before high confidence.** A grade-A stream needs its backtest to include at least one bear market (SPY more than 20% under its high) and one high-volatility period (RG-1 high-vol on at least 20 sessions). Its results are reported by regime. The scanner gets the 10-year SIP history momentum uses (MO-22) before its techniques can rise above C. |
+| `DC-5` | P0 | **Re-validate choices made after seeing both halves.** Every default chosen with both halves in view is listed with the date and the reason, and graded on the frozen holdout (RL-5) before it can support a grade above C. The list: the scanner's default disabled list (SCANNER §6.2), the momentum leader filter and default policies (MO-24), `SMA200_PULLBACK` watch-only (MOMENTUM §9.6), and any event pattern. |
+| `DC-6` | P0 | **A capital plan.** Config states the split of the account between the rotation model, swing alerts, options and cash, for example 60 / 25 / 5 / 10. Each sleeve's open risk and exposure are checked against its share, and an alert that would exceed its sleeve is resized or skipped. The weekly report shows each sleeve's return against its own benchmark. The default split favours the stream with the strongest evidence (today the rotation model, §1 W-2). |
+| `DC-7` | P0 | **Compared with doing nothing.** Every alert stream reports its after-tax return and Sharpe against holding QQQ and the equal-weight universe (total return, RL-11), over the same sessions, backtest and forward. A stream that does not beat the passive alternative on risk-adjusted terms in both halves stays research (grade D), as the MO-25 gate already does for the rotation model. Its alerts say what the passive alternative would have earned. |
+| `DC-8` | P1 | **Expectations before the first trade.** For each stream, the console and the first alert of each month show what the next 50 and 100 trades are likely to bring, from a Monte Carlo of its graded trades (SV-2, with DC-3 blocks): the probability of being down, the median and 95th-percentile longest losing streak, the drawdown range, and the expected total R with its interval. When live results stay inside these ranges, the system says so ("a 6-trade losing streak is inside the expected range"), to stop a working plan being abandoned in a normal drawdown. |
+
+## 13. Order of work
 
 | Phase | Requirements | Why first |
 | --- | --- | --- |
 | 1. Protect money already at risk | SL-1..SL-13, IR-3, IR-6, FM-24..FM-34, LC-1..LC-3, RL-10 | Stops and reconciliation on the owner's real positions matter more than better entries |
 | 2. Follow every trade end to end | EN-1..EN-8, RD-1..RD-4, HU-1..HU-2, RL-1, RL-2 | One lifecycle and one ledger for every source |
 | 3. Make it run unattended | IR-1, IR-2, IR-4, IR-5, IR-7..IR-10 | Missed jobs are missed alerts |
-| 4. Earn the right to alert | RL-3..RL-7, RL-9, RL-11, RL-12 | Forward proof, a frozen holdout and one idea per ticker |
+| 4. Earn the right to alert | RL-3..RL-7, RL-9, RL-11, RL-12, DC-1..DC-3, DC-5..DC-7, then DC-4, DC-8 | Forward proof, a frozen holdout, one idea per ticker, and a grade and size that follow the evidence |
 | 5. See the whole stock | TA-19, TA-8, TA-9, then TA-1, TA-2, TA-4..TA-7, TA-13..TA-15, then the P2 rows | Coverage and the critical components first |
 | 6. Learn from every outcome | LN-1..LN-7, LN-13, LN-14 first, then LN-8..LN-12, LN-17, then the P2 rows | Needs the ledger (phase 2) and the event tags; attribution before any rule changes |
 | 7. Broaden the edge | RL-13, RL-14, RL-15, EN-9..EN-12, RD-5..RD-10 | New uncorrelated strategies, through the same gates |
