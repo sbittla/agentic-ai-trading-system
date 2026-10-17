@@ -598,3 +598,62 @@ def test_previews_and_opinion_are_not_events(head: str) -> None:
 def test_real_headlines_seen_in_the_smoke_test(head: str, want: str) -> None:
     got = classify_rules(cluster([item("x", "TSLA", at(D0), head)])[0])
     assert got is not None and got[0] == want
+
+
+# --- Stocktwits source ---------------------------------------------------------------------
+
+def _stw_page(ids: list[int], start: datetime, more: bool = True) -> dict:
+    msgs = [{"id": i, "body": f"$NVDA post {i}",
+             "created_at": (start - timedelta(minutes=k)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "user": {"username": f"u{i}"},
+             "entities": {"sentiment": {"basic": "Bullish"} if i % 2 else None}}
+            for k, i in enumerate(ids)]
+    return {"messages": msgs, "cursor": {"more": more, "max": ids[-1] if ids else None}}
+
+
+async def test_stocktwits_pages_back_to_since_and_reads_tags():
+    import httpx
+
+    from trader.catalyst.collect import StocktwitsPosts
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    pages = {None: _stw_page([10, 9, 8], now),
+             "8": _stw_page([7, 6, 5], now - timedelta(minutes=3)),
+             "5": _stw_page([4, 3], now - timedelta(minutes=60))}
+    seen: list[str | None] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.params.get("max"))
+        return httpx.Response(200, json=pages[req.url.params.get("max")])
+
+    src = StocktwitsPosts(httpx.MockTransport(handler), pause=0)
+    got = await src.fetch(["NVDA"], now - timedelta(minutes=30))
+    assert seen == [None, "8", "5"]                 # stops once a page reaches past ``since``
+    assert [it.id for it in got] == [f"stw-{i}" for i in (10, 9, 8, 7, 6, 5)]
+    assert got[0].meta["tag"] is None and got[1].meta["tag"] == "bullish"
+    assert got[0].kind == "post" and got[0].meta["author"] == "u10"
+
+
+async def test_stocktwits_rate_limit_and_budget():
+    import httpx
+
+    from trader.catalyst.collect import StocktwitsPosts
+
+    now = datetime.now(UTC)
+    calls = []
+
+    def limited(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        return httpx.Response(429)
+
+    src = StocktwitsPosts(httpx.MockTransport(limited), pause=0)
+    assert await src.fetch(["NVDA", "AAPL"], now - timedelta(hours=1)) == []
+    assert len(calls) == 1 and src.paused_until is not None
+    assert await src.fetch(["NVDA"], now - timedelta(hours=1)) == []
+    assert len(calls) == 1                          # paused: no call during the cooldown
+
+    ok = StocktwitsPosts(httpx.MockTransport(
+        lambda r: httpx.Response(200, json=_stw_page([2, 1], now, more=True))),
+        per_hour=3, pause=0)
+    got = await ok.fetch(["A", "B", "C", "D"], now - timedelta(days=1))
+    assert len(ok.calls) == 3 and {it.ticker for it in got} <= {"A", "B", "C"}

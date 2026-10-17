@@ -308,42 +308,83 @@ class FundamentalsFeed:
 
 
 class StocktwitsPosts:
-    """Public symbol stream (messages with optional user Bullish/Bearish tags). Off until its
-    terms are verified (``catalyst.social_sources``)."""
+    """Public symbol stream (messages with optional user Bullish/Bearish tags), no key needed.
+    Off until its terms are verified (``catalyst.social_sources``).
+
+    A page holds the newest 30 messages; a busy ticker posts that many in minutes, so the
+    stream is paged back (``?max=<cursor>``) to ``since``, at most ``max_pages`` a ticker.
+    Unauthenticated calls are limited per IP (about 200 an hour): ``per_hour`` keeps a margin,
+    and an HTTP 429 pauses the source for ``cooldown``."""
 
     name = "stocktwits"
+    URL = "https://api.stocktwits.com/api/2/streams/symbol/{}.json"
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, max_pages: int = 4,
+                 per_hour: int = 150, cooldown: timedelta = timedelta(minutes=15),
+                 pause: float = 0.5) -> None:
         self.transport = transport
+        self.max_pages = max_pages
+        self.per_hour = per_hour
+        self.cooldown = cooldown
+        self.pause = pause
+        self.calls: list[datetime] = []        # request times over the last hour
+        self.paused_until: datetime | None = None
+
+    def _may_call(self, now: datetime) -> bool:
+        if self.paused_until is not None and now < self.paused_until:
+            return False
+        self.calls = [t for t in self.calls if now - t < timedelta(hours=1)]
+        return len(self.calls) < self.per_hour
 
     async def fetch(self, symbols: Sequence[str], since: datetime) -> list[NewsItem]:
         out: list[NewsItem] = []
         async with httpx.AsyncClient(timeout=20, transport=self.transport,
                                      headers={"User-Agent": UA}) as c:
             for sym in symbols:
-                try:
-                    r = await c.get(f"https://api.stocktwits.com/api/2/streams/symbol/{sym}.json")
-                except httpx.HTTPError:
-                    continue
-                if r.status_code != 200:
-                    continue
-                for m in (r.json() or {}).get("messages", []):
+                cursor: int | None = None
+                for _ in range(self.max_pages):
+                    now = datetime.now(UTC)
+                    if not self._may_call(now):
+                        log.warning("stocktwits_budget_spent", symbol=sym)
+                        return out
+                    self.calls.append(now)
                     try:
-                        ts = datetime.fromisoformat(str(m["created_at"]).replace("Z", "+00:00"))
-                    except (KeyError, ValueError):
-                        continue
-                    if ts < since:
-                        continue
-                    tag = ((m.get("entities") or {}).get("sentiment") or {}).get("basic")
-                    body = str(m.get("body", ""))[:1000]
-                    out.append(NewsItem(
-                        id=f"stw-{m.get('id')}", ticker=sym, source="stocktwits",
-                        published_at=ts.astimezone(UTC), headline=body[:300], text=body,
-                        kind="post",
-                        meta={"author": str((m.get("user") or {}).get("username", "")),
-                              "tag": tag.lower() if isinstance(tag, str) else None,
-                              "publisher": "stocktwits"}))
-                await asyncio.sleep(0.5)
+                        r = await c.get(self.URL.format(sym),
+                                        params={"max": cursor} if cursor else None)
+                    except httpx.HTTPError:
+                        break
+                    if r.status_code == 429:
+                        self.paused_until = now + self.cooldown
+                        log.warning("stocktwits_rate_limited", symbol=sym)
+                        return out
+                    if r.status_code != 200:
+                        break
+                    js = r.json() or {}
+                    oldest = None
+                    for m in js.get("messages", []):
+                        try:
+                            ts = datetime.fromisoformat(str(m["created_at"]).replace("Z",
+                                                                                     "+00:00"))
+                        except (KeyError, ValueError):
+                            continue
+                        oldest = ts if oldest is None else min(oldest, ts)
+                        if ts < since:
+                            continue
+                        tag = ((m.get("entities") or {}).get("sentiment") or {}).get("basic")
+                        body = str(m.get("body", ""))[:1000]
+                        out.append(NewsItem(
+                            id=f"stw-{m.get('id')}", ticker=sym, source="stocktwits",
+                            published_at=ts.astimezone(UTC), headline=body[:300], text=body,
+                            kind="post",
+                            meta={"author": str((m.get("user") or {}).get("username", "")),
+                                  "tag": tag.lower() if isinstance(tag, str) else None,
+                                  "publisher": "stocktwits"}))
+                    await asyncio.sleep(self.pause)
+                    cur = js.get("cursor") or {}
+                    if oldest is None or oldest < since or not cur.get("more") or not cur.get(
+                            "max"):
+                        break
+                    cursor = int(cur["max"])
         return out
 
 

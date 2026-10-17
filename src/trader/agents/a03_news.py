@@ -135,8 +135,8 @@ class NewsAgent:
 
     async def hot_cycle(self, tickers: Sequence[str]) -> list[EventFlags]:
         """NW-1: a fast poll for tickers with an open position or a game-plan setup. News and
-        8-K sources only (no Reddit), FinBERT tone only (no Qwen call, so no GPU load); the
-        last full cycle's summary and catalyst are kept."""
+        8-K sources only (no Reddit or Stocktwits), FinBERT tone only (no Qwen call, so no GPU
+        load); the last full cycle's summary and catalyst are kept."""
         hot = [self.cfg.canonical(t) for t in tickers if self.cfg.canonical(t) in self.state]
         if not hot:
             return []
@@ -146,7 +146,7 @@ class NewsAgent:
         before = {t: set(self.state[t].items) for t in hot}
         items: list[NewsItem] = []
         for src in self.sources:
-            if src.name == "reddit":
+            if src.name in ("reddit", "stocktwits"):
                 continue
             try:
                 items += await src.fetch(hot, since)
