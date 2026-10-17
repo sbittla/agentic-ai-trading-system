@@ -10,6 +10,7 @@ This document specifies what the system needs to become a **reliable and consist
 4. **Analysis gaps:** what is still missing to analyse a stock fully (§10).
 5. **Learning from outcomes:** every trade gets a cause. It may be a technical error, an execution or human mistake, stock news, a sector, macro or market event, a regime mismatch, a stock that did not behave as predicted, or plain variance. Lessons become tested rules, never silent tuning (§11).
 6. **Decision confidence:** a confidence grade on every alert, size that follows the evidence, statistics that respect clustering, a capital plan, a comparison with doing nothing, and the expected range of outcomes before the first trade (§12).
+7. **Beyond other platforms:** a provable, hash-chained track record anchored outside the system, overfitting statistics on every strategy selection (Deflated Sharpe Ratio, Probability of Backtest Overfitting), LLM features graded only after the model's training cutoff, and a wider universe that does not raise false discoveries (§13).
 
 **Scope.** The engine's own trades already have most lifecycle protections: the entry checklist CK-1..CK-10, no-chase CK-6 and LAT-3, bracket orders EX-2, stop-market stops EX-5, exit rules XR-1..XR-6, co-pilot tracking CP-2, and shadow trades SH-1. The main gap is that **the advisory alerts the owner trades by hand** do not get the same protection: momentum (A19), the scanner, events (A20), catalysts (A17) and options suggestions. These requirements apply to every alert source unless a row says otherwise. Where an existing rule already covers a case, it is cited, not repeated.
 
@@ -324,16 +325,145 @@ How confident a trader can be in an alert depends on the strength of the evidenc
 | `DC-7` | P0 | **Compared with doing nothing.** Every alert stream reports its after-tax return and Sharpe against holding QQQ and the equal-weight universe (total return, RL-11), over the same sessions, backtest and forward. A stream that does not beat the passive alternative on risk-adjusted terms in both halves stays research (grade D), as the MO-25 gate already does for the rotation model. Its alerts say what the passive alternative would have earned. |
 | `DC-8` | P1 | **Expectations before the first trade.** For each stream, the console and the first alert of each month show what the next 50 and 100 trades are likely to bring, from a Monte Carlo of its graded trades (SV-2, with DC-3 blocks): the probability of being down, the median and 95th-percentile longest losing streak, the drawdown range, and the expected total R with its interval. When live results stay inside these ranges, the system says so ("a 6-trade losing streak is inside the expected range"), to stop a working plan being abandoned in a normal drawdown. |
 
-## 13. Order of work
+## 13. Beyond other platforms (PR, OV, LM, UB)
+
+The commercial AI alert platforms reviewed on October 17, 2026 work in five ways:
+
+- **Nightly strategy optimizers** (Trade Ideas Holly): backtest 60–70 strategies on 8,000+ stocks each night and keep the survivors.
+- **Pattern "odds of success"** (Tickeron): historical frequency, by a proprietary formula.
+- **Build-your-own ML labs** (TrendSpider).
+- **AI scores** (Danelfin, Kavout).
+- **LLM assistants in brokers** (Robinhood Cortex and Agentic Trading, Public Alpha).
+
+None of them publishes an independently verifiable live record. Their odds come without intervals, sample sizes or a count of the strategies tried, and they stop at the entry signal. Research on LLM forecasts finds that memorization before a model's training cutoff inflates backtests (Glasserman & Lin 2023; *A Test of Lookahead Bias in LLM Forecasts*, 2025). The SEC has fined advisers for overstated AI claims (Delphia and Global Predictions, 2024).
+
+This section specifies four capabilities that answer those weaknesses. Each group ends with build notes: data, commands, config and tests.
+
+### 13.1 A provable track record (PR)
+
+The system writes every alert to an append-only, hash-chained ledger **before its outcome is known**, and stamps a daily fingerprint outside the system. Nobody can quietly delete losers or backdate winners, including the system itself.
+
+| ID | Pri | Requirement |
+| --- | --- | --- |
+| `PR-1` | P0 | **Canonical event record.** Every ledger event (RL-1, LC-1) is serialized as canonical JSON: UTF-8, keys sorted, no insignificant whitespace, prices and quantities as decimal strings, timestamps as UTC ISO-8601 with milliseconds. The fields: `event_id`, `signal_id`, `seq`, `kind`, `ts`, `payload`, `rule_version`, `model_digest`. |
+| `PR-2` | P0 | **Hash chain.** `hash_i = SHA-256(hash_{i-1} ‖ canonical(event_i))`, with `hash_0` the SHA-256 of a fixed genesis string that holds the installation id. One global chain, strictly ordered by `seq` (a database sequence). It is written in the same transaction as the event: an event without its chain row is rolled back. |
+| `PR-3` | P0 | **Append only, enforced.** The application roles have INSERT and SELECT on the ledger and chain tables, never UPDATE or DELETE (SEC-17 grants). A database trigger rejects updates and deletes for every role but the migration owner. A mistake is corrected by a new `CORRECTION` event that references the original; it is never edited away. |
+| `PR-4` | P0 | **Recorded before the outcome.** An alert counts in the track record only if its `ALERTED` event is chained before its entry window opens. That is, before the trigger session's open for daily setups, and before the trigger time for intraday ones. Alerts chained late are labelled `LATE` and reported separately, never mixed in. |
+| `PR-5` | P1 | **Daily anchor.** At 23:00 ET the system computes the day's Merkle root (SHA-256, the day's event hashes in `seq` order, the last leaf duplicated when the count is odd), plus the last chain hash. It writes `anchors/YYYY-MM-DD.json` with the date, first and last `seq`, event count, Merkle root and chain head. The file is committed to a separate anchor git repository. With `ledger.anchor.push: true` it is pushed to a remote (an independent timestamp). With `ledger.anchor.ots: true` it is also stamped with OpenTimestamps (a `.ots` proof). The anchor holds **hashes only**: no tickers, prices or positions. Pushing is off by default and is an owner decision, because it publishes the hashes. |
+| `PR-6` | P0 | **Verification.** `trader verify-ledger [--from DATE] [--to DATE]` recomputes every hash and Merkle root and compares them with the stored chain and the anchors, including the remote copy when configured. Any mismatch is a P1 incident and stops the track-record report. It runs every Sunday, before every weekly report and in the monthly drill (OPS-2). |
+| `PR-7` | P1 | **Track-record report from the verified chain only.** Per stream: every alert, with nothing filtered out; graded by its declared contract (RL-2, by version); time-weighted returns for the portfolio views. Exported as CSV and JSON together with the event hashes, the Merkle proofs and the anchor files. Anyone can then check that a listed alert was recorded on the day the report says. |
+| `PR-8` | P2 | **Proof for one alert.** `trader prove <signal_id>` prints the event, its hash, its Merkle path and the anchor that holds it. |
+
+**Build notes (PR).**
+
+- **Tables:**
+  - `ledger_chain` (seq bigint PK, event_id UUID unique, prev_hash char(64), hash char(64), created_at timestamptz);
+  - `ledger_anchor` (date PK, first_seq, last_seq, count, merkle_root char(64), chain_head char(64), committed_at, pushed_at, ots_status).
+- **Code:** `trader/ledger/chain.py` (canonicalize, hash, append in the caller's transaction), `trader/ledger/anchor.py` (Merkle root, file, git commit through `git` subprocess, optional `ots stamp`), `trader/ledger/verify.py`.
+- **Commands:** `trader verify-ledger`, `trader prove`, `trader anchor --date` (re-runs a missed anchor; IR-5).
+- **Config:** `ledger.anchor.repo_path`, `ledger.anchor.push` (false), `ledger.anchor.remote`, `ledger.anchor.ots` (false), `ledger.anchor.time` ("23:00").
+- **Tests:**
+  - canonical JSON is stable across key order and float formatting;
+  - tampering with one payload byte, deleting a row or reordering two rows is detected and names the first bad `seq`;
+  - the Merkle root matches a reference implementation for 1, 2, 3 and 1,000 leaves;
+  - an alert chained after its window opens is `LATE`;
+  - updates and deletes are refused for the app role (Postgres integration test);
+  - re-anchoring a day is idempotent.
+
+### 13.2 Overfitting statistics on strategy selection (OV)
+
+Selecting the best of many backtested variants guarantees a good-looking winner even when none has an edge. These requirements count every variant ever tried and judge the winners after that count, using the Probabilistic and Deflated Sharpe Ratios (Bailey & López de Prado, 2012 and 2014) and the Probability of Backtest Overfitting from combinatorially symmetric cross-validation (Bailey, Borwein, López de Prado & Zhu, 2015).
+
+| ID | Pri | Requirement |
+| --- | --- | --- |
+| `OV-1` | P0 | **Trial registry.** Every evaluated variant, kept or rejected, is recorded in `trials`: the family (for example `momentum.rotation`, `scanner.swing`, `events.pattern`, `ln.candidate`), the rule and parameters (canonical JSON), the universe, the period, the code version, the contract version, the summary statistics, and a hash of its return series. Trials are never deleted. N for a family counts **all** its trials ever. |
+| `OV-2` | P0 | **Return series per trial.** Each trial stores its daily return series (net of costs, as RL-12) in the Parquet store under `trials/<family>/<trial_id>.parquet`. PSR, DSR and PBO need the series, not just the summaries. |
+| `OV-3` | P0 | **Probabilistic Sharpe Ratio.** For a trial's per-period Sharpe ratio SR̂ over T observations, with sample skewness γ₃ and kurtosis γ₄ (not excess): PSR(SR\*) = Φ( (SR̂ − SR\*) · √(T − 1) / √(1 − γ₃·SR̂ + ((γ₄ − 1)/4)·SR̂²) ). It is computed on the same per-period scale as SR̂; annualised figures are for display only. |
+| `OV-4` | P0 | **Deflated Sharpe Ratio.** DSR = PSR(SR₀), where SR₀ is the Sharpe ratio expected from the best of N independent trials with no edge: SR₀ = √V · ((1 − γ)·Φ⁻¹(1 − 1/N) + γ·Φ⁻¹(1 − 1/(N·e))). Here V is the variance of the family's trial Sharpe ratios, γ ≈ 0.5772 (Euler–Mascheroni) and e is Euler's number. N is the **effective** number of trials: N_eff = ρ̄ + (1 − ρ̄)·N, with ρ̄ the average pairwise correlation of the trials' return series (from a random sample of at most 500 pairs when N is large). The report shows N, N_eff, V, SR₀, SR̂ and DSR. |
+| `OV-5` | P0 | **Probability of Backtest Overfitting (CSCV).** The selection matrix (T periods × N variants) is split into S = 16 equal time blocks. For each of the C(16, 8) = 12,870 ways to choose 8 blocks as in-sample, or a seeded random sample of 2,000 when the cost is high: pick the in-sample best variant by Sharpe; find its relative rank ω ∈ (0, 1) out of sample (its rank among the N variants ÷ (N + 1), rank 1 = worst); λ = ln(ω / (1 − ω)). **PBO** = the share of splits with λ ≤ 0. Also reported: the distribution of λ, the regression of out-of-sample on in-sample performance (its slope is the degradation), and the probability that the selected variant loses out of sample. |
+| `OV-6` | P0 | **Gates.** The selection families (rotation model choice MO-13, scanner technique selection, event patterns, LN candidates, any re-optimization) must have **PBO ≤ 0.20** for their selection to be used. A stream's grade (DC-1) also requires **DSR ≥ 0.95 for A** and **≥ 0.90 for B**. Below that it is C at best, whatever its raw interval. |
+| `OV-7` | P1 | **Minimum track-record length.** The forward period of RL-3 lasts at least MinTRL = 1 + (1 − γ₃·SR̂ + ((γ₄ − 1)/4)·SR̂²) · (Φ⁻¹(0.95) / (SR̂ − SR\*))² periods, with SR\* = 0 and the backtest's moments. It is shown in sessions and as a calendar date. When MinTRL is longer than 3 years, the stream's edge is too small to verify in reasonable time, and the report says so. |
+| `OV-8` | P1 | **No nightly re-optimization.** Parameters change only through the lifecycle (RL-4) with the OV gates. Re-selection is at most weekly (MO-13's weekly re-grade). Each re-selection is a new set of trials counted in N. |
+| `OV-9` | P1 | **One overfitting report** per family in `reports/overfitting.json` and on the console's walk-forward record: N, N_eff, the best variant's SR̂, PSR, DSR, SR₀, PBO, the λ histogram, degradation, MinTRL and the gate result. |
+
+**Build notes (OV).**
+
+- **Tables:**
+  - `trials` (trial_id UUID, family, params JSON, universe_hash, period_from, period_to, code_version, contract_version, sr, skew, kurt, t_obs, series_hash, created_at, kept bool).
+- **Code:** `trader/stats/overfit.py` with pure functions `psr`, `sr0_expected_max`, `n_eff`, `dsr`, `cscv_pbo`, `min_trl`, each with NumPy and SciPy's normal distribution, seeded. The existing evaluators register trials: `momentum/evaluate.py` (every setup × policy, every rotation model), `scanner/evaluate.py`, `events/study.py` (each group × window is a trial), and the LN candidates.
+- **Command:** `trader overfit-report [--family F]`.
+- **Config:** `overfit.pbo_max` (0.20), `overfit.dsr_a` (0.95), `overfit.dsr_b` (0.90), `overfit.cscv_blocks` (16), `overfit.cscv_max_splits` (2000), `overfit.seed`.
+- **Tests:**
+  - PSR and DSR against published worked examples, or an independent reference implementation, to 1e-6;
+  - N_eff is N for uncorrelated trials and 1 for identical ones;
+  - 200 pure-noise strategies: the best has DSR < 0.5 and PBO ≈ 0.5 (± 0.1);
+  - 199 noise strategies plus one with a planted edge (Sharpe 2 a year over 10 years): DSR > 0.95 and PBO < 0.1;
+  - CSCV with 16 blocks enumerates 12,870 splits, and the sampled version is reproducible for a seed;
+  - MinTRL falls as SR̂ rises.
+
+### 13.3 Look-ahead-safe LLM use (LM)
+
+| ID | Pri | Requirement |
+| --- | --- | --- |
+| `LM-1` | P0 | **Model registry.** Every model the system runs is listed in `llm.models`: the name, the role (MR-1), the exact digest (the Ollama manifest SHA-256, or the Hugging Face commit hash), the **training-data cutoff** (documented, else a conservative estimate marked as such), the licence and the date it was added. The digest is stored with every output it produces (`llm_calls`, the ledger's `model_digest`). |
+| `LM-2` | P0 | **Pinned by digest, fail closed.** At startup and every hour, the running model's digest is compared with the registry. A mismatch, such as an upgraded tag that silently changed the weights, turns the features that depend on that model off. Their outputs are marked unavailable (NFR-010), a P2 is sent, and nothing restarts until the owner registers the new digest. |
+| `LM-3` | P0 | **Graded only after the cutoff.** Any feature derived from a model and used in a signal, a score, a gate or a grade is evaluated only on inputs published after the model's cutoff plus 30 days. Examples: Qwen's catalyst type, FinBERT and FinTwitBERT sentiment, embeddings used for novelty. Results before that date are reported separately, labelled "possibly memorized", and never used for gates (MO-14, NC-34, RL-3, DC-1). A feature with too little post-cutoff data stays research (grade D). |
+| `LM-4` | P1 | **Memorization diagnostics,** run at each evaluation. (a) The performance gap before and after the cutoff: a feature much stronger before it is flagged. (b) An anonymization test: re-run the feature with company names, tickers and dates masked (`[COMPANY]`, `[TICKER]`, `[DATE]`) on a seeded sample of 500 items; a drop beyond the sampling interval is flagged. Flags appear in the overfitting report (OV-9). |
+| `LM-5` | P0 | **A new model is a new trial.** Changing a model or its digest creates new trials (OV-1). The feature goes back to `paper` (RL-4) until it passes on post-cutoff data. Old and new run side by side (shadow) for at least 20 sessions before the switch. |
+| `LM-6` | P1 | **Prompt and decoding pinned.** The prompt version (NC-46), temperature, seed and context size are stored with every output, and every LLM feature is replayable from the cache (CachedLLM). A change to any of them is treated as LM-5. |
+| `LM-7` | P0 | **Role limits stay.** LLMs extract, classify into fixed lists and explain. They never produce a price, size, stop, probability or grade (MR-1, A11-3, TS-13). These requirements add the evidence rules; they do not widen the role. |
+
+**Build notes (LM).**
+
+- **Config:** `llm.models: [{name, role, digest, cutoff, cutoff_estimated, licence}]`.
+- **Code:** `trader/llm/registry.py` (load, compare the live digest via the Ollama `/api/show` or `/api/tags` manifest and the Hugging Face cache metadata, fail closed), `trader/llm/memorization.py` (the cutoff split and the masked re-run).
+- **Data:** a `model_digest` column on `llm_calls`, `news_items` (for its sentiment score), `news_stories` and `catalyst_outlooks`; a migration adds it, nullable for history.
+- **Command:** `trader llm-check` (lists models, digests, cutoffs, the live comparison).
+- **Tests:**
+  - a digest mismatch disables dependent features and marks outputs unavailable;
+  - the evaluation splits exactly at cutoff + 30 days;
+  - pre-cutoff results never reach a gate;
+  - the masking is deterministic, and the anonymization test is reproducible for a seed;
+  - a new digest creates new trials.
+
+### 13.4 Breadth without more false discoveries (UB)
+
+| ID | Pri | Requirement |
+| --- | --- | --- |
+| `UB-1` | P1 | **Daily universe builder.** After the close, the full list of active, tradable US assets is taken from the broker's assets endpoint. Kept: common stocks on NYSE, Nasdaq and NYSE American. Excluded: ETFs, warrants, rights, units, preferreds and OTC. Filters at that date: close ≥ `universe_scan.min_price` ($10), 20-session average dollar volume ≥ `universe_scan.min_dollar_volume` ($50M), and at least 260 sessions of history (MO-1 rules). The result is stored per day in `universe_daily` (date, symbol, eligible, reasons). That makes the system's own **point-in-time universe** from the first run onward, a forward answer to D1. |
+| `UB-2` | P1 | **Three tiers:** *tradable* (`universe.tickers`: the engine may trade them), *scan* (UB-1's eligible set, capped at `universe_scan.max_symbols`, default 1,500, by dollar volume; advisory alerts) and *context* (indices, sectors, breadth inputs). Every alert names its tier. |
+| `UB-3` | P1 | **Data within budget.** Daily SIP bars come from multi-symbol bar requests (batches of `universe_scan.batch`, default 200 symbols), within the plan's request rate. 10 years are downloaded once per new symbol; after that one incremental request covers each batch. The run reports requests, symbols, bytes and time; stale symbols are skipped with reasons (MO-22). Intraday monitoring stays on armed and held symbols only (MO-15 snapshots). Streaming the whole universe is out of scope unless the data plan allows it. |
+| `UB-4` | P1 | **Compute within the close window.** The close job finishes within 25 minutes for 1,500 symbols on the production host (IR-1). Factors and setups are computed in vectorized NumPy per symbol, in parallel across processes. The job's time and memory are measured on every run and alerted (IR-2) when they pass 80% of the budget. |
+| `UB-5` | P0 | **More symbols means more trials.** Widening the universe, adding a family or adding a setup registers trials (OV-1). Gates use DSR with N_eff and PBO (OV-4..OV-6). Per-symbol statistics are shrunk toward their family's value (LN-10). A setup that was gated on the 115-symbol universe is re-graded on the wider one before it alerts there. |
+| `UB-6` | P0 | **Alert volume stays fixed.** More candidates do not mean more alerts. RL-7 consolidates per ticker, the daily alert caps (AL-5, HU-4) still apply, and candidates are ranked by grade (DC-1) and then by the strength of their record. The rest go to the console only. |
+| `UB-7` | P1 | **Complete analysis for every scanned name:** the sector map (TA-4), liquidity (TA-8) and the event calendar (TA-9). A scanned name missing any critical component is not alerted (TA-19). |
+
+**Build notes (UB).**
+
+- **Tables:** `universe_daily` (date, symbol, eligible bool, reasons JSON, dollar_volume, close).
+- **Code:** `trader/universe/scan.py` (assets list, filters, batches), the bar store's `daily_sip` kind reused, `momentum/factors.py` vectorized across symbols where a loop is now used.
+- **Command:** `trader universe-scan [--date]`; `momentum-history --scan` downloads the scan tier.
+- **Config:** `universe_scan.enabled` (false), `min_price`, `min_dollar_volume`, `max_symbols`, `batch`, `exchanges`, `exclude_types`.
+- **Tests:**
+  - filters on a fixture of the assets endpoint (ETFs, warrants and OTC excluded);
+  - point-in-time: the universe for day D uses only data up to D;
+  - the batch planner stays within the configured request rate;
+  - a re-grade is required before a setup alerts on a wider universe;
+  - the alert count stays within the caps on a synthetic 1,500-symbol day;
+  - the timing budget is checked by a benchmark test with a tolerance.
+
+## 14. Order of work
 
 | Phase | Requirements | Why first |
 | --- | --- | --- |
 | 1. Protect money already at risk | SL-1..SL-13, IR-3, IR-6, FM-24..FM-34, LC-1..LC-3, RL-10 | Stops and reconciliation on the owner's real positions matter more than better entries |
 | 2. Follow every trade end to end | EN-1..EN-8, RD-1..RD-4, HU-1..HU-2, RL-1, RL-2 | One lifecycle and one ledger for every source |
+| 2b. Make the record provable | PR-1..PR-4, PR-6, then PR-5, PR-7, PR-8 | Built with the ledger (RL-1): the chain must exist before the first alert it is meant to prove |
 | 3. Make it run unattended | IR-1, IR-2, IR-4, IR-5, IR-7..IR-10 | Missed jobs are missed alerts |
 | 4. Earn the right to alert | RL-3..RL-7, RL-9, RL-11, RL-12, DC-1..DC-3, DC-5..DC-7, then DC-4, DC-8 | Forward proof, a frozen holdout, one idea per ticker, and a grade and size that follow the evidence |
+| 4b. Count every trial | OV-1..OV-6, LM-1..LM-3, LM-5, LM-7, then OV-7..OV-9, LM-4, LM-6 | With phase 4: the grades (DC-1) depend on DSR and PBO, and on post-cutoff LLM evidence |
 | 5. See the whole stock | TA-19, TA-8, TA-9, then TA-1, TA-2, TA-4..TA-7, TA-13..TA-15, then the P2 rows | Coverage and the critical components first |
 | 6. Learn from every outcome | LN-1..LN-7, LN-13, LN-14 first, then LN-8..LN-12, LN-17, then the P2 rows | Needs the ledger (phase 2) and the event tags; attribution before any rule changes |
-| 7. Broaden the edge | RL-13, RL-14, RL-15, EN-9..EN-12, RD-5..RD-10 | New uncorrelated strategies, through the same gates |
+| 7. Broaden the edge | RL-13, RL-14, RL-15, EN-9..EN-12, RD-5..RD-10, UB-1..UB-7 | New uncorrelated strategies and a wider universe, through the same gates (UB-5 needs OV) |
 
-**Definition of done for "reliable":** twelve months of forward results in which every alert, entry, stop and exit is in the ledger. The owner's fills track the plan within the measured slippage. Every alerting stream is `limited` or `full` with its RL-3 criteria met. No P1 went unacknowledged. No scheduled job was missed without a P1. Every closed trade has a cause class. Technical errors and human deviations together cost under 10% of gross R. Every adopted rule change came through LN-9. The after-tax result beats the total-return benchmark it was promoted against.
+**Definition of done for "reliable":** twelve months of forward results in which every alert, entry, stop and exit is in the ledger. The owner's fills track the plan within the measured slippage. Every alerting stream is `limited` or `full` with its RL-3 criteria met. No P1 went unacknowledged. No scheduled job was missed without a P1. Every closed trade has a cause class. Technical errors and human deviations together cost under 10% of gross R. Every adopted rule change came through LN-9. `verify-ledger` passes over the whole year against the external anchors. Every alerting stream has PBO ≤ 0.20 and DSR at its grade's bar. The after-tax result beats the total-return benchmark it was promoted against.

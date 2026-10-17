@@ -631,6 +631,37 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `DC-6` | A capital plan. Config states the split of the account between the rotation model, swin… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 | `DC-7` | Compared with doing nothing. Every alert stream reports its after-tax return and Sharpe… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 | `DC-8` | Expectations before the first trade. For each stream, the console and the first alert o… | decision confidence (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-1` | Canonical event record. Every ledger event (RL-1, LC-1) is serialized as canonical JSON… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-2` | Hash chain. hash_i = SHA-256(hash_{i-1} ‖ canonical(event_i)), with hash_0 the SHA-256… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-3` | Append only, enforced. The application roles have INSERT and SELECT on the ledger and c… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-4` | Recorded before the outcome. An alert counts in the track record only if its ALERTED ev… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-5` | Daily anchor. At 23:00 ET the system computes the day's Merkle root (SHA-256, the day's… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-6` | Verification. trader verify-ledger [--from DATE] [--to DATE] recomputes every hash and… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-7` | Track-record report from the verified chain only. Per stream: every alert, with nothing… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `PR-8` | Proof for one alert. trader prove <signal_id> prints the event, its hash, its Merkle pa… | provable ledger (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-1` | Trial registry. Every evaluated variant, kept or rejected, is recorded in trials: the f… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-2` | Return series per trial. Each trial stores its daily return series (net of costs, as RL… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-3` | Probabilistic Sharpe Ratio. For a trial's per-period Sharpe ratio SR̂ over T observatio… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-4` | Deflated Sharpe Ratio. DSR = PSR(SR₀), where SR₀ is the Sharpe ratio expected from the… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-5` | Probability of Backtest Overfitting (CSCV). The selection matrix (T periods × N variant… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-6` | Gates. The selection families (rotation model choice MO-13, scanner technique selection… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-7` | Minimum track-record length. The forward period of RL-3 lasts at least MinTRL = 1 + (1… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-8` | No nightly re-optimization. Parameters change only through the lifecycle (RL-4) with th… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `OV-9` | One overfitting report per family in reports/overfitting.json and on the console's walk… | overfitting statistics (evaluators) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-1` | Model registry. Every model the system runs is listed in llm.models: the name, the role… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-2` | Pinned by digest, fail closed. At startup and every hour, the running model's digest is… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-3` | Graded only after the cutoff. Any feature derived from a model and used in a signal, a… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-4` | Memorization diagnostics, run at each evaluation. (a) The performance gap before and af… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-5` | A new model is a new trial. Changing a model or its digest creates new trials (OV-1). T… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-6` | Prompt and decoding pinned. The prompt version (NC-46), temperature, seed and context s… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LM-7` | Role limits stay. LLMs extract, classify into fixed lists and explain. They never produ… | LLM registry and evaluation | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-1` | Daily universe builder. After the close, the full list of active, tradable US assets is… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-2` | Three tiers: *tradable* (universe.tickers: the engine may trade them), *scan* (UB-1's e… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-3` | Data within budget. Daily SIP bars come from multi-symbol bar requests (batches of univ… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-4` | Compute within the close window. The close job finishes within 25 minutes for 1,500 sym… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-5` | More symbols means more trials. Widening the universe, adding a family or adding a setu… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-6` | Alert volume stays fixed. More candidates do not mean more alerts. RL-7 consolidates pe… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `UB-7` | Complete analysis for every scanned name: the sector map (TA-4), liquidity (TA-8) and t… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 
 ## How to use
 
