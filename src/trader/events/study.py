@@ -5,8 +5,9 @@ For each past event the **reaction session** R is the first session that can pri
 event day when it starts during or before market hours, else the next session (``amc``).
 Three windows, each as the stock's return minus SPY's over the same closes (abnormal), less
 the stock's **baseline**: its mean abnormal return over every window of the same length in
-the study period. Without the baseline a stock that beat SPY all decade (NVDA) shows a
-"pattern" in any window:
+the ``base_sessions`` (504) sessions before the event's first window, so no event is
+adjusted with later data. Without the baseline a stock that beat SPY all decade (NVDA) shows
+a "pattern" in any window:
 
 - ``run_up``:   close of R - 1 - pre  ->  close of R - 1   (into the event)
 - ``reaction``: close of R - 1        ->  close of R       (the event itself)
@@ -86,6 +87,17 @@ def load_groups(path: str | Path) -> list[Group]:
     return out
 
 
+def load_earnings(path: str | Path) -> dict[str, list[date]]:
+    """EV-10 fallback: hand-entered earnings dates (``earnings: {NVDA: [2026-11-17]}``) for
+    runs without the journal's Finnhub calendar."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    out: dict[str, list[date]] = {}
+    for t, v in (raw.get("earnings") or {}).items():
+        vals = v if isinstance(v, list) else [v]
+        out[str(t).upper()] = sorted(parse_date(x).day for x in vals)
+    return out
+
+
 def reaction_index(s: Series, ev: EventDate) -> int | None:
     """Index of the first session that can price the event (None when after the data)."""
     for i, d in enumerate(s.dates):
@@ -109,11 +121,17 @@ def baseline(s: Series, spy: Series, lengths: Sequence[int], start: date | None 
     return out
 
 
+BASE_SESSIONS = 504     # EV-4: two years of trailing windows
+BASE_MIN = 250          # fewer sessions before the event: the event is left out
+
+
 def observe(s: Series, spy: Series, ev: EventDate, pre: int, post: int,
-            base: Mapping[int, float] | None = None) -> dict[str, Any] | None:
+            base: Mapping[int, float] | None = None, base_sessions: int | None = None
+            ) -> dict[str, Any] | None:
     """EV-3: the three windows of one past event: ``<window>`` is the move net of SPY and
     of the baseline, ``_spy`` net of SPY only, ``_raw`` the stock's own (None when the bars
-    do not cover all of them)."""
+    do not cover all of them). ``base_sessions``: the trailing baseline (EV-4), computed from
+    the sessions before the run-up window only; ``base`` gives one instead (tests)."""
     r = reaction_index(s, ev)
     if r is None or r - 1 - pre < 0 or r + post >= len(s.c):
         return None
@@ -121,6 +139,12 @@ def observe(s: Series, spy: Series, ev: EventDate, pre: int, post: int,
     marks = {"start": r - 1 - pre, "pre": r - 1, "react": r, "end": r + post}
     if any(s.dates[i] not in spy_c for i in marks.values()):
         return None
+    if base_sessions is not None:
+        first = marks["start"] - base_sessions
+        if marks["start"] < BASE_MIN:
+            return None
+        base = baseline(s, spy, (pre, 1, post), s.dates[max(0, first)],
+                        s.dates[marks["start"]])
 
     def ret(a: int, b: int) -> tuple[float, float]:
         raw = float(s.c[b] / s.c[a] - 1)
@@ -135,6 +159,7 @@ def observe(s: Series, spy: Series, ev: EventDate, pre: int, post: int,
         out[name] = round(ab * 100 - (base or {}).get(n, 0.0), 2)
         out[name + "_spy"] = round(ab * 100, 2)
         out[name + "_raw"] = round(raw * 100, 2)
+        out[name + "_base"] = round((base or {}).get(n, 0.0), 2)
     return out
 
 

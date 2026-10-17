@@ -994,12 +994,14 @@ class TradingEngine:
 
         load = self.momentum_agent().load
         try:
-            payload = await EventsAgent(self.cfg, load, self.now, cal=self.cal).run()
+            payload = await EventsAgent(self.cfg, load, self.now, cal=self.cal,
+                                        journal=self.journal).run()
         except Exception as exc:   # noqa: BLE001 - a bad calendar entry must not stop the day
             log.warning("events_failed", error=str(exc))
             return True
         nxt = self.cal.next_trading_day(et_date(now)).isoformat()
-        due = [i for i in payload.get("ideas") or [] if i["enter"] == nxt and i["side"] == "buy"]
+        due = [i for i in payload.get("ideas") or [] if i["enter"] == nxt and i["side"] == "buy"
+               and i.get("verdict") == "ok"]                             # EV-10
         if self.cfg.events.telegram and due:
             await self.say(render({**payload, "ideas": due}), kind="events")
         return True

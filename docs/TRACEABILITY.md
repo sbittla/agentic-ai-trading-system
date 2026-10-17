@@ -443,8 +443,186 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `EV-6` | Ideas for upcoming events within lookahead_days, dated from the reaction session… | A20 events (trader-core) | unit/test_events.py | — |
 | `EV-7` | Outputs: trader events, run.sh/run.cmd events, events.latest_file, the 17:05 ET job… | A20 events (trader-core) | unit/test_events.py | — |
 | `EV-8` | Config events: with defaults; out-of-range values fail validation; a missing calendar… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-9` | Ledger: every idea in event_ideas, refreshed while open, graded once when its… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-10` | Earnings inside the window: a buy idea is blocked when an earnings date falls… | A20 events (trader-core) | unit/test_events.py | — |
 
 | `NC-49` | Tilt gate: the event-study tilt must beat no tilt on walk-forward Brier, else off | A17 (trader-core) | unit/test_catalyst.py | — |
+
+### Reliability, trade lifecycle and analysis (RELIABILITY_REQUIREMENTS.md)
+
+| `RL-1` | One signal ledger. Every module writes every candidate to one signals table: source, ru… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-2` | Outcome contract per strategy family. Each rule declares its target (+1R before −1R; po… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-3` | Forward evidence before alerts. Each alert stream runs as paper for a declared period b… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-4` | Lifecycle per strategy: research → paper → limited → full → paused → retired. A transit… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-5` | Frozen holdout and hysteresis. The most recent 12 months are held out and never used fo… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-6` | Automatic demotion. A limited or full stream moves to paused when, over its last 30 for… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-7` | One idea per ticker per day. Signals from all modules on the same ticker and day are co… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-8` | Rule version on every alert. An open position keeps the rules of its entry (stop logic,… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-9` | Scorecard per stream: backtest, paper (theoretical fills), the owner's fills (RL-10) an… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-10` | The owner's fills are the truth. Fills come from the Alpaca account, from the FILLED co… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-11` | After tax and total return. Reports give returns after an owner-set short-term and long… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-12` | Cost realism. Costs by liquidity tier: spread from the quote history, plus slippage sca… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-13` | Uncorrelated edges. New strategy families come before new variants of momentum: trend-f… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-14` | Universe breadth. The tradable universe is configurable beyond the 10 names, with a sec… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RL-15` | Point-in-time data for grading. Backtests use a constituents history that includes deli… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-1` | Always-on host. Production runs on a Linux host with Docker Engine (not Desktop), a UPS… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-2` | Missed-job check-ins. Every scheduled job pings an external check-in service when it fi… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-3` | Alert delivery guarantees. P1 alerts go to two channels (Telegram and a push or SMS ser… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-4` | Fail closed on inputs. Each input has a freshness limit: intraday quotes 2 s for orders… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-5` | Catch-up after downtime. A job missed because the host was down runs on restart. Its al… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-6` | Owner position reconciliation. Every 5 minutes in market hours, and at 9:25 and 16:05 E… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-7` | Calendar and reference expiry. Warn 60 days before a hand-kept calendar ends (the macro… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-8` | Idempotent jobs. Re-running a job for the same session changes nothing and sends nothin… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-9` | Config change log. Every config change is versioned, journaled and diffed in the next d… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-10` | Clock check. Host clock drift above 1 s against NTP is an incident, and above 5 s pause… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `IR-11` | Second data source for prices. End-of-day closes are cross-checked against a second sou… | operations | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-1` | Price falls through the stop level before the trigger fires | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-2` | Gap open above the no-chase limit | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-3` | Gap open below the stop | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-4` | Earnings date announced or moved into the hold window | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-5` | Material news after the alert (guidance, downgrade, legal, management change, offering) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-6` | Market regime flips (SPY under its 200-day, a high-vol day, a RISK_OFF macro label) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-7` | Sector breaks down (the sector ETF under its 50-day, or the ticker's relative strength… | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-8` | Trigger hit on weak volume (a probable false breakout) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-9` | Trigger hit in the last 10 minutes of the session | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-10` | Trigger reached only in pre-market or after hours | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-11` | A correlated position is already open | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-12` | Heat or position caps already used | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-13` | Ex-dividend date inside the hold (price drops by the dividend) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-14` | Halt or LULD pause on an armed ticker | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-15` | The alert arrives late (delivery delay) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-16` | Conflicting alerts from two modules | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-17` | Account limits: day-trade count rules, unsettled cash (T+1), buying power | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-18` | Ticker locked (wash sale, loss streak, kill switch) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-19` | The owner is unavailable (no acknowledgement of a P2 within its deadline) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-20` | Analysis incomplete for the ticker (new listing, missing data) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-21` | Fill far from the plan (slippage) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-22` | Partial fill | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-23` | Order rejected (buying power, halts, price bands) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-24` | Entered without a protective stop | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-25` | Wrong size (fat finger) or wrong ticker or side | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-26` | Broker outage during entry | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-27` | Stop hit intraday | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-28` | Gap through the stop overnight | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-29` | Trading halt on a held stock (news pending, LULD) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-30` | Market-wide circuit breaker (7%, 13%, 20% S&P 500 declines) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-31` | Flash crash or bad print hits a stop | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-32` | Surprise news while holding (pre-announcement, guidance cut, downgrade, legal) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-33` | Merger or acquisition announced (the stock becomes pinned) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-34` | Stock split or reverse split | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-35` | Special dividend, spin-off or rights issue | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-36` | Secondary offering or lock-up expiry (new listings such as SPCX) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-37` | Index deletion or addition | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-38` | ADR home-market shock (TSM: Taiwan session, Taiwan holidays, geopolitics) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-39` | The trade stalls (no progress) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-40` | Correlated holdings all drop together | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-41` | Climax run (extended far above the averages) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-42` | The stop order expires at the broker (GTC limits, for example 90 days at Alpaca) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-43` | The owner widens or cancels the stop | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-44` | The owner adds to a loser | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-45` | Exit rule fired but the owner did not sell | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-46` | Owner sells before any rule (early exit) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-47` | Trail exit decided on the close, then a gap the next morning | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-48` | Exit into poor liquidity (pre-market, the first minute, a halt reopen) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-49` | Target hit after hours | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-50` | A scheduled job did not run | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-51` | Stale or partial bar treated as final | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-52` | Bad print or unadjusted corporate action in the history | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-53` | Market calendar error (holiday, half day) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-54` | Database, notifier or model server down | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-55` | Duplicate alerts after a restart | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-56` | Config changed with positions open | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-57` | Clock drift | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-58` | Alert storm (many signals at once) | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-59` | Alert not seen | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-60` | FOMO entry after a missed trigger | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-61` | Revenge trade after a stop-out | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-62` | Over-sizing | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-63` | Overtrading after losses | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-64` | Holding a loser past its stop ("hope") | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `FM-65` | Selling a winner too early ("fear") | lifecycle monitor (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LC-1` | States: CANDIDATE → ALERTED → ARMED → ENTERED → MANAGING → EXITED, with the side exits… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LC-2` | Theoretical and actual tracks. Every alerted signal is followed in two tracks: the plan… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LC-3` | Monitoring coverage. Every ARMED and MANAGING signal is checked every 5 minutes in mark… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-1` | A complete entry plan on every buy alert: the valid-from and valid-until sessions; the… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-2` | A ready order ticket. The alert gives the exact order to place in advance, so the owner… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-3` | Pre-session plan (8:45 ET): every armed idea for the session with its ticket. Ideas new… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-4` | Trigger alert (P2) when the trigger trades: ENTER: within plan with the live price and… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-5` | Expiry. An idea not triggered by its valid-until close is EXPIRED, and the owner is tol… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-6` | Avoid alerts. Each idea that the checks turn down after it was alerted gets an explicit… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-7` | Entry confirmation. On the owner's fill, the plan is recomputed from the actual price:… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-8` | Checks at the trigger, not only at the alert: earnings and events (EV-10, MO-18), news… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-9` | A missed entry gets a protocol, not a chase. A triggered idea the owner did not take is… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-10` | Re-entry after a stop-out needs a fresh setup from a rule, not the same alert. The cool… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-11` | Gap-risk check for overnight holds (swing): if the stock's 99th-percentile adverse over… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `EN-12` | Entry timing studies. Each setup's record is split by trigger type (gap through, openin… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-1` | Every alert states its stop three ways: price, % from entry, and $ at risk for the size… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-2` | Broker-stop verification. For Alpaca-held positions, IR-6 checks that a sell stop exist… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-3` | Approaching the stop: information, not advice. At −0.75R a P3 note says "near the stop;… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-4` | Stop hit. When the last trade is at or below the stop, a P1 STOP HIT: SELL ALL goes out… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-5` | Gap below the stop. Pre-market at 8:00 and 9:00 ET, a swing position quoted below its s… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-6` | Raise-only stop changes. Break-even moves, trail raises and the partial-profit stop are… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-7` | Close-basis rules get a warning before the close. For trails decided on the close (EMA1… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-8` | Halts. A halt on a held stock is P1 (FM-29). At the reopen, the stop is re-checked, and… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-9` | Corporate actions. On a split, reverse split, special dividend or spin-off, every level… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-10` | Stop order expiry. A GTC stop older than the broker's limit minus 5 sessions gets a P2… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-11` | Daily stop audit (evening report): each open position with its stop, the distance in %… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-12` | After a stop-out: the result is journaled. The cool-off (HU-3) starts, and the re-entry… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `SL-13` | Delivery. All stop alerts are P1 or P2 and follow IR-3. A stop alert is never digested,… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-1` | A daily "hold" message for every open position (after the close, P3). It gives the R so… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-2` | Exits come only from rules. The system never suggests a sale outside a rule event. A sa… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-3` | Expectations from the record. The entry alert and the hold messages show the setup's wi… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-4` | Partial profits set at entry. The partial rule (for example 1/3 at +2R, MO-9; half at 1… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-5` | Trail levels published each evening for the next session, raise-only. Intraday trails (… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-6` | Adding to winners (optional, off by default). Only on a fresh rule-defined setup while… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-7` | Events during the hold are decided at entry. The policy for earnings and other events i… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-8` | Regime changes do not force exits. Exits ignore the regime (MO-6). The hold message not… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-9` | Re-entry after a trail exit: if the trend resumes, a fresh setup alert is sent (EN-10).… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `RD-10` | Milestones. At +1R, +2R and +3R, a P3 note gives the new stop, the open profit protecte… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-1` | Take or pass. Each buy alert can be answered TAKE <id> or PASS <id> <reason>. Passes ar… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-2` | Discretion log. Every action outside the plan (early exit, ignored exit, FOMO entry, a… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-3` | Cool-off and loss-streak rules apply to manual trades: no re-entry on a ticker for 2 se… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-4` | Daily limits on new positions and the heat cap (PF-1) on actual holdings, across all so… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-5` | Quiet hours for P2 and P3 only, never for P1. | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `HU-6` | Plain messages. Every alert's first line is the action: ENTER, AVOID, HOLD, RAISE STOP,… | signal lifecycle (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-1` | Multi-timeframe. Weekly trend (weekly close against the 10- and 30-week averages, weekl… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-2` | Support and resistance zones for swing trades. Swing pivots plus a volume profile over… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-3` | Anchored VWAP from the last earnings day, the 52-week high and low, and the listing day… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-4` | Sector and industry. Every ticker mapped to a sector and industry (SEC SIC code, free)… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-5` | Breadth and internals from the 115-stock universe: the % above the 50- and 200-day aver… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-6` | Volatility state and implied moves. ATR percentile, Bollinger-width percentile, and IV… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-7` | Gap behaviour per ticker: frequency and size of overnight gaps, the share filled the sa… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-8` | Liquidity for every ticker and size: 20-day average dollar volume, the typical spread f… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-9` | One event calendar per ticker: earnings (exists), ex-dividend dates, splits, index reba… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-10` | Short interest as % of float and days to cover (FINRA, bi-monthly; D4). Context for squ… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-11` | Ownership and estimates: insider trades (exists), quarterly 13F institutional changes (… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-12` | Fundamental quality for swing and position ideas: revenue and earnings growth, margins,… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-13` | ADR handling (TSM). The home-market close (TWSE) and its move since the ADR's last clos… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-14` | New listings (SPCX). Rules for short histories: no 200-day average until 200 sessions;… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-15` | Intraday detail for daily triggers: how the trigger traded (a gap through, an opening-r… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-16` | Seasonality per ticker and month, with its sample size, labelled weak evidence. Context… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-17` | Factor and cluster exposure of the open ideas: momentum, growth, semis, mega-cap. Shown… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-18` | Corporate-action and bad-print guard in every module: the MO-22 jump guard, applied to… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `TA-19` | Analysis coverage on every idea: which components are present and which are missing, fo… | analysis (all modules) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-1` | An attribution record for every closed signal (both tracks, LC-2), written when it is g… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-2` | Return decomposition over the hold, daily, from entry to exit, which adds up to the tra… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-3` | Event tags over the window, aligned to the bars that did the damage. The tags: earnings… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-4` | Cause class, by code, in this priority order, the first that applies: (1) technical err… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-5` | Decision quality against outcome quality. Each trade goes into a 2×2. *Good process, go… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-6` | Was it knowable at entry? For event-driven losses, a point-in-time check: was the event… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-7` | Margin of error by component. Over rolling windows (30 and 100 trades) and per setup, t… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-8` | Hypotheses, not changes. Loss clusters from LN-7 with at least 20 trades become candida… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-9` | Every candidate goes through the gates. A walk-forward test on data not used to discove… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-10` | Stock behaviour profiles, rebuilt monthly from point-in-time data. Per ticker: the foll… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-11` | Calibration feedback. Predicted win rates, ranges and probabilities are compared with o… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-12` | Mistake catalogue. Every recurring mistake type gets an entry: the cause class, an exam… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-13` | Technical errors close only with a regression test. Each class-1 cause opens an inciden… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-14` | Post-mortem for large losses and P1 incidents. Any loss beyond 2R or 1% of equity, any… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-15` | Near misses are recorded: a stop missing then placed, a late alert that was still in ti… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-16` | Owner notes as data. The owner's notes on a trade (UI-29), passes (HU-1) and overrides… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-17` | Weekly learning report: R by cause class, and the decision-quality 2×2 (LN-5). The marg… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-18` | Narrative, with citations. Qwen may write a plain summary per trade and per week from t… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
+| `LN-19` | Monthly behaviour review per ticker: the LN-10 profile changes, the tickers whose recen… | learning loop (all sources) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 
 ## How to use
 

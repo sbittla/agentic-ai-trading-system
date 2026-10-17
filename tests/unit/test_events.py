@@ -217,3 +217,100 @@ def test_config_validation() -> None:
     assert any(x.startswith("events:") for x in validate(cfg(min_years=2)))
     # a missing calendar fails the events job (logged), never the platform's start
     assert not [x for x in validate(cfg(file="nope.yaml"), base_dir=ROOT) if "events" in x]
+
+
+@pytest.mark.rule("EV-4")
+def test_trailing_baseline_uses_no_later_data() -> None:
+    days = sessions(date(2018, 1, 2), date(2020, 12, 31))
+    n = len(days)
+    closes = [100.0 * 1.001 ** k for k in range(n)]
+    s = series("X", days, closes)
+    spy = series("SPY", days, [400.0] * n)
+    ev = EventDate(date(2020, 3, 2))
+    a = observe(s, spy, ev, 10, 10, base_sessions=504)
+    later = closes[:]
+    for k in range(days.index(date(2020, 4, 1)), n):     # change only data after the event
+        later[k] = later[k] * 3
+    b = observe(series("X", days, later), spy, ev, 10, 10, base_sessions=504)
+    assert a is not None and b is not None and a["run_up_base"] == b["run_up_base"]
+    assert a["run_up_base"] == pytest.approx((1.001 ** 10 - 1) * 100, abs=0.01)
+    assert a["run_up"] == pytest.approx(0.0, abs=0.01)    # a steady trend is no pattern
+    assert observe(s, spy, EventDate(date(2018, 6, 1)), 10, 10, base_sessions=504) is None
+
+
+def _idea(enter: str, exit_: str, side: str = "buy") -> dict:
+    return {"ticker": "NVDA", "enter": enter, "exit": exit_, "side": side}
+
+
+@pytest.mark.rule("EV-10")
+def test_earnings_inside_a_window_block_buy_ideas(tmp_path: Path, journal) -> None:   # noqa: ANN001
+    from trader.events.agent import EventsAgent as EA
+    from trader.events.study import load_earnings
+    from trader.journal import schema as js
+
+    chk = EA._earnings_check
+    i = _idea("2026-11-13", "2026-11-30")
+    chk(i, {"NVDA": [date(2026, 11, 17)]}, None)
+    assert i["verdict"] == "earnings_in_window" and i["earnings_date"] == "2026-11-17"
+    i = _idea("2026-12-17", "2027-01-04")
+    chk(i, {"NVDA": [date(2026, 11, 17)]}, None)
+    assert i["verdict"] == "earnings_unknown"              # nothing covers the window
+    chk(i, {"NVDA": [date(2026, 11, 17)]}, date(2027, 1, 10))
+    assert i["verdict"] == "ok"                            # the calendar covers it: none due
+    chk(i, {"NVDA": [date(2027, 2, 24)]}, None)
+    assert i["verdict"] == "ok"                            # the next report is after the window
+    i = _idea("2026-11-13", "2026-11-30", side="avoid")
+    chk(i, {"NVDA": [date(2026, 11, 17)]}, None)
+    assert i["verdict"] == "ok" and i["earnings_date"] == "2026-11-17"
+    (tmp_path / "config").mkdir()
+    f = tmp_path / "config/ev.yaml"
+    f.write_text("earnings:\n  nvda: [2026-11-17]\n  AAPL: 2027-01-28\ngroups: []\n",
+                 encoding="utf-8")
+    assert load_earnings(f) == {"NVDA": [date(2026, 11, 17)], "AAPL": [date(2027, 1, 28)]}
+    c = cfg(file="config/ev.yaml")
+    now = datetime(2026, 10, 17, 21, 0, tzinfo=UTC)
+    ag = EA(c, _loader({}), lambda: now, base=tmp_path, journal=journal)
+    assert ag.earnings(date(2026, 10, 17))[1:] == (None, "file")
+    journal.insert(js.fundamentals_daily, {"date": date(2026, 10, 16), "ticker": "MSFT",
+                                           "kind": "earnings_calendar",
+                                           "json": {"date": "2026-10-28"}})
+    dates, until, src = ag.earnings(date(2026, 10, 17))
+    assert src == "finnhub" and until == date(2026, 12, 15)
+    assert dates["MSFT"] == [date(2026, 10, 28)] and dates["NVDA"] == [date(2026, 11, 17)]
+    assert ag.earnings(date(2026, 10, 25))[2] == "file"    # the Finnhub rows are stale
+
+
+@pytest.mark.rule("EV-9")
+def test_every_idea_is_kept_and_graded_once(tmp_path: Path, journal) -> None:   # noqa: ANN001
+    from trader.journal import schema as js
+
+    days = sessions(date(2026, 9, 1), date(2026, 10, 30))
+    s = series("NVDA", days, [100.0 + k for k in range(len(days))])
+    spy = series("SPY", days, [400.0] * len(days))
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/ev.yaml").write_text("groups: []\n", encoding="utf-8")
+    now = [datetime(2026, 10, 1, 21, 0, tzinfo=UTC)]
+    ag = EventsAgent(cfg(file="config/ev.yaml"), _loader({}), lambda: now[0], base=tmp_path,
+                     journal=journal)
+    idea = {"group": "G", "ticker": "NVDA", "kind": "BUY_RUN_UP", "side": "buy",
+            "window": "run_up", "event_date": "2026-10-20", "estimated": False,
+            "enter": "2026-10-05", "exit": "2026-10-19", "verdict": "ok", "basis": "group",
+            "n": 9, "mean_pct": 5.0, "same_sign_rate": 0.9, "p": 0.04}
+    led = ag.record([idea], {"NVDA": s}, spy, date(2026, 10, 1))
+    assert led["ideas"] == 1 and led["graded"] == 0
+    ag.record([{**idea, "mean_pct": 4.0}], {"NVDA": s}, spy, date(2026, 10, 2))
+    (row,) = journal.rows(js.event_ideas)
+    assert row["first_seen"] == date(2026, 10, 1) and row["mean_pct"] == 4.0
+    led = ag.record([], {"NVDA": s}, spy, date(2026, 10, 20))
+    (row,) = journal.rows(js.event_ideas)
+    c = dict(zip(s.dates, s.c, strict=True))
+    want = (c[date(2026, 10, 19)] / c[date(2026, 10, 5)] - 1) * 100
+    assert row["graded"] == date(2026, 10, 20) and row["realized_pct"] == pytest.approx(want, 0.01)
+    assert led["graded_buys"] == 1 and led["buy_hit_rate"] == 1.0
+    ag.record([{**idea, "mean_pct": 1.0}], {"NVDA": s}, spy, date(2026, 10, 21))
+    (row,) = journal.rows(js.event_ideas)
+    assert row["mean_pct"] == 4.0 and row["graded"] == date(2026, 10, 20)   # frozen once graded
+    assert "Past buy ideas: 1 graded" in render({
+        "asof": "2026-10-21", "windows": {"pre_sessions": 10, "post_sessions": 10},
+        "ideas": [], "upcoming": [], "patterns": 0, "tests": 0, "expected_false": 0,
+        "gate": {"max_p": 0.1}, "ledger": led})

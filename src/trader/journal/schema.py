@@ -554,6 +554,24 @@ momentum_signals = Table("momentum_signals", metadata, _id(),     # MO-15 (core 
                          Column("why", Text),
                          Column("updated", UtcDateTime))
 
+event_ideas = Table("event_ideas", metadata, _id(),               # EV-9 (core writes)
+                    Column("idea_id", String(96), unique=True),  # group:event_date:window
+                    Column("group_id", String(32), index=True),
+                    Column("ticker", String(10), index=True),
+                    Column("kind", String(16)), Column("side", String(6)),
+                    Column("window", String(10)),
+                    Column("event_date", Date), Column("estimated", Boolean),
+                    Column("enter", Date), Column("exit", Date, index=True),
+                    Column("verdict", String(20)),   # ok | earnings_in_window | ...unknown
+                    Column("earnings_date", Date),
+                    Column("basis", String(48)), Column("n", Integer),
+                    Column("mean_pct", Float), Column("same_sign_rate", Float),
+                    Column("p", Float),
+                    Column("first_seen", Date), Column("updated", UtcDateTime),
+                    Column("realized_pct", Float),       # net of SPY, close enter -> exit
+                    Column("realized_raw_pct", Float),
+                    Column("graded", Date))
+
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
 NEWS_WRITES = ("news_items", "event_flags", "llm_calls", "analyst_actions", "news_embeddings",
                "social_posts", "fundamentals_daily", "macro_series", "macro_news")

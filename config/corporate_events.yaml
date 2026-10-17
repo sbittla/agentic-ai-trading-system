@@ -10,6 +10,12 @@
 # the new year's date when the company announces it. A group's `family` pools similar events
 # (all of one CEO's keynotes, say) when the group alone has too few years.
 
+# Earnings dates for runs without the journal (EV-10). trader-core uses Finnhub's calendar
+# (fresh daily, 60 days ahead) instead; these only fill in for a host CLI run. A buy idea whose
+# window holds an earnings report is blocked: no past window held one.
+earnings:
+  NVDA: [2026-11-17]          # Finnhub calendar as of 2026-10-16
+
 groups:
   - id: AAPL_WWDC
     ticker: AAPL

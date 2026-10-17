@@ -621,6 +621,37 @@ def _world(n: int = 330) -> dict[str, Series]:
 @pytest.mark.rule("MO-15")
 @pytest.mark.rule("MO-16")
 @pytest.mark.rule("MO-14")
+def _calendar(journal: SqlJournal, d: date) -> None:
+    """A fresh Finnhub earnings calendar (MO-18), with no date near the test tickers."""
+    from trader.journal import schema as js
+
+    journal.insert(js.fundamentals_daily, {"date": d, "ticker": "ZZZ", "kind": "earnings_calendar",
+                                           "json": {"date": "2099-01-02"}})
+
+
+@pytest.mark.rule("MO-18")
+def test_earnings_calendar_fails_closed(cfg: Config, tmp_path: Path, journal: SqlJournal
+                                        ) -> None:
+    c = _mcfg(cfg, tmp_path)
+    _eval_file(Path(c.momentum.eval_file), ["DONCHIAN_55"])
+    store = _world()
+    d0 = store["LEAD"].dates[-1]
+    agent = MomentumAgent(c, journal, _loader(store), lambda: et_datetime(d0, time(17, 0)))
+    pay = asyncio.run(agent.run(asof=d0, track=False))       # no calendar row at all
+    don = next(x for x in pay["candidates"] if x["setup"] == "DONCHIAN_55")
+    assert pay["earnings_status"] == "stale" and don["verdict"] == "earnings_unknown"
+    assert "held back" in render(pay)
+    _calendar(journal, d0 - timedelta(days=c.momentum.earnings_max_age_days + 1))
+    assert agent.earnings_status(d0) == "stale"                  # too old
+    _calendar(journal, d0 - timedelta(days=1))
+    pay = asyncio.run(agent.run(asof=d0, track=False))
+    assert pay["earnings_status"] == "fresh"
+    assert next(x for x in pay["candidates"] if x["setup"] == "DONCHIAN_55")["verdict"] == "alert"
+    bare = MomentumAgent(c, None, _loader(store), lambda: et_datetime(d0, time(17, 0)))
+    pay = asyncio.run(bare.run(asof=d0, track=False))
+    assert pay["earnings_status"] == "unchecked" and "NOT checked" in render(pay)
+
+
 def test_tracker_arms_fills_stops_and_alerts_once(cfg: Config, tmp_path: Path,
                                                   journal: SqlJournal) -> None:
     c = _mcfg(cfg, tmp_path)
@@ -629,6 +660,7 @@ def test_tracker_arms_fills_stops_and_alerts_once(cfg: Config, tmp_path: Path,
     d0 = store["LEAD"].dates[-1]
     now = [et_datetime(d0, time(17, 0))]
     agent = MomentumAgent(c, journal, _loader(store), lambda: now[0], equity=100_000.0)
+    _calendar(journal, d0)
     pay = asyncio.run(agent.run(asof=d0))
     lead = [x for x in pay["candidates"] if x["ticker"] == "LEAD"]
     alert = [x for x in lead if x["verdict"] == "alert"]
@@ -680,6 +712,7 @@ def test_intraday_trigger_alert_is_not_repeated_by_the_close_job(
     d0 = store["LEAD"].dates[-1]
     now = [et_datetime(d0, time(17, 0))]
     agent = MomentumAgent(c, journal, _loader(store), lambda: now[0])
+    _calendar(journal, d0)
     pay = asyncio.run(agent.run(asof=d0))
     trig = next(x["trigger"] for x in pay["candidates"] if x["verdict"] == "alert")
     store["LEAD"] = _extend(store["LEAD"], [(trig - 0.1, trig + 1.0, trig - 0.5, trig + 0.5)])

@@ -69,6 +69,10 @@ def harness(tmp_path: Path, end: date) -> Harness:
     store["SPY"] = series("SPY", end, 330, 0.0005, 400.0)
     h.engine._momentum = MomentumAgent(cfg, h.engine.journal, loader(store), h.engine.now,
                                        cal=h.engine.cal)
+    from trader.journal import schema as js
+
+    h.engine.journal.insert(js.fundamentals_daily, {          # a fresh calendar (MO-18)
+        "date": end, "ticker": "ZZZ", "kind": "earnings_calendar", "json": {"date": "2099-01-02"}})
     return h
 
 

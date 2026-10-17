@@ -4,6 +4,8 @@
 
 The earlier review ([REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md)) asked whether the requirements help a day trader at the moment of decision. This one asks a different question: **what would a prop-trading risk desk, or a careful trader running their own money, expect that the requirements still leave out?**
 
+A second review against the owner's *Trading Ideas Platform* supplement (October 17) is in [IDEAS_PLATFORM_GAPS.md](IDEAS_PLATFORM_GAPS.md).
+
 ## Verdict
 
 The system is already stricter than most retail setups. It has per-trade risk, daily, weekly and monthly loss limits, broker-side stops, a kill switch, wash-sale control, walk-forward testing and staged go-live gates.

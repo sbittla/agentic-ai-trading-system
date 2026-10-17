@@ -1071,7 +1071,8 @@ def cmd_events(a: argparse.Namespace) -> int:
 
         load = refresh_loader(root, AlpacaHistory(key, secret, feed=cfg.momentum.feed),
                               lambda: datetime.now(UTC))
-    agent = EventsAgent(cfg, load, lambda: datetime.now(UTC))
+    db = _journal(create=False) if os.environ.get("DATABASE_URL") else None
+    agent = EventsAgent(cfg, load, lambda: datetime.now(UTC), journal=db)
     payload = asyncio.run(agent.run(write=not a.no_write))
     if a.json:
         print(json.dumps(payload, indent=1, default=str))

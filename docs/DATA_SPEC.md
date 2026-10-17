@@ -117,6 +117,7 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | `macro_news` | item_id (unique), ts, source, headline, cleaned_text, theme, tone, sentiment, suspicious | news-sentiment (MA-4) |
 | `macro_daily` | date (unique), score, label, indicators, releases | trader-core A18 (MA-6) |
 | `momentum_signals` | signal_id (unique: ticker:setup:asof), ticker, setup, policy, asof, state (ARMED, OPEN, CLOSED, EXPIRED, SKIPPED), entry_type, trigger, stop, rs, template, proven, alerted, shares, risk_usd, entry_date, entry_price, exit_date, r, exit_reason, position (exit state machine JSON), sent (alert keys), events, why, updated | trader-core A19 (MO-15) |
+| `event_ideas` | idea_id (unique: group:event_date:window), group_id, ticker, kind, side, window, event_date, estimated, enter, exit, verdict (ok, earnings_in_window, earnings_unknown), earnings_date, basis, n, mean_pct, same_sign_rate, p, first_seen, updated, realized_pct (net of SPY), realized_raw_pct, graded | trader-core A20 (EV-9) |
 | `news_embeddings` | item_id (unique), ticker, model, vec (base64 float16) | news-sentiment (NC-1) |
 | `social_posts` | item_id (unique), ticker, ts, source, author (salted hash), score, tag, length, text_hash, model | news-sentiment (NC-11) |
 | `fundamentals_daily` | date, ticker, kind (earnings, recommendation, earnings_calendar, insider, short_volume, apewisdom), json | news-sentiment (NC-16) |

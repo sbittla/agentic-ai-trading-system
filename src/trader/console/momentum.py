@@ -26,7 +26,7 @@ from trader.console.render import (
 REGIME_TONE = {"ON": "ok", "CAUTION": "warn", "OFF": "bad", "UNKNOWN": "neutral"}
 VERDICT_TONE = {"alert": "ok", "unproven": "neutral", "earnings": "warn", "no_slot": "warn",
                 "correlated": "warn", "busy": "neutral", "regime_off": "bad",
-                "watch_only": "neutral"}
+                "watch_only": "neutral", "earnings_unknown": "warn"}
 
 
 def _pct(v: Any) -> str:

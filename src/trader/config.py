@@ -482,6 +482,7 @@ class MomentumCfg(_Frozen):
     min_trades: int = 30
     min_pf: float = 1.2
     earnings_block_sessions: int = 3    # MO-18
+    earnings_max_age_days: int = 4      # MO-18: older calendar = unknown, entries held back
     intraday_every_min: int = 5
     sma200_watch_pct: float = 6.0       # MO-27: leaders this close above a rising 200-day
     latest_file: str = "reports/momentum.json"
@@ -654,6 +655,8 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
         p.append("momentum.max_correlated >= 1 (MO-17)")
     if not 1 <= mo.intraday_every_min <= 30:
         p.append("momentum.intraday_every_min: 1-30 (MO-15)")
+    if not 1 <= mo.earnings_max_age_days <= 10:
+        p.append("momentum.earnings_max_age_days: 1-10 (MO-18)")
     if not 0 < mo.sma200_watch_pct <= 25:
         p.append("momentum.sma200_watch_pct: above 0, at most 25 (MO-27)")
     ev = cfg.events                                                     # EV-8

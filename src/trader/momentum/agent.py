@@ -177,6 +177,21 @@ class MomentumAgent:
                     out[r["ticker"]] = self.cal.trading_days_between(asof, nd)
         return out
 
+    def earnings_status(self, asof: date) -> str:
+        """MO-18 fails closed: ``fresh`` when the Finnhub calendar was collected within
+        ``earnings_max_age_days``, ``stale`` when it is missing or older (entries are then held
+        back), ``unchecked`` without a journal (a host CLI run: the report says so)."""
+        if self.journal is None:
+            return "unchecked"
+        f = s.fundamentals_daily.c
+        try:
+            rows = self.journal.query(select(f.date).where(
+                f.kind == "earnings_calendar", f.date <= asof,
+                f.date >= asof - timedelta(days=self.m.earnings_max_age_days)).limit(1))
+        except Exception:   # noqa: BLE001 - no table: unknown, so fail closed
+            return "stale"
+        return "fresh" if rows else "stale"
+
     def final_session(self) -> date:
         """The newest session whose daily bar is final: today after 16:15 ET, else the one
         before (a mid-session run must not treat a partial bar as a closed session)."""
@@ -211,7 +226,8 @@ class MomentumAgent:
         reg = regime(spy, day, self.macro_label)
         board = panel.leaderboard(day, self.m.leaderboard_n)
         earn = self.earnings_in(list(live), day)
-        cands = self._candidates(panel, day, reg.state, reg.size_mult, ev, earn)
+        earn_status = self.earnings_status(day)
+        cands = self._candidates(panel, day, reg.state, reg.size_mult, ev, earn, earn_status)
         tracked: dict[str, Any] = {"events": [], "open": [], "closed": [], "armed": []}
         if track and self.journal is not None:
             tracked = self._track(panel, day, cands)
@@ -225,6 +241,7 @@ class MomentumAgent:
         payload = {
             "generated": self.now().isoformat(), "asof": day.isoformat(),
             "regime": reg.as_dict(), "leaderboard": [r.as_dict() for r in board],
+            "earnings_status": earn_status,
             "rank_factors": list(factors),
             "candidates": cands, "tracked": tracked, "skipped": skipped, "rotation": rot,
             "sma200_watch": watch,
@@ -238,8 +255,8 @@ class MomentumAgent:
         return payload
 
     def _candidates(self, panel: Panel, day: date, state: str, size_mult: float,
-                    ev: Mapping[str, Any] | None, earn: Mapping[str, int]
-                    ) -> list[dict[str, Any]]:
+                    ev: Mapping[str, Any] | None, earn: Mapping[str, int],
+                    earn_status: str = "fresh") -> list[dict[str, Any]]:
         rs = panel.rs(day)
         out = []
         for sym, x in sorted(panel.frames.items()):
@@ -265,6 +282,10 @@ class MomentumAgent:
                 if n_earn is not None and n_earn <= self.m.earnings_block_sessions and \
                         st.name != "EPISODIC_PIVOT" and verdict == "alert":
                     verdict, why = "earnings", f"earnings in {n_earn} sessions (CK-1)"
+                elif earn_status == "stale" and st.name != "EPISODIC_PIVOT" and \
+                        verdict == "alert":
+                    verdict, why = "earnings_unknown", (
+                        "no fresh earnings calendar: held back until it is (MO-18)")
                 shares = risk_usd = None
                 if self.sizer is not None:
                     q, ru, _ = self.sizer(cand.trigger, stop)
@@ -617,6 +638,10 @@ def render(payload: Mapping[str, Any], *, show_unproven: bool = False, n_board: 
     reg = payload["regime"]
     lines = [f"Momentum · {payload['asof']} · regime {reg['state']} "
              f"(size x{reg['size_mult']:g}) · {'; '.join(reg['reasons'])}"]
+    if payload.get("earnings_status") == "unchecked":
+        lines.append("Earnings dates NOT checked (no journal): verify before buying (MO-18).")
+    elif payload.get("earnings_status") == "stale":
+        lines.append("Earnings calendar missing or stale: entry alerts held back (MO-18).")
     tr = payload.get("tracked") or {}
     ev = tr.get("events") or []
     if ev:

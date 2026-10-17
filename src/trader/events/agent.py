@@ -13,30 +13,37 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from sqlalchemy import select
 
 from trader.calendar import MarketCalendar
 from trader.config import Config
 from trader.events.study import (
+    BASE_SESSIONS,
     WINDOWS,
     Group,
-    baseline,
     ideas_for,
+    load_earnings,
     load_groups,
     observe,
     reaction_day,
     study,
 )
+from trader.journal import schema as js
 from trader.scanner import ta
 from trader.scanner.techniques import Series
 from trader.timeutil import to_et
 
 SeriesLoader = Callable[[Sequence[str], date], Awaitable[dict[str, Series]]]
+FINNHUB_HORIZON = 60        # days the Finnhub earnings calendar covers (NC-16)
+CALENDAR_MAX_AGE = 4        # days: an older calendar is stale (as MO-18)
 
 
 class EventsAgent:
     def __init__(self, cfg: Config, load: SeriesLoader, now: Callable[[], datetime], *,
-                 cal: MarketCalendar | None = None, base: Path | None = None) -> None:
+                 cal: MarketCalendar | None = None, base: Path | None = None,
+                 journal: Any = None) -> None:
         self.cfg = cfg
+        self.journal = journal
         self.e = cfg.events
         self.load = load
         self.now = now
@@ -58,19 +65,10 @@ class EventsAgent:
         if spy is None:
             return {"error": "no SPY bars: run momentum-history"}
         obs: dict[str, list[dict[str, Any]]] = {}
-        lengths = (e.pre_sessions, 1, e.post_sessions)
-        bases: dict[str, dict[int, float]] = {}
-        for g in groups:
+        for g in groups:                    # EV-4: a trailing baseline per event
             s = series.get(g.ticker)
-            if s is None:
-                obs[g.id] = []
-                continue
-            if g.ticker not in bases:       # EV-4: over the span of all the ticker's events
-                days = [d.day for x in groups if x.ticker == g.ticker for d in x.dates]
-                bases[g.ticker] = baseline(s, spy, lengths, min(days, default=None),
-                                           max(days, default=None))
-            rows = [observe(s, spy, d, e.pre_sessions, e.post_sessions, bases[g.ticker])
-                    for d in g.dates]
+            rows = [observe(s, spy, d, e.pre_sessions, e.post_sessions,
+                            base_sessions=BASE_SESSIONS) for d in g.dates] if s is not None else []
             obs[g.id] = [r for r in rows if r is not None]
         fam: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for g in groups:
@@ -87,6 +85,7 @@ class EventsAgent:
         by_id = {x["id"]: x for x in out_groups}
         upcoming: list[dict[str, Any]] = []
         ideas: list[dict[str, Any]] = []
+        earn, known_until, earn_source = self.earnings(today)
         horizon = today + timedelta(days=e.lookahead_days)
         for g in groups:
             for ev in g.upcoming:
@@ -100,6 +99,8 @@ class EventsAgent:
                 for i in found:
                     if i["side"] == "buy" and ctx.get("atr"):
                         i["stop_hint"] = round(ctx["close"] - 2 * ctx["atr"], 2)
+                for i in found:
+                    self._earnings_check(i, earn, known_until)
                 ideas += found
                 upcoming.append({
                     "group": g.id, "ticker": g.ticker, "event": g.name,
@@ -119,15 +120,104 @@ class EventsAgent:
             "windows": {"pre_sessions": e.pre_sessions, "post_sessions": e.post_sessions},
             "gate": self.gate(), "tests": tested, "patterns": found_n,
             "expected_false": round(tested * e.max_p, 1),
-            "baselines": {k: {str(n): round(v, 2) for n, v in b.items()}
-                          for k, b in bases.items()},
+            "earnings": {"source": earn_source,
+                         "known_until": known_until.isoformat() if known_until else None},
             "upcoming": upcoming, "ideas": ideas, "groups": out_groups,
             "families": fam_study}
+        if self.journal is not None:                                    # EV-9
+            payload["ledger"] = self.record(ideas, series, spy, today)
         if write:
             p = Path(e.latest_file)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(payload, indent=1, default=str), encoding="utf-8")
         return payload
+
+    def earnings(self, today: date) -> tuple[dict[str, list[date]], date | None, str]:
+        """EV-10: earnings dates per ticker and the date up to which the calendar is complete.
+        The journal's Finnhub calendar (fresh within 4 days, covering 60) wins; the calendar
+        file's hand-entered ``earnings:`` dates fill in for runs without it."""
+        manual = load_earnings(self.base / self.e.file)
+        out = {k: list(v) for k, v in manual.items()}
+        if self.journal is not None:
+            f = js.fundamentals_daily.c
+            try:
+                rows = self.journal.query(select(f.ticker, f.date, f.json).where(
+                    f.kind == "earnings_calendar", f.date <= today,
+                    f.date >= today - timedelta(days=CALENDAR_MAX_AGE)).order_by(f.date))
+            except Exception:   # noqa: BLE001 - no table: fall back to the file
+                rows = []
+            if rows:
+                for r in rows:
+                    d = (r["json"] or {}).get("date")
+                    if d:
+                        out.setdefault(r["ticker"], []).append(date.fromisoformat(str(d)))
+                last = max(r["date"] for r in rows)
+                return out, last + timedelta(days=FINNHUB_HORIZON), "finnhub"
+        return out, None, "file" if manual else "none"
+
+    @staticmethod
+    def _earnings_check(i: dict[str, Any], earn: Mapping[str, list[date]],
+                        known_until: date | None) -> None:
+        """EV-10: a buy idea whose window holds an earnings report is blocked (no past window
+        held one, so the history does not apply); with no calendar covering the window it is
+        unknown. Neither is sent."""
+        a, b = date.fromisoformat(i["enter"]), date.fromisoformat(i["exit"])
+        dates = earn.get(i["ticker"], [])
+        hit = next((d for d in dates if a <= d <= b), None)
+        i["earnings_date"] = hit.isoformat() if hit else None
+        if i["side"] != "buy":
+            i["verdict"] = "ok"
+        elif hit is not None:
+            i["verdict"] = "earnings_in_window"
+        elif (known_until is not None and b <= known_until) or any(d > b for d in dates):
+            i["verdict"] = "ok"
+        else:
+            i["verdict"] = "earnings_unknown"
+
+    def record(self, ideas: Sequence[Mapping[str, Any]], series: Mapping[str, Series],
+               spy: Series, today: date) -> dict[str, Any]:
+        """EV-9: keep every idea (first sighting kept, fields refreshed until graded) and grade
+        the ones whose window has closed: the return from the close of ``enter`` to the close
+        of ``exit``, raw and net of SPY."""
+        t = js.event_ideas
+        now = self.now()
+        for i in ideas:
+            iid = f"{i['group']}:{i['event_date']}:{i['window']}"
+            vals = {"group_id": i["group"], "ticker": i["ticker"], "kind": i["kind"],
+                    "side": i["side"], "window": i["window"],
+                    "event_date": date.fromisoformat(i["event_date"]),
+                    "estimated": i["estimated"], "enter": date.fromisoformat(i["enter"]),
+                    "exit": date.fromisoformat(i["exit"]), "verdict": i.get("verdict"),
+                    "earnings_date": date.fromisoformat(i["earnings_date"])
+                    if i.get("earnings_date") else None, "basis": i["basis"][:48],
+                    "n": i["n"], "mean_pct": i["mean_pct"],
+                    "same_sign_rate": i["same_sign_rate"], "p": i["p"], "updated": now}
+            have = self.journal.query(select(t.c.graded).where(t.c.idea_id == iid))
+            if not have:
+                self.journal.insert(t, {"idea_id": iid, "first_seen": today, **vals})
+            elif have[0]["graded"] is None:
+                self.journal.update(t, {"idea_id": iid}, vals)
+        spy_c = dict(zip(spy.dates, spy.c, strict=True))
+        for r in self.journal.query(select(t).where(t.c.graded.is_(None), t.c.exit < today)):
+            x = series.get(r["ticker"])
+            if x is None:
+                continue
+            c = dict(zip(x.dates, x.c, strict=True))
+            a, b = r["enter"], r["exit"]
+            if a in c and b in c and a in spy_c and b in spy_c:
+                raw = c[b] / c[a] - 1
+                self.journal.update(t, {"idea_id": r["idea_id"]}, {
+                    "realized_raw_pct": round(raw * 100, 2),
+                    "realized_pct": round((raw - (spy_c[b] / spy_c[a] - 1)) * 100, 2),
+                    "graded": today})
+        done = self.journal.query(select(t).where(t.c.graded.is_not(None)))
+        buys = [r for r in done if r["side"] == "buy" and r["verdict"] == "ok"]
+        return {"ideas": len(self.journal.query(select(t.c.idea_id))), "graded": len(done),
+                "graded_buys": len(buys),
+                "buy_hit_rate": round(sum(r["realized_pct"] > 0 for r in buys) / len(buys), 2)
+                if buys else None,
+                "buy_mean_pct": round(sum(r["realized_pct"] for r in buys) / len(buys), 2)
+                if buys else None}
 
     def _basis(self, g: Group, st: Mapping[str, Any], fam: Mapping[str, Any]
                ) -> tuple[dict[str, Any] | None, str]:
@@ -177,9 +267,13 @@ def render(payload: Mapping[str, Any], *, ticker: str | None = None) -> str:
         for i in ideas:
             est = " (date estimated)" if i["estimated"] else ""
             stop = f" Stop hint {i['stop_hint']} (2 ATR)." if i.get("stop_hint") else ""
+            block = {"earnings_in_window": f"BLOCKED: earnings {i.get('earnings_date')} fall "
+                                           "inside the window, which no past window held. ",
+                     "earnings_unknown": "HELD: no earnings calendar covers the window; "
+                                         "check the date first. "}.get(i.get("verdict", ""), "")
             lines.append(
                 f"  {i['ticker']} {i['kind']} · {i['event']} {i['event_date']}{est} · "
-                f"{i['action']}.{stop} History ({i['basis']}): {i['mean_pct']:+.1f}% beyond "
+                f"{block}{i['action']}.{stop} History ({i['basis']}): {i['mean_pct']:+.1f}% beyond "
                 f"the usual, same way in {i['same_sign_rate']:.0%} of {i['n']} events, "
                 f"p {i['p']:.2f}"
                 f"{' · window open' if i['status'] == 'open' else ''}")
@@ -200,6 +294,10 @@ def render(payload: Mapping[str, Any], *, ticker: str | None = None) -> str:
                                                  for k, v in u["summary"].items()))
             else:
                 lines.append(f"    {u['basis']}")
+    led = payload.get("ledger") or {}
+    if led.get("graded_buys"):
+        lines.append(f"Past buy ideas: {led['graded_buys']} graded, {led['buy_hit_rate']:.0%} "
+                     f"beat SPY, mean {led['buy_mean_pct']:+.1f}% (EV-9).")
     lines.append(f"{payload['patterns']} patterns in {payload['tests']} tests; about "
                  f"{payload['expected_false']} could be chance at p <= "
                  f"{payload['gate']['max_p']}. A pattern is a tendency over a handful of events, "
