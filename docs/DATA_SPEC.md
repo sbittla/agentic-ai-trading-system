@@ -21,8 +21,13 @@ Defines every external data source, how often it is called, the internal tables 
 | Finnhub | Earnings surprises, analyst consensus, next earnings date (NC-16) | REST `stock/earnings`, `stock/recommendation`, `calendar/earnings` | 7:30 AM daily; `backfill-catalysts` once | ~2 calls per ticker a day; an endpoint refused on the plan is skipped (logged once) |
 | SEC EDGAR | Form 4 open-market insider trades (NC-16) | `submissions` JSON, then each Form 4 XML (read with regular expressions) | 7:30 AM daily, last 90 days, ≤ 25 filings per ticker | < 10 requests/s with the User-Agent |
 | FINRA Reg SHO | Daily short-sale volume share (NC-16) | `cdn.finra.org/equity/regsho/daily/CNMSshvolYYYYMMDD.txt` (public file) | 7:30 AM daily, last 20 sessions | ~25 files a day |
+| FRED (St. Louis Fed) | Economic series: CPI, PCE, payrolls, unemployment, claims, yields, curve, credit spreads, VIX, dollar, oil (MA-1) | Public CSV `fred.stlouisfed.org/graph/fredgraph.csv?id=<ID>` (no key) | 7:00 ET, every 2 h in session, after 16:30; `macro-backfill` once | ~20 files per run |
+| Federal Reserve | Press releases, FOMC statements, minutes, speeches (MA-4) | RSS `federalreserve.gov/feeds/press_all.xml` | With the FRED runs | 1 request per run |
+| Finnhub | Market and economy headlines (MA-4) | REST `news?category=general` | With the FRED runs | 1 call per run |
 | Stocktwits (off) | Messages with users' own Bullish/Bearish tags (NC-11) | `api.stocktwits.com/api/2/streams/symbol/<T>.json` | With A3 when `catalyst.social_sources` has `stocktwits` | Off until its terms are confirmed |
 | ApeWisdom (off) | Reddit mention counts per ticker (NC-11) | `apewisdom.io/api/v1.0/filter/all-stocks/page/<n>` | 7:30 AM when enabled | Off until its terms are confirmed |
+| Alpaca Market Data (SIP history) | 10 years of consolidated daily bars for `momentum.universe` (MO-22), stored as kind `daily_sip` | REST `GET /v2/stocks/bars?feed=sip`, the request ending 16 minutes before now (free plan) | `momentum-history` once; the 16:50 job tops up stale symbols | ~115 calls a day |
+| Alpaca snapshots | Last trade and day bar for armed and open momentum signals (MO-15) | REST `GET /v2/stocks/snapshots` (IEX) | Every 5 min, 9:36–15:50 ET, only while signals are armed or open | 1 call per run |
 | Macro calendar | CPI, jobs report, FOMC dates | Published BLS and Federal Reserve schedules, entered in config yearly | Yearly, checked monthly | — |
 
 **Data quality rules**
@@ -107,6 +112,10 @@ Live and paper trading use **Postgres 16** (schema `journal`, ADR-012), shared b
 | `option_suggestions` | suggestion_id, ts, ticker, direction, source, style, structure, expiry, legs_json, contracts, entry_price (+debit/−credit), max_loss, max_gain, breakeven, underlying, invalidation, t1, iv_rank, detail_json (view, numbers, entry quotes), text, status, mark, exit_price, exit_reason, closed_at, pnl, r_multiple, stock_view_right | A14 / A16 |
 | `owner_notes` | ts, ref_type, ref_id, tags, note, screenshot_b64 | console (UI-29) |
 | `console_chats` | ts, day, question, answer, tool, rows_json, model_used | console (UI-8d) |
+| `macro_series` | series_id, date, value (unique per series and date) | news-sentiment (MA-1) |
+| `macro_news` | item_id (unique), ts, source, headline, cleaned_text, theme, tone, sentiment, suspicious | news-sentiment (MA-4) |
+| `macro_daily` | date (unique), score, label, indicators, releases | trader-core A18 (MA-6) |
+| `momentum_signals` | signal_id (unique: ticker:setup:asof), ticker, setup, policy, asof, state (ARMED, OPEN, CLOSED, EXPIRED, SKIPPED), entry_type, trigger, stop, rs, template, proven, alerted, shares, risk_usd, entry_date, entry_price, exit_date, r, exit_reason, position (exit state machine JSON), sent (alert keys), events, why, updated | trader-core A19 (MO-15) |
 | `news_embeddings` | item_id (unique), ticker, model, vec (base64 float16) | news-sentiment (NC-1) |
 | `social_posts` | item_id (unique), ticker, ts, source, author (salted hash), score, tag, length, text_hash, model | news-sentiment (NC-11) |
 | `fundamentals_daily` | date, ticker, kind (earnings, recommendation, earnings_calendar, insider, short_volume, apewisdom), json | news-sentiment (NC-16) |

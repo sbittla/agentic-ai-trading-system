@@ -531,6 +531,19 @@ def create_app(
         return await html(req, ses, "Technical scan", body)
 
     @page
+    async def macro_page(req: Request, ses: Session) -> Response:
+        from trader.console import macro as mp
+
+        return await html(req, ses, "Macro", mp.page(data.macro(), data.forecast(), ses.csrf))
+
+    @page
+    async def momentum_page(req: Request, ses: Session) -> Response:
+        from trader.console import momentum as mp
+
+        return await html(req, ses, "Momentum", mp.page(data.momentum(), data.momentum_eval(),
+                                                        ses.csrf))
+
+    @page
     async def catalysts(req: Request, ses: Session) -> Response:
         from trader.console import catalysts as cat
 
@@ -806,6 +819,8 @@ def create_app(
         Route("/ideas", ideas),
         Route("/technical", technical),
         Route("/catalysts", catalysts),
+        Route("/macro", macro_page),
+        Route("/momentum", momentum_page),
         Route("/reports", reports),
         Route("/compliance", compliance),
         Route("/notes", notes_get),

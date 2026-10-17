@@ -27,6 +27,10 @@
 #   run.cmd catalyst [TICKER] [--telegram]   news catalysts: strength, 1d-1m outlook, view
 #   run.cmd catalyst-eval   grade past outlooks walk-forward; writes reports/catalyst_eval.json
 #   run.cmd backfill-catalysts [days]   once: a year of news + bars, then catalyst-eval
+#   run.cmd macro [--telegram]   macro regime, releases, Fed/economy headlines (macro-backfill once)
+#   run.cmd forecast [TICKER] | forecast-eval   volatility, gaps, macro days, sector ranks
+#   run.cmd momentum [--telegram] [--equity N] | momentum-eval | momentum-history   momentum
+#                            leaders, buy-stops, exits, rotation (docs/MOMENTUM_REQUIREMENTS.md)
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -477,7 +481,20 @@ switch ($cmd) {
     }
     'backfill' { Invoke-Backfill $rest; exit 0 }
     'backfill-catalysts' { Invoke-BackfillCatalysts $rest; exit 0 }
-    { $_ -in 'scan', 'scan-eval', 'catalyst', 'catalyst-eval' } {
+    'macro-backfill' {
+        Test-Docker   # MA-2: full FRED history + headlines (news container)
+        & docker @Compose run --rm -T --no-deps news-sentiment trader macro-collect --history
+        Assert-Native 'macro collection failed: see the output above'
+        & docker @Compose run --rm -T --no-deps trader-core trader macro
+        exit $LASTEXITCODE
+    }
+    'forecast-eval' {
+        Test-Docker
+        & docker @Compose run --rm -T --no-deps trader-core trader forecast --eval @rest
+        exit $LASTEXITCODE
+    }
+    { $_ -in 'scan', 'scan-eval', 'catalyst', 'catalyst-eval', 'macro', 'forecast',
+              'momentum', 'momentum-eval', 'momentum-history' } {
         Test-Docker   # trader-core has the bar store; --telegram goes via the notifier
         & docker @Compose run --rm -T --no-deps trader-core trader $cmd @rest
         exit $LASTEXITCODE

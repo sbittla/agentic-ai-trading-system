@@ -72,10 +72,14 @@ def _insert_new(journal: SqlJournal, table: Any, rows: list[dict[str, Any]]) -> 
     """Insert rows whose ``item_id`` is not stored yet (re-ingest after a restart is a no-op)."""
     from sqlalchemy import select
 
-    ids = [r["item_id"] for r in rows]
+    ids = list(dict.fromkeys(r["item_id"] for r in rows))
     have = {r["item_id"] for r in journal.query(select(table.c.item_id).where(
         table.c.item_id.in_(ids)))} if ids else set()
-    new = [r for r in rows if r["item_id"] not in have]
+    new = []
+    for r in rows:   # one article can be filed under several tickers: store it once
+        if r["item_id"] not in have:
+            have.add(r["item_id"])
+            new.append(r)
     if new:
         journal.insert_many(table, new)
 
@@ -186,7 +190,10 @@ class FundamentalsFeed:
         self.journal.upsert(s.fundamentals_daily, {"date": d, "ticker": ticker, "kind": kind},
                             {"json": data})
 
-    async def finnhub(self, tickers: Sequence[str], d: date) -> int:
+    async def finnhub(self, tickers: Sequence[str], d: date,
+                      calendar_tickers: Sequence[str] = ()) -> int:
+        """Per-ticker earnings and ratings for ``tickers``; the one-call earnings calendar
+        also for ``calendar_tickers`` (MO-18: the momentum universe)."""
         if not self.token:
             return 0
         n = 0
@@ -207,7 +214,7 @@ class FundamentalsFeed:
                                 "finnhub:calendar")
             if r is not None:
                 rows = (r.json() or {}).get("earningsCalendar") or []
-                for t in tickers:
+                for t in dict.fromkeys([*tickers, *calendar_tickers]):
                     nxt = sorted(x["date"] for x in rows if x.get("symbol") == t and x.get("date"))
                     if nxt:
                         self._store(d, t, "earnings_calendar", {"date": nxt[0]})

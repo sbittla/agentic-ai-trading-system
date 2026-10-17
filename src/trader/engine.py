@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import os
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -203,6 +204,8 @@ class TradingEngine:
         self.in_play_today: list[dict[str, Any]] = []
         self._catalyst: Any = None                  # A17, built on first use
         self._catalyst_sent: set[str] = set()       # NC-28: one alert per story
+        self._momentum: Any = None                  # A19 agent (built on first use)
+        self._momentum_rest: Any = None
         self._setup_jobs()
 
     # ===================================================================================
@@ -252,6 +255,20 @@ class TradingEngine:
                         until=time(23, 59))                                      # NC-35
                 sch.add("catalyst_eval", time(18, 30), self.job_catalyst_eval,
                         when="sunday", until=time(23, 59))                       # NC-33/34
+            if self.cfg.macro.enabled:                                          # A18
+                sch.add("macro_morning", time(8, 40), self.job_macro)
+                sch.add("macro_close", time(16, 35), self.job_macro, until=time(23, 59))
+            sch.add("forecast_close", time(16, 45), self.job_forecast,
+                    until=time(23, 59))                                          # FC-6
+            sch.add("forecast_eval", time(18, 45), self.job_forecast_eval,
+                    when="sunday", until=time(23, 59))                           # FC-2/FC-5
+            if self.cfg.momentum.enabled:                                       # A19
+                sch.add("momentum_intraday", time(9, 36), self.job_momentum_intraday,
+                        until=time(15, 55), retry_min=self.cfg.momentum.intraday_every_min)
+                sch.add("momentum_close", time(16, 50), self.job_momentum,
+                        until=time(23, 59), retry_min=10)                        # MO-15
+                sch.add("momentum_eval", time(19, 0), self.job_momentum_eval,
+                        when="sunday", until=time(23, 59))                       # MO-11..14
             # after the 4:30-5:30 reports: free the GPU and ~3 GB RAM overnight; QW-4 reloads
             # the model at 8:55 and the news service loads it on its first call from 7:15
             sch.add("llm_unload", LLM_UNLOAD_AT, self._unload_llm, when="daily",
@@ -847,6 +864,124 @@ class TradingEngine:
                 self._catalyst_sent.add(o["story_id"])
             await self.say(report.render(fresh, as_of=et_date(now).isoformat(),
                                          track=data.get("horizons")), kind="catalyst")
+        return True
+
+    # -- A18 macro and forecasts (MACRO_FORECAST_REQUIREMENTS.md) ---------------------------
+    def _bar_loader(self) -> Any:
+        from trader.catalyst.agent import history_loader
+
+        async def none(symbols: Any, until: date) -> dict[str, Any]:
+            return {}
+        return history_loader(self.history) if self.history is not None else none
+
+    async def job_macro(self, now: datetime, send: bool = False) -> bool:
+        """MA-6..MA-8: refresh the regime; the 8:40 run also goes to the owner."""
+        from trader.macro.agent import MacroAgent, render
+
+        payload = await MacroAgent(self.cfg, self.journal, self._bar_loader(), self.now).run()
+        if send or to_et(now).hour < 12:
+            await self.say(render(payload), kind="macro")
+        return True
+
+    async def job_forecast(self, now: datetime) -> bool:
+        from trader.forecast.agent import ForecastAgent
+
+        await ForecastAgent(self.cfg, self._bar_loader(), self.macro, self.now).run()
+        return True
+
+    async def job_forecast_eval(self, now: datetime) -> bool:
+        from trader.forecast.agent import ForecastAgent
+
+        await ForecastAgent(self.cfg, self._bar_loader(), self.macro, self.now).evaluate()
+        return True
+
+    # -- A19 momentum (MOMENTUM_REQUIREMENTS.md) -----------------------------------------
+    def momentum_agent(self) -> Any:
+        """Built once; size, equity and the macro label are refreshed on every use."""
+        if self._momentum is None:
+            from trader.data.store import resolve_bars_path
+            from trader.momentum.agent import MomentumAgent, refresh_loader, store_loader
+
+            root = resolve_bars_path(self.cfg.storage.bars_path)
+            load = store_loader(root)
+            key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get(
+                "ALPACA_PAPER_SECRET")
+            if key and secret:
+                from trader.data.alpaca_data import AlpacaHistory
+
+                load = refresh_loader(root, AlpacaHistory(key, secret,
+                                                          feed=self.cfg.momentum.feed), self.now)
+            self._momentum = MomentumAgent(self.cfg, self.journal, load, self.now, cal=self.cal)
+        ag = self._momentum
+        ag.equity = float(self.equity) if self.equity > 0 else None
+        ag.sizer = self._catalyst_sizer() if self.equity > 0 else None
+        try:
+            from trader.macro.agent import latest_label
+
+            ag.macro_label = (latest_label(self.journal, et_date(self.now())) or {}).get("label")
+        except Exception:   # noqa: BLE001 - the regime then ignores the macro view
+            ag.macro_label = None
+        return ag
+
+    async def job_momentum(self, now: datetime, send: bool = False) -> bool:
+        """MO-15/MO-16: after the close, apply the day's bar to the tracked signals, arm the
+        next session's buy-stops and send what needs action. ``send`` (MOMENTUM command):
+        the newest stored session, always sent."""
+        from trader.momentum.agent import render
+
+        m = self.cfg.momentum
+        payload = await self.momentum_agent().run(expect=None if send else et_date(now))
+        if payload.get("pending"):
+            return False                                    # today's bar not final: retry
+        if payload.get("error"):
+            log.warning("momentum_failed", error=payload["error"])
+            if send:
+                await self.say(f"MOMENTUM: {payload['error']}", "command_reply")
+            return True
+        rot = payload.get("rotation") or {}
+        actionable = bool((payload.get("tracked") or {}).get("events")) or any(
+            c["verdict"] == "alert" for c in payload["candidates"]) or bool(
+            rot.get("due") and rot.get("proven"))
+        if send or (m.telegram and actionable):
+            await self.say(render(payload, show_unproven=m.alert_unproven), kind="momentum")
+        return True
+
+    async def job_momentum_intraday(self, now: datetime) -> bool:
+        """MO-15: triggers, stops and +2R targets of alerted signals every few minutes.
+        Returns False so the scheduler runs it again until 15:55."""
+        from trader.momentum.agent import render_alert
+
+        if to_et(now).time() >= time(15, 50):
+            return True
+        key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get("ALPACA_PAPER_SECRET")
+        if not (key and secret):
+            return True
+        if self._momentum_rest is None:
+            from trader.alerts.feed import AlpacaRest
+
+            self._momentum_rest = AlpacaRest(key, secret, feed=self.cfg.data.alpaca_feed)
+        try:
+            alerts = await self.momentum_agent().intraday(self._momentum_rest)
+        except Exception as exc:   # noqa: BLE001 - try again on the next tick
+            log.warning("momentum_intraday_failed", error=str(exc))
+            return False
+        if alerts and self.cfg.momentum.telegram:
+            await self.say("Momentum (live):\n" + "\n".join(render_alert(a) for a in alerts),
+                           kind="momentum")
+        return False
+
+    async def job_momentum_eval(self, now: datetime) -> bool:
+        """Weekly walk-forward re-grade: the alert gate and the rotation choice (MO-11..14).
+        A child process: ten years of bars take ~350 MB, returned to the OS when it exits."""
+        import sys
+
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "trader.cli", "momentum-eval",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await proc.communicate()
+        if proc.returncode:
+            log.warning("momentum_eval_failed", code=proc.returncode,
+                        error=err.decode(errors="replace")[-400:])
         return True
 
     async def job_catalyst_grade(self, now: datetime) -> bool:
@@ -2079,6 +2214,24 @@ class TradingEngine:
                         await self.say(f"SCAN failed: {exc}", "command_reply")
                 self._spawn(_scan())
                 reply = "SCAN started: the technical scan follows"
+        elif action == "MOMENTUM":                                              # MO-20
+            async def _mom() -> None:
+                try:
+                    await self.job_momentum(self.now(), send=True)
+                except Exception as exc:   # noqa: BLE001
+                    log.warning("momentum_failed", error=str(exc))
+                    await self.say(f"MOMENTUM failed: {exc}", "command_reply")
+            self._spawn(_mom())
+            reply = "MOMENTUM started: leaders, buy-stops and signals follow"
+        elif action == "MACRO":                                                 # MA-8
+            async def _macro() -> None:
+                try:
+                    await self.job_macro(self.now(), send=True)
+                except Exception as exc:   # noqa: BLE001
+                    log.warning("macro_failed", error=str(exc))
+                    await self.say(f"MACRO failed: {exc}", "command_reply")
+            self._spawn(_macro())
+            reply = "MACRO started: the regime follows"
         elif action == "CATALYST":                                              # NC-28
             tks = [arg.strip().upper()] if arg.strip() else None
 

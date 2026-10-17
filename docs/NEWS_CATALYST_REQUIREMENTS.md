@@ -208,6 +208,7 @@ Two parts, split by container: **A3 is extended** (news-sentiment) to build stor
 | `NC-46` | Stories store their item ids, whether a rule or the model typed them, and the prompt version. |
 | `NC-47` | **Relevance.** An item counts only if its headline or first 400 characters name the company (symbol or a name in `news/names.py`). Feeds file articles about other companies under a ticker; on October 16, 2026, 60% of stored items failed this check. Filings, rating actions and insider forms always count. |
 | `NC-48` | **Non-events.** Previews ("to report", "what to expect"), opinion and listicles ("should you buy", "3 reasons", "could double", "may") are typed OTHER, with no materiality points: the event, if any, comes later. |
+| `NC-49` | **Tilt gate.** The event-study tilt must beat no tilt at all on the walk-forward Brier score, or it is switched off and outlooks show the volatility range with P(up) near 50%. Found on the first backfill (October 16, 2026): over 5,322 events the tilt scored 0.253–0.258 vs 0.25 for a coin, while the ranges held 79–80% of outcomes. |
 
 ### 5.8 Outputs
 
@@ -321,3 +322,21 @@ Source weights (NC-3) are `catalyst.source_weights` (publisher substring → wei
 4. **Alerts:** off until the gate passes (NC-34) **and** `catalyst.telegram: true`.
 5. **Horizon:** the code picks the horizon with the largest typical move for its uncertainty.
 6. **Stocktwits and ApeWisdom:** built, off by default (`catalyst.social_sources: [reddit]`) until their terms are confirmed.
+
+## 14. First results on real data (October 16, 2026)
+
+Backfill: about 70,000 articles for 37 tickers (Finnhub free plan, back to October 2025), embedded with MiniLM; 60% of stored items failed the relevance check (NC-47). That gave **5,359 events** with known outcomes.
+
+| Horizon | Graded | Range hit (target 80%) | Brier with news tilt | Brier, tilt off (used) |
+| --- | --- | --- | --- | --- |
+| 1 day | 5,271 | 79% | 0.2526 | 0.2500 |
+| 1 week | 5,043 | 80% | 0.2552 | 0.2498 |
+| 2 weeks | 4,753 | 80% | 0.2576 | 0.2501 |
+| 1 month | 4,230 | 79% | 0.2582 | 0.2501 |
+
+**What it means:**
+
+- The **ranges are well calibrated**: the 10–90% band holds the outcome 79–80% of the time at every horizon. That is the useful output (stops, targets, option strikes).
+- **News direction gave no edge.** Pooled across 37 large caps, the tilt from past similar stories scored worse than a coin. The NC-49 gate switched it off, so outlooks say P(up) 50%, and the view is NEUTRAL or NO_TRADE unless a future re-grade finds an edge.
+- The alert gate (NC-34) is not passed, and cannot be while there is no directional edge, so Telegram catalyst alerts stay off.
+- The weekly re-grade (Sundays 18:30) keeps testing. Social data (once Reddit keys exist) and a longer history may change this; that will show in the walk-forward numbers before anything changes in the outlooks.

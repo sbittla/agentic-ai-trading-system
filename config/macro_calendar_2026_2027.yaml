@@ -10,10 +10,17 @@
 # (RUNBOOK maintenance task, December). A10 refuses to start if today is past the last listed CPI date.
 
 fomc_decision_days:            # statement at 14:00 ET on these days
-  2026: ["2026-10-28", "2026-12-09"]
+  # past meetings: used only by FC-4 (measured reactions); trading rules look at today only
+  2025: ["2025-01-29", "2025-03-19", "2025-05-07", "2025-06-18", "2025-07-30", "2025-09-17",
+         "2025-10-29", "2025-12-10"]
+  2026: ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16",
+         "2026-10-28", "2026-12-09"]
   2027: ["2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09",
          "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08"]   # tentative
 
+# Past CPI and jobs dates (FC-4): add the actual 2025-2026 release days from the BLS archive
+# (https://www.bls.gov/bls/news-release/cpi.htm, .../empsit.htm). The 2025 shutdown moved
+# several releases, so they are not generated from rules here.
 cpi_release_days:              # 08:30 ET
   2026: ["2026-10-14", "2026-11-10", "2026-12-10"]
   2027: []                     # TODO: fill from BLS 2027 schedule

@@ -30,7 +30,8 @@ R_MIN_ATR = 0.25
 R_MAX_ATR = 2.5
 ADX_OVERHEATED = 35
 
-SHORT_NAMES = {"BREAKOUT_20D": "BREAKDOWN_20D", "HIGH_52W": "LOW_52W", "BULL_FLAG": "BEAR_FLAG"}
+SHORT_NAMES = {"BREAKOUT_20D": "BREAKDOWN_20D", "HIGH_52W": "LOW_52W", "BULL_FLAG": "BEAR_FLAG",
+               "BASE_BREAKOUT": "BASE_BREAKDOWN"}
 
 
 @dataclass(frozen=True)
@@ -81,12 +82,17 @@ class Frame:
         self.ll20 = ta.shift(ta.rolling_min(l, 20))
         self.high252 = ta.rolling_max(h, max(1, min(252, len(h))))   # 52-week extreme
         self.rng = h - l
+        # TS-20 accumulation / distribution (on the mirrored series for shorts)
+        self.obv_slope = ta.slope(ta.obv(c, s.v) / max(float(np.mean(s.v)) or 1.0, 1.0), 20)
+        self.px_slope = ta.slope(c / max(float(np.mean(np.abs(c))) or 1.0, 1e-9), 20)
+        self.cmf20 = ta.cmf(h, l, c, s.v, 20)
         self.inside = pat.inside_bar(s.h, s.l)
         self.nr7 = pat.nr(s.h, s.l, 7)
         self.reversal = (pat.bullish_reversal(s.o, s.h, s.l, s.c) if side > 0
                          else pat.bearish_reversal(s.o, s.h, s.l, s.c))
         self.rs63 = np.full(len(c), np.nan)
         self.spy_up = np.full(len(c), np.nan)                 # +1 aligned, -1 against
+        self.spy_dist = np.full(len(c), np.nan)               # TS-22 distribution days
         if spy is not None and len(spy.c):
             idx = {d: j for j, d in enumerate(spy.dates)}
             spy_roc, spy_sma = ta.roc(spy.c, 63), ta.sma(spy.c, 50)
@@ -96,6 +102,10 @@ class Frame:
                 if j is None:
                     continue
                 self.rs63[i] = k * (my_roc[i] - spy_roc[j])
+                if j >= 26:
+                    self.spy_dist[i] = sum(
+                        1 for q in range(j - 24, j + 1)
+                        if spy.c[q] / spy.c[q - 1] - 1 <= -0.002 and spy.v[q] > spy.v[q - 1])
                 if not math.isnan(spy_sma[j]):
                     self.spy_up[i] = 1.0 if k * (spy.c[j] - spy_sma[j]) > 0 else -1.0
 
@@ -119,6 +129,17 @@ class Frame:
             return None
         w = ta.sma(np.asarray(closes, dtype=np.float64), 10)
         return bool(closes[-1] > w[-1] and w[-1] > w[-5])
+
+    def accumulation(self, i: int) -> int:
+        """TS-20: +1 money flowing in (CMF > 0.05 and OBV rising), -1 out, 0 otherwise."""
+        cm, ob = self.cmf20[i], self.obv_slope[i]
+        if math.isnan(cm) or math.isnan(ob):
+            return 0
+        if cm > 0.05 and ob > 0:
+            return 1
+        if cm < -0.05 and ob < 0:
+            return -1
+        return 0
 
     def b(self, i: int) -> float:
         return 0.05 * float(self.atr[i])
@@ -296,6 +317,30 @@ def macd_cross(x: Frame, i: int) -> Cand | None:
                 "MACD crossed its signal line early in the move, trend intact")
 
 
+def base_breakout(x: Frame, i: int) -> Cand | None:
+    """TS-21: a 20-60 session base no deeper than 25%, ranges contracting, volume drying up,
+    then a close above the base high on volume (a volatility contraction pattern)."""
+    if i < 70 or not x.vol50[i] > 0:
+        return None
+    for n in (60, 50, 40, 30, 20):
+        hi = float(x.h[i - n:i].max())
+        lo = float(x.l[i - n:i].min())
+        if hi <= 0 or (hi - lo) / abs(hi) > 0.25:
+            continue
+        tight = float(x.h[i - 10:i].max() - x.l[i - 10:i].min())
+        if tight > 0.6 * (hi - lo):
+            return None
+        if float(x.v[i - 10:i].mean()) > 0.8 * float(x.vol50[i]):
+            return None
+        if not (x.c[i] > hi and x.v[i] >= VOLUME_MULT * x.vol50[i]):
+            return None
+        return Cand(float(x.h[i]) + x.b(i), float(x.l[i - 10:i + 1].min()) - x.b(i),
+                    f"{n}-session base {(hi - lo) / abs(hi):.0%} deep, ranges contracting and "
+                    f"volume drying up; closed above {_f(hi)} on "
+                    f"{x.v[i] / x.vol50[i]:.1f}x volume")
+    return None
+
+
 def reversal_candle(x: Frame, i: int) -> Cand | None:
     if i < 25 or not x.c[i] > x.sma200[i]:
         return None
@@ -321,6 +366,8 @@ TECHNIQUES: tuple[Technique, ...] = (
     Technique("RSI2_REVERSION", "swing", "reversion", rsi2_reversion, "Connors RSI(2)"),
     Technique("MACD_CROSS", "swing", "trend", macd_cross, "early MACD cross in trend"),
     Technique("REVERSAL_CANDLE", "swing", "trend", reversal_candle, "reversal candle at support"),
+    Technique("BASE_BREAKOUT", "swing", "trend", base_breakout,
+              "volatility-contraction base breakout on volume"),
 )
 
 
@@ -374,7 +421,11 @@ def _context(x: Frame, i: int, t: Technique) -> dict[str, Any]:
             "rs63": None if math.isnan(rs) else round(float(rs), 2),
             "adx": None if math.isnan(x.adx[i]) else round(float(x.adx[i]), 1),
             "rvol": round(float(x.v[i] / x.vol50[i]), 2) if x.vol50[i] > 0 else None,
-            "reversion": t.kind == "reversion"}
+            "reversion": t.kind == "reversion",
+            "accumulation": x.accumulation(i),                                  # TS-20
+            "cmf20": None if math.isnan(x.cmf20[i]) else round(float(x.cmf20[i]), 3),
+            "market_distribution_days": None if math.isnan(x.spy_dist[i])        # TS-22
+            else int(x.spy_dist[i])}
 
 
 def frames(s: Series, spy: Series | None) -> tuple[Frame, Frame]:

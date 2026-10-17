@@ -141,3 +141,8 @@ class AlpacaHistory:
 
     async def minute_bars(self, symbol: str, start: datetime, end: datetime) -> list[Bar]:
         return await self._bars(symbol, start, end, "1Min")
+
+    async def daily_bars_until(self, symbol: str, start: date, end: datetime) -> list[Bar]:
+        """Daily bars up to the instant ``end`` (MO-22: SIP history must end 15+ minutes
+        before now on the free plan)."""
+        return await self._bars(symbol, et_datetime(start, time(0, 0)), end, "1Day")

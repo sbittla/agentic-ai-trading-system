@@ -26,10 +26,10 @@ def _frame(root: Path, kind: str, symbol: str) -> pd.DataFrame | None:
     return df.sort_values("ts")
 
 
-def load_daily(root: Path, symbols: Iterable[str]) -> dict[str, Series]:
+def load_daily(root: Path, symbols: Iterable[str], kind: str = "daily") -> dict[str, Series]:
     out: dict[str, Series] = {}
     for sym in symbols:
-        df = _frame(root, "daily", sym)
+        df = _frame(root, kind, sym)
         if df is None:
             continue
         rows = [(ts.date(), float(o), float(h), float(lo), float(c), float(v))

@@ -178,6 +178,38 @@ def obv(close: Arr, volume: Arr) -> Arr:
     return np.cumsum(sign * volume)
 
 
+def ad_line(high: Arr, low: Arr, close: Arr, volume: Arr) -> Arr:
+    """TA-Lib AD (Chaikin Accumulation/Distribution line); flat bars add nothing."""
+    rng = high - low
+    mfm = np.where(rng > 0, ((close - low) - (high - close)) / np.where(rng > 0, rng, 1.0), 0.0)
+    return np.cumsum(mfm * volume)
+
+
+def cmf(high: Arr, low: Arr, close: Arr, volume: Arr, n: int = 20) -> Arr:
+    """Chaikin Money Flow: sum of money-flow volume / sum of volume over ``n`` bars (TS-20)."""
+    rng = high - low
+    mfm = np.where(rng > 0, ((close - low) - (high - close)) / np.where(rng > 0, rng, 1.0), 0.0)
+    out = _nan(len(close))
+    mfv = mfm * volume
+    for i in range(n - 1, len(close)):
+        vs = float(volume[i - n + 1:i + 1].sum())
+        out[i] = float(mfv[i - n + 1:i + 1].sum()) / vs if vs > 0 else 0.0
+    return out
+
+
+def slope(x: Arr, n: int) -> Arr:
+    """Least-squares slope of the last ``n`` values, per bar (NaN until n values)."""
+    out = _nan(len(x))
+    t = np.arange(n, dtype=np.float64)
+    tc = t - t.mean()
+    den = float((tc * tc).sum())
+    for i in range(n - 1, len(x)):
+        w = x[i - n + 1:i + 1]
+        if not np.isnan(w).any():
+            out[i] = float((tc * (w - w.mean())).sum()) / den
+    return out
+
+
 def roc(x: Arr, n: int) -> Arr:
     out = _nan(len(x))
     if len(x) > n:

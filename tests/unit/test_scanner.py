@@ -295,7 +295,7 @@ def test_reversal_candle_needs_support() -> None:
 @pytest.mark.rule("TS-4")
 def test_every_technique_has_a_registry_entry_and_short_name() -> None:
     names = T.technique_names()
-    assert len(T.TECHNIQUES) == 9 and len(set(names)) == len(names)
+    assert len(T.TECHNIQUES) == 10 and len(set(names)) == len(names)   # + BASE_BREAKOUT
     assert {"BREAKDOWN_20D", "LOW_52W", "BEAR_FLAG"} <= set(names)
 
 

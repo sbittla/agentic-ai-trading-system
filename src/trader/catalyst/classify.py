@@ -65,7 +65,8 @@ ITEM_TYPES = {"2.02": "EARNINGS", "1.01": "M_AND_A", "2.01": "M_AND_A", "5.02": 
 ITEM_RE = re.compile(r"\b(\d\.\d\d)\b")
 # NC-48: previews, opinion and listicles describe no new event (the event, if any, comes later)
 NON_EVENT_RE = re.compile(
-    r"(\bto report\b|\bahead of (its |the )?(earnings|results|report)|\bpreview\b|"
+    r"(\bto report\b|\bahead of\b.{0,50}\b(earnings|results|report)|\bpreview\b|"
+    r"here'?s what|\bwhat .{0,40} says comes next\b|"
     r"what to (expect|watch)|what'?s in the cards|\bshould you\b|\bis it (time|too late)\b|"
     r"\b(is|are) \w+( \w+)? (a|an) (buy|sell)\b|stocks? to (buy|sell|watch)|"
     r"\bbetter buy\b|\bprobably\b|\bcould (reach|soar|double|triple|be)\b|"

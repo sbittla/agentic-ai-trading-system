@@ -71,6 +71,8 @@ class Inputs:
     earnings_next: Mapping[str, int | None] = field(default_factory=dict)   # sessions away
     macro: Sequence[tuple[int, str]] = ()          # (sessions away, event name)
     llm_types: Mapping[str, tuple[str, str]] = field(default_factory=dict)  # story -> type
+    event_mult: Mapping[str, Mapping[str, float]] = field(default_factory=dict)   # FC-4
+    macro_regime: Mapping[str, Any] | None = None                                 # MA-7
 
 
 @dataclass
@@ -199,6 +201,12 @@ def flags_for(t: Typed, s: Series) -> dict[str, bool]:
             "trend": _trend_agrees(s, i, t.direction)}
 
 
+def event_key(name: str) -> str:
+    """'FOMC 2026-10-28' -> 'fomc' (the FC-4 multiplier keys)."""
+    low = name.lower()
+    return "fomc" if low.startswith("fomc") else "cpi" if low.startswith("cpi") else "jobs"
+
+
 def best_per_day(typed: Sequence[Typed]) -> list[Typed]:
     """One event per ticker and day 0 (the strongest): many stories on one day are one event
     for the price, and counting them twice would overstate the evidence."""
@@ -252,7 +260,11 @@ def outlook(t: Typed, pool: Pool, inp: Inputs, cfg: CatalystCfg, now: datetime, 
         ev = 0.0
         if e_next is not None and 0 < e_next <= h and t.ctype != "EARNINGS":
             ev += (2.5 * sig) ** 2            # an earnings day moves ~2.5 daily sigmas
-        ev += sum((1.0 * sig) ** 2 for off, _ in inp.macro if 0 < off <= h)
+        mults = inp.event_mult.get(tk, {})
+        for off, name in inp.macro:     # FC-4: measured move on macro days, else sqrt(2)
+            if 0 < off <= h:
+                m = mults.get(event_key(name)) or 2 ** 0.5
+                ev += max(0.0, m * m - 1) * sig ** 2
         views.append(horizon_view(pool, probe, h, sig, k=cfg.shrink_k,
                                   adjustments=adjustments, event_var=ev,
                                   calibrated=calibrated))
@@ -272,6 +284,7 @@ def outlook(t: Typed, pool: Pool, inp: Inputs, cfg: CatalystCfg, now: datetime, 
         inp.spy.dates else None
     checks += cx.regime(inp.spy, inp.sector.get(tk), spy_i,
                         [n for off, n in inp.macro if off <= max(cfg.horizons)], t.direction)
+    checks += cx.macro_regime(inp.macro_regime, t.direction)
     st, v, why = stance(views, strength_label=t.strength.label, stance_p=cfg.stance_p,
                         min_edge=cfg.stance_min_edge, earnings_in=e_next,
                         is_earnings=t.ctype == "EARNINGS")

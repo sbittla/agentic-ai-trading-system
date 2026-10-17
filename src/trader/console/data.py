@@ -46,6 +46,8 @@ ALLOWED = {
     "RECAP",
     "SCAN",
     "CATALYST",
+    "MACRO",
+    "MOMENTUM",
 }
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 ARG_RE = re.compile(r"^[A-Za-z0-9 .@:_-]{0,40}$")
@@ -408,6 +410,26 @@ class ConsoleData:
         """NC-27: the newest catalyst outlooks (reports/catalysts.json)."""
         ca = getattr(self.cfg, "catalyst", None)
         return self._report_json(ca.latest_file if ca else "catalysts.json")
+
+    def macro(self) -> dict[str, Any] | None:
+        """MA-8: the newest macro regime (reports/macro.json)."""
+        m = getattr(self.cfg, "macro", None)
+        return self._report_json(m.latest_file if m else "macro.json")
+
+    def momentum(self) -> dict[str, Any] | None:
+        """MO-20: the newest momentum run (reports/momentum.json)."""
+        m = getattr(self.cfg, "momentum", None)
+        return self._report_json(m.latest_file if m else "momentum.json")
+
+    def momentum_eval(self) -> dict[str, Any] | None:
+        """MO-11..MO-14: the walk-forward record (reports/momentum_eval.json)."""
+        m = getattr(self.cfg, "momentum", None)
+        return self._report_json(m.eval_file if m else "momentum_eval.json")
+
+    def forecast(self) -> dict[str, Any] | None:
+        """FC-6: the newest forecasts (reports/forecast.json)."""
+        f = getattr(self.cfg, "forecast", None)
+        return self._report_json(f.latest_file if f else "forecast.json")
 
     def catalyst_eval(self) -> dict[str, Any] | None:
         """NC-32: walk-forward grades (reports/catalyst_eval.json), without the event list."""

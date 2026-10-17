@@ -27,7 +27,9 @@ SAFE = {"STATUS", "KILL", "ACK", "PAUSE", "HELP", "PLAN",
         "OPT", "CHAIN", "IV", "OPTS", "OPTIONS",   # OP-13 (read-only, no orders)
         "RECAP",             # UI-34: RECAP [sessions] - past-window recap + watchlist
         "SCAN",              # TS-19: technical scan now (read-only, no orders)
-        "CATALYST"}          # NC-28: CATALYST [TICKER] news catalyst outlook (read-only)
+        "CATALYST",          # NC-28: CATALYST [TICKER] news catalyst outlook (read-only)
+        "MACRO",             # MA-8: macro regime now (read-only)
+        "MOMENTUM"}          # MO-20: momentum leaders, buy-stops, signals (read-only)
 DESTRUCTIVE = {"FLATTEN", "RESUME", "UNPAUSE"}
 APPROVAL = {"YES", "NO"}
 KNOWN = SAFE | DESTRUCTIVE | APPROVAL | {"CONFIRM"}

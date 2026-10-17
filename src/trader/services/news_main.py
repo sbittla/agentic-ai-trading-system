@@ -97,13 +97,41 @@ class NewsService:
             tickers = list(cfg.universe.tickers)
             try:
                 ciks = await EdgarFilings(ua).cik_map()
-                await fundamentals.finnhub(tickers, day)
+                await fundamentals.finnhub(tickers, day, cfg.momentum.universe)
                 await fundamentals.insiders(tickers, day, ciks)
                 await fundamentals.short_volume(tickers, day)
                 if "apewisdom" in cfg.catalyst.social_sources:
                     await fundamentals.apewisdom(extended_tickers(cfg), day)
             except Exception as exc:   # noqa: BLE001 - never blocks the news loop
                 log.warning("fundamentals_failed", error=str(exc))
+
+        async def macro_poll() -> None:
+            """MA-2 / MA-4: FRED series and macro headlines at 7:00 ET, every 2 hours to the
+            close, and once after 16:30 (when FRED has posted the day's market series)."""
+            if not cfg.macro.enabled:
+                return
+            from trader.macro.agent import collect
+            from trader.macro.sources import MacroFeeds
+
+            feeds = MacroFeeds(os.environ.get("FINNHUB_TOKEN"), ua)   # FRED wants a contact
+            last_slot: tuple[Any, Any] | None = None
+            while True:
+                local = to_et(datetime.now(UTC))
+                minute = local.hour * 60 + local.minute
+                slot: tuple[Any, Any] | None = None
+                if 7 * 60 <= minute < 16 * 60 + 30:
+                    slot = (local.date(), (minute - 7 * 60) // 120)
+                elif minute >= 16 * 60 + 30:
+                    slot = (local.date(), "close")
+                if slot is not None and slot != last_slot:
+                    last_slot = slot
+                    try:
+                        got = await collect(journal, feeds, cfg.macro.series, scorer,
+                                            categories=cfg.macro.news_categories)
+                        log.info("macro_collected", **{k: v for k, v in got.items() if v})
+                    except Exception as exc:   # noqa: BLE001 - never blocks the news loop
+                        log.warning("macro_collect_failed", error=str(exc))
+                await asyncio.sleep(300)
 
         async def poll() -> None:
             last_universe = None
@@ -173,7 +201,7 @@ class NewsService:
                 await asyncio.sleep(_until_next(now, cfg.data.news_poll_open_s if in_window
                                                 else 300))
 
-        await asyncio.gather(heartbeat(), poll(), hot_poll())
+        await asyncio.gather(heartbeat(), poll(), hot_poll(), macro_poll())
 
 
 def cfg_company_names(cfg: Any) -> dict[str, tuple[str, ...]]:

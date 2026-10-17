@@ -100,8 +100,10 @@ def combined_loader(first: SeriesLoader, then: SeriesLoader | None) -> SeriesLoa
     """The bar store first; symbols it lacks (or holds stale) from ``then``."""
     async def load(symbols: Sequence[str], until: date) -> dict[str, Series]:
         got = await first(symbols, until)
-        stale = until - timedelta(days=5)
-        missing = [t for t in symbols if t not in got or got[t].dates[-1] < stale]
+        due = until                     # the newest weekday on or before ``until``
+        while due.weekday() >= 5:
+            due -= timedelta(days=1)
+        missing = [t for t in symbols if t not in got or got[t].dates[-1] < due]
         if missing and then is not None:
             got.update(await then(missing, until))
         return got
@@ -270,7 +272,16 @@ class CatalystAgent:
         spy = series.pop("SPY", None)
         sector = {t: series[SECTOR[t]] for t in tickers if t in SECTOR and SECTOR[t] in series}
         fund = self.latest_fund(tickers, asof)
+        from trader.forecast.agent import load_json
+        from trader.macro.agent import latest_label
+
+        mult = (load_json(self.cfg.forecast.eval_file) or {}).get("event_multipliers") or {}
+        try:
+            reg = latest_label(self.journal, asof)
+        except Exception:   # noqa: BLE001 - an old journal without the table
+            reg = None
         return Inputs(series=series, spy=spy, sector=sector, iv=self.iv(tickers, asof),
+                      event_mult=mult, macro_regime=reg,
                       actions=self.actions(tickers, since, now), fundamentals=fund,
                       social=self.social(tickers, since - timedelta(days=30)),
                       earnings_next=self.earnings_next(fund, asof),
@@ -375,9 +386,15 @@ class CatalystAgent:
         gate = (data or {}).get("gate") or {"pass": False}
         adjustments = tuple((data or {}).get("adjustments") or ())
         pool = self.pool_from(data, day)
+        if data is not None and data.get("tilt") is False:   # NC-49: tilt switched off
+            from trader.catalyst.evaluate import NO_TILT_K
+
+            ca_k = self.ca.model_copy(update={"shrink_k": NO_TILT_K})
+        else:
+            ca_k = self.ca
         outs = []
         for t in live(typed, self.ca, cut):
-            o = outlook(t, pool, inp, self.ca, cut, adjustments=adjustments,
+            o = outlook(t, pool, inp, ca_k, cut, adjustments=adjustments,
                         calibrated=bool(gate.get("pass")), sizer=sizer)
             if o is not None:
                 outs.append(o)

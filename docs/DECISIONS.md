@@ -24,6 +24,8 @@ Short records of the main design decisions, so later changes can see why things 
 | ADR-016 | 2026-10-11 | Analyst ratings from public RSS headlines parsed by rules, not by the model | Accepted |
 | ADR-017 | 2026-10-16 | News catalyst outlooks from a pooled event study, not a forecasting model | Accepted |
 | ADR-018 | 2026-10-16 | Portfolio risk limits and an independent pre-trade order check | Accepted |
+| ADR-019 | 2026-10-16 | Macro regime from fixed published rules on free FRED data; forecasts limited to what is gradeable | Accepted |
+| ADR-020 | 2026-10-17 | Momentum: a graded rotation model plus gated swing setups, one exit state machine for live and backtest | Accepted |
 
 ---
 
@@ -127,3 +129,14 @@ Short records of the main design decisions, so later changes can see why things 
 **Decision:** A7 caps open risk to stops, beta-weighted exposure and swing gap stress, and refuses names that measurably move with an open position (PF-1..PF-4), using statistics computed each morning from bars before today. A8 checks the price band, volume share, order shape and an optional notional cap just before submitting (OC-1..OC-4).
 **Consequences:** Some trades will be smaller, and a few correlated entries refused, by design. The checks use only data already loaded each morning.
 
+### ADR-019 Macro regime from fixed rules on FRED data; forecasts that can be graded
+
+**Context:** The owner asked for macro and microeconomic news and for prediction use cases.
+**Decision:** Economic numbers come from FRED's public CSV files (no key) and Fed news from the Fed's RSS feed; Finnhub general news adds economy headlines. The regime is a sum of fixed, published rules (yield curve, credit spreads, VIX level and term structure, Sahm rule, inflation trend, dollar, oil, SPY trend, distribution days), not a fitted model: any free history has too few regime changes to fit one. Forecasts are limited to what markets allow and what can be graded: volatility (three estimators, best by QLIKE), gap behaviour, macro-day reactions and sector rotation. Release surprises are measured against trend, because consensus expectations are paid data.
+**Consequences:** Free, explainable and testable. The regime is shown and used as a check, never as a trade blocker. Past CPI and jobs dates must be added to the macro calendar for their reactions to be measured; FOMC dates from 2025 are included.
+
+### ADR-020 Momentum: a graded rotation model plus gated swing setups
+
+**Context:** The owner asked for the best-known winning momentum techniques, with entry and exit alerts, to build a platform for high profits with momentum stocks.
+**Decision:** Seven published setups are implemented: Qullamaggie breakout and episodic pivot, Minervini VCP, the O'Neil high tight flag, the Kacher-Morales pocket pivot, the Turtle 55-day breakout and the George-Hwang 52-week high. So are five exit policies, partial-then-trail, a climax sale and a time stop. A rotation model holds the top 10 by a momentum composite (Jegadeesh-Titman, Clenow, Antonacci, Barroso and Santa-Clara). One exit state machine (`momentum/exits.py`) runs both the live tracker and the walk-forward backtest. Everything is graded on 10 years of SIP daily bars, with an in-sample and an out-of-sample half. Entry alerts go out only for setups that pass the gate. The rotation model's factors are chosen on the in-sample half only. Results are compared with the equal-weight universe as well as SPY, because the universe is today's large caps.
+**Consequences:** The measured result (MOMENTUM_REQUIREMENTS §9) is that the rotation model is the return engine: 23% a year out-of-sample against 19% for equal weight, with deeper drawdowns. Only the 55-day breakout is a robust swing edge. Setups that did not work stay graded and unalerted rather than being tuned until they do. Advisory only (ADR-006), long stock only (ADR-008).
