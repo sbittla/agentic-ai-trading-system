@@ -194,6 +194,7 @@ momentum:                          # docs/MOMENTUM_REQUIREMENTS.md (A19, advisor
   min_rs: 80                       # leader filter (MO-7)
   min_template: 7
   disabled: []
+  watch_only: [SMA200_PULLBACK]   # MO-26: armed and tracked, never alerted (see §9.6)
   setup_policy: {}                 # e.g. {DONCHIAN_55: sma50}; defaults in MOMENTUM_REQUIREMENTS §6
   partial_frac: 0.3333             # MO-9
   partial_r: 2.0
@@ -217,5 +218,19 @@ momentum:                          # docs/MOMENTUM_REQUIREMENTS.md (A19, advisor
   min_pf: 1.2
   earnings_block_sessions: 3
   intraday_every_min: 5
+  sma200_watch_pct: 6.0            # MO-27: leaders this close above a rising 200-day
   eval_file: reports/momentum_eval.json
   latest_file: reports/momentum.json
+
+events:                            # docs/EVENT_REQUIREMENTS.md (A20, advisory)
+  enabled: true
+  file: config/corporate_events.yaml   # past and upcoming product launches, developer days
+  pre_sessions: 10                 # EV-3: run-up window
+  post_sessions: 10                # EV-3: drift window
+  min_years: 6                     # EV-5 pattern bar
+  min_hit: 0.7
+  max_p: 0.10
+  min_move_pct: 1.0
+  lookahead_days: 90               # EV-6
+  telegram: false                  # EV-7: the evening before a buy window opens
+  latest_file: reports/events.json

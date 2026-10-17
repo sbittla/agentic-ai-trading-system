@@ -294,7 +294,7 @@ def test_setups_need_a_leader_and_an_r_inside_the_window() -> None:
     for st, c in setups_at(x, 299, leader=True):
         r = c.trigger - c.stop
         assert 0.25 * x.atr[299] <= r <= st.r_max_atr * x.atr[299]
-    assert len(SETUPS) == 7 and len(set(SETUP_NAMES)) == 7
+    assert len(SETUPS) == 8 and len(set(SETUP_NAMES)) == 8
 
 
 # --- MO-8 / MO-9 entries and exits ----------------------------------------------------------
@@ -889,3 +889,78 @@ def test_console_page_and_command(cfg: Config, tmp_path: Path) -> None:
     assert "Not graded yet" in page.page(None, None, "csrf")
     assert "MOMENTUM" in CONSOLE_SAFE
     assert any(href == "/momentum" for _, links in NAV for href, _ in links)
+
+
+# --- MO-26 / MO-27 the 200-day average ------------------------------------------------------
+
+def _pullback_closes(n_up: int = 320, fall: float = 0.012) -> list[float]:
+    """A strong advance, then a steady fall to the rising 200-day average."""
+    closes = uptrend(n_up, g=0.003)
+    while len(closes) < n_up + 120:
+        closes.append(closes[-1] * (1 - fall))
+    return closes
+
+
+@pytest.mark.rule("MO-26")
+def test_sma200_pullback_arms_on_the_first_touch_only() -> None:
+    from trader.momentum.setups import sma200_pullback, sma200_trend
+
+    x = _frame(_pullback_closes())
+    hits = [i for i in range(300, len(x.c)) if sma200_pullback(x, i) is not None]
+    assert hits, "the fall reaches the 200-day average"
+    i = hits[0]
+    s = x.sma200[i]
+    c = sma200_pullback(x, i)
+    assert c is not None and x.l[i] <= 1.01 * s and x.c[i] >= 0.98 * s
+    assert c.trigger == pytest.approx(x.h[i] + 0.05 * x.atr[i])
+    assert c.stop == pytest.approx(min(x.l[i], s) - 0.5 * x.atr[i])
+    assert all(x.c[i - 40:i] > x.sma200[i - 40:i])
+    # once closes have been under the average, a later touch is not a first test
+    later = [k for k in hits if k > i + 5]
+    assert all(not sma200_trend(x, k) or sma200_pullback(x, k) is None for k in later
+               if (x.c[k - 40:k] <= x.sma200[k - 40:k]).any())
+    # a stock that never ran 15% above its average is not a leader pulling back
+    flat = _frame(uptrend(320, g=0.0004) + [uptrend(320, g=0.0004)[-1] * 0.995 ** k
+                                            for k in range(1, 60)])
+    assert all(sma200_pullback(flat, k) is None for k in range(300, len(flat.c)))
+
+
+@pytest.mark.rule("MO-26")
+def test_sma200_pullback_setup_is_registered_without_the_leader_filter() -> None:
+    st = {s.name: s for s in SETUPS}["SMA200_PULLBACK"]
+    assert st.needs_leader is False and st.policy == "chandelier"
+    x = _frame(_pullback_closes())
+    i = next(k for k in range(300, len(x.c)) if st.fn(x, k) is not None)
+    assert "SMA200_PULLBACK" in [s.name for s, _ in setups_at(x, i, leader=False)]
+
+
+@pytest.mark.rule("MO-27")
+def test_sma200_watchlist_and_history() -> None:
+    from trader.momentum import sma200
+
+    closes = _pullback_closes()
+    x = _frame(closes)
+    touch = next(k for k in range(300, len(x.c)) if x.l[k] <= 1.01 * x.sma200[k])
+    near = next(k for k in range(touch - 1, 300, -1)
+                if 0 < x.c[k] / x.sma200[k] - 1 <= 0.06)
+    s = from_closes("X", closes)
+    spy = from_closes("SPY", uptrend(len(closes)))
+    panel = Panel({"X": MomFrame(s, spy)}, min_dollar=0)
+    day = s.dates[near]
+    rows = sma200.watch(panel, day, always=("X",))
+    assert [r["ticker"] for r in rows] == ["X"]
+    r = rows[0]
+    assert 0 < r["dist_pct"] <= 6 and r["sma200"] == pytest.approx(x.sma200[near], abs=0.01)
+    assert sma200.watch(panel, day, max_dist=0.001, always=("X",)) == []
+    assert sma200.watch(panel, day) == [] or panel.composite(day)["X"] >= 0.5
+    # history: touches with 60 sessions of follow-through only, counted once per 20 sessions
+    assert sma200.history(x, touch + 59)["tests"] == 0
+    h = sma200.history(x, len(x.c) - 1)
+    assert h["tests"] == len([k for k in sma200.touches(x, len(x.c) - 61)])
+    if h["tests"]:
+        assert 0 <= h["held_rate"] <= 1 and h["last"]["date"] == x.dates[touch].isoformat()
+    # the report lists it
+    payload = {"asof": day.isoformat(), "regime": {"state": "ON", "size_mult": 1,
+                                                   "reasons": ["x"]},
+               "candidates": [], "sma200_watch": rows, "records": {}}
+    assert "Near the 200-day average" in render(payload) and "X " in render(payload)

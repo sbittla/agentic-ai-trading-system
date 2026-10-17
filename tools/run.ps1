@@ -31,6 +31,8 @@
 #   run.cmd forecast [TICKER] | forecast-eval   volatility, gaps, macro days, sector ranks
 #   run.cmd momentum [--telegram] [--equity N] | momentum-eval | momentum-history   momentum
 #                            leaders, buy-stops, exits, rotation (docs/MOMENTUM_REQUIREMENTS.md)
+#   run.cmd events [TICKER] [--telegram]   product launches, developer days: past price
+#                            pattern and dated ideas (docs/EVENT_REQUIREMENTS.md)
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -494,7 +496,7 @@ switch ($cmd) {
         exit $LASTEXITCODE
     }
     { $_ -in 'scan', 'scan-eval', 'catalyst', 'catalyst-eval', 'macro', 'forecast',
-              'momentum', 'momentum-eval', 'momentum-history' } {
+              'momentum', 'momentum-eval', 'momentum-history', 'events' } {
         Test-Docker   # trader-core has the bar store; --telegram goes via the notifier
         & docker @Compose run --rm -T --no-deps trader-core trader $cmd @rest
         exit $LASTEXITCODE

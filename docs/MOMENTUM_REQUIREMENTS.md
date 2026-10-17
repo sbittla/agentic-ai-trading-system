@@ -85,6 +85,7 @@ Notation: today's bar `o, h, l, c, v`; ATR = ATR14; b = 0.05 × ATR; vol50 = the
 | `POCKET_PIVOT` | Leader. Up day whose volume beats every down day's volume of the prior 10 sessions; close above SMA50 and within 1 ATR of SMA10 | next open | lowest low of 3 sessions − b | `ema20` |
 | `DONCHIAN_55` | Leader. Close within 1 ATR(20) below the prior 55-session high | 55-session high + b | trigger − 2 × ATR(20) | `donchian20` |
 | `HIGH_52W` | Leader. The scanner's tight 10-session range under the 52-week high (SCANNER §3.1) | 52-week high + b | 10-session low − b | `chandelier` |
+| `SMA200_PULLBACK` | No leader filter (a pullback fails the template); its own trend rule instead (MO-26). The low comes within 1% of the 200-day average and the close holds at most 2% under it | h + b | min(l, SMA200) − 0.5 ATR | `chandelier` |
 
 ## 7. Exits
 
@@ -110,6 +111,8 @@ Notation: today's bar `o, h, l, c, v`; ATR = ATR14; b = 0.05 × ATR; vol50 = the
 | `MO-21` | **Config.** `momentum:` with `enabled`, `telegram`, `universe`, the filters, factors, setup thresholds, policies, exit parameters, sizing and gate values. Defaults work without the section; invalid names fail validation. |
 | `MO-23` | **Explainable.** Every alert and leaderboard row states its numbers: the factor values, the template items that failed, and the exact rule that fired. |
 | `MO-25` | **Rotation alerts.** The close job replays the rotation model over the loaded sessions with the backtest's code. On a rebalance day it lists BUY (with weight and shares), SELL and HOLD against the previous rebalance, and on other days the current holdings and the next rebalance date. Rebalance alerts go to Telegram only when the selected model's CAGR beat SPY and the equal-weight universe in both halves (the MO-25 gate). |
+| `MO-26` | **The 200-day pullback** (`SMA200_PULLBACK`, §6). A leader's first pullback to a rising 200-day average. All four must hold: (1) the SMA200 is higher than 20 and 60 sessions ago; (2) a close at least 15% above it within the last 63 sessions; (3) every close of the prior 40 sessions above it, so this is the first test, not a stock churning around the line; (4) today's low within 1% of it and the close at most 2% under it. Graded like every setup (MO-11). Setups in `momentum.watch_only` (default: this one) are armed, tracked and listed with their record, but never alerted and never counted in the alert-stream portfolio (§9.6). |
+| `MO-27` | **Near the 200-day average.** The close job lists leaders, meaning the top half of the composite plus `universe.tickers`, that meet MO-26 rules (1)–(3) and close within `sma200_watch_pct` (6%) above the average. That is the price point where the setup would arm. Each row gives the close, the SMA200, the distance in % and in ATR, the distance from the 52-week high, the RS rating, and the stock's own history of first tests: their count, how many held (no close more than 3% under the average within 20 sessions), the share up after 20 sessions, and the median 20- and 60-session returns. Shown in `trader momentum`, the console and `momentum.json` (`sma200_watch`). |
 | `MO-24` | **Honest results.** §9 records the measured results with their sample sizes, including setups and policies that lost. A rule is not tuned on the out-of-sample half. Default changes made after looking at both halves are labelled as such. |
 
 ## 9. Measured results
@@ -157,6 +160,8 @@ What this means:
 - **Qullamaggie-style breakouts did not work on these large caps** (−0.01R). The method targets fast small and mid caps; this universe has none. It stays graded, and stays unproven.
 - Results are not sensitive to the unknown order of the low and the trigger on the fill day: the pessimistic version moves each average by at most 0.01R.
 
+| `SMA200_PULLBACK` | `chandelier` | 264 | 51% | +0.14 | 1.33 | +0.21 / +0.09 | passes; watch-only (§9.6) |
+
 ### 9.3 The swing alert stream as a portfolio (MO-12)
 
 At 0.5% risk per trade, with 8 slots and the heat and correlation caps, the gated setups made **8.2% a year** (Sharpe 0.75, max drawdown 25%), with only 42% of the money invested on average. That is worse than SPY. The swing alerts are a way to time entries into leaders with a defined risk. **On their own they are not the high-return engine; the rotation model is.** The alert stream passed the SV-3 statistical gate (990 closed trades, the 95% interval of the expectancy +0.07R to +0.29R, the Monte Carlo drawdown inside the limit), so the edge per trade is real, just small next to buy-and-hold of strong stocks.
@@ -174,3 +179,17 @@ At 0.5% risk per trade, with 8 slots and the heat and correlation caps, the gate
 ### 9.5 What to expect live
 
 These are backtests on a survivorship-biased list. Paper-track the alerts before you trust them with money (TEST_PLAN stage 4): `momentum_signals` keeps every alerted and unproven signal with its outcome. Momentum has crashed suddenly in the past: −73% for US winners-minus-losers in 1932 and −45% in 2009, both in rebounds after bear markets. The crash guard halves size in that pattern, but it cannot prevent a loss.
+
+### 9.6 The 200-day pullback (MO-26, MO-27), added October 17, 2026
+
+The rules were fixed before the first backtest (MO-24). On the same bars and sessions as §9.2:
+
+| | Trades | Win | Avg R | PF | 95% CI of the mean |
+| --- | --- | --- | --- | --- | --- |
+| In-sample (Sep 2017 – Mar 2022) | 117 | 56% | +0.21 | 1.53 | −0.10 to +0.60 |
+| Out-of-sample (Mar 2022 – Oct 2026) | 147 | 48% | +0.09 | 1.20 | −0.17 to +0.38 |
+| Without the regime filter | 357 | 48% | +0.07 | 1.14 | −0.10 to +0.26 |
+
+It passes the per-setup gate (MO-14), but only just: the out-of-sample profit factor is at the 1.2 bar, and the interval includes zero in both halves. Added to the alert stream it **lowers** the portfolio: Sharpe falls from 0.75 to 0.63 (out of sample from 0.55 to 0.39), and the stream fails SV-3. It takes slots and heat from the stronger breakouts. On its own the stream's Sharpe is 0.34. So it is **watch-only** (`momentum.watch_only`): armed, tracked in `momentum_signals` and shown with its record, never sent. This was decided after seeing both halves, and it removes alerts rather than adding them. The weekly re-grade keeps measuring it.
+
+Per stock, first tests of the 200-day average are rare (0–3 in ten years for most large caps), so a single stock's history is a hint, not a statistic. The pooled record above is the number to trust.

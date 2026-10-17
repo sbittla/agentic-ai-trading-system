@@ -1,0 +1,122 @@
+# Recurring company events for the event study (docs/EVENT_REQUIREMENTS.md, EV-1).
+#
+# Each group is one kind of event for one ticker. A date is the keynote or start day:
+#   "2025-06-09"        the event starts during market hours (or before the open): that
+#                       session is the reaction day
+#   "2025-09-17 amc"    the event starts after the 16:00 ET close (or on a weekend/holiday):
+#                       the next session is the reaction day
+# `upcoming` lists future dates; `estimated: true` marks a date guessed from the usual
+# pattern, not announced. Dates were collected by hand: verify before trading on one, and add
+# the new year's date when the company announces it. A group's `family` pools similar events
+# (all of one CEO's keynotes, say) when the group alone has too few years.
+
+groups:
+  - id: AAPL_WWDC
+    ticker: AAPL
+    name: Apple WWDC keynote
+    family: aapl_keynote
+    dates: [2016-06-13, 2017-06-05, 2018-06-04, 2019-06-03, 2020-06-22, 2021-06-07,
+            2022-06-06, 2023-06-05, 2024-06-10, 2025-06-09, 2026-06-08]
+    upcoming:
+      - {date: 2027-06-07, estimated: true}
+
+  - id: AAPL_IPHONE
+    ticker: AAPL
+    name: Apple iPhone event
+    family: aapl_keynote
+    dates: [2016-09-07, 2017-09-12, 2018-09-12, 2019-09-10, 2020-10-13, 2021-09-14,
+            2022-09-07, 2023-09-12, 2024-09-09, 2025-09-09, 2026-09-09]
+    upcoming:
+      - {date: 2027-09-08, estimated: true}
+
+  - id: GOOGL_IO
+    ticker: GOOGL
+    name: Google I/O keynote
+    family: googl_keynote
+    dates: [2016-05-18, 2017-05-17, 2018-05-08, 2019-05-07, 2021-05-18, 2022-05-11,
+            2023-05-10, 2024-05-14, 2025-05-20, 2026-05-19]
+    upcoming:
+      - {date: 2027-05-18, estimated: true}
+
+  - id: GOOGL_PIXEL
+    ticker: GOOGL
+    name: Made by Google (Pixel launch)
+    family: googl_keynote
+    dates: [2016-10-04, 2017-10-04, 2018-10-09, 2019-10-15, 2020-09-30, 2021-10-19,
+            2022-10-06, 2023-10-04, 2024-08-13, 2025-08-20, "2026-08-12 amc"]
+    upcoming:
+      - {date: 2027-08-11, estimated: true}
+
+  - id: MSFT_BUILD
+    ticker: MSFT
+    name: Microsoft Build
+    family: msft_conference
+    dates: [2016-03-30, 2017-05-10, 2018-05-07, 2019-05-06, 2020-05-19, 2021-05-25,
+            2022-05-24, 2023-05-23, 2024-05-21, 2025-05-19, 2026-06-02]
+    upcoming:
+      - {date: 2027-05-18, estimated: true}
+
+  - id: MSFT_IGNITE
+    ticker: MSFT
+    name: Microsoft Ignite
+    family: msft_conference
+    dates: [2016-09-26, 2017-09-25, 2018-09-24, 2019-11-04, 2020-09-22, 2021-11-02,
+            2022-10-12, 2023-11-15, 2024-11-19, 2025-11-18]
+    upcoming:
+      - {date: 2026-11-17}
+
+  - id: NVDA_GTC
+    ticker: NVDA
+    name: NVIDIA GTC keynote (San Jose)
+    family: nvda_keynote
+    dates: [2016-04-05, 2017-05-10, 2018-03-27, "2019-03-18 amc", 2020-05-14, 2021-04-12,
+            2022-03-22, 2023-03-21, "2024-03-18 amc", 2025-03-18, 2026-03-16]
+    upcoming:
+      - {date: 2027-03-15, estimated: true}   # GTC 2027 runs March 14-18
+
+  - id: NVDA_CES
+    ticker: NVDA
+    name: NVIDIA CES keynote
+    family: nvda_keynote
+    dates: [2023-01-03, 2024-01-08, "2025-01-06 amc", 2026-01-05]
+    upcoming:
+      - {date: 2027-01-05, estimated: true}   # CES 2027 runs January 6-9
+
+  - id: NVDA_GTC_DC
+    ticker: NVDA
+    name: NVIDIA GTC Washington DC keynote
+    family: nvda_keynote
+    dates: [2025-10-28]
+    upcoming:
+      - {date: 2026-12-01}
+
+  - id: META_CONNECT
+    ticker: META
+    name: Meta Connect keynote
+    dates: [2016-10-05, 2017-10-11, 2018-09-26, 2019-09-25, 2020-09-16, 2021-10-28,
+            2022-10-11, 2023-09-27, 2024-09-25, "2025-09-17 amc", "2026-09-23 amc"]
+    upcoming:
+      - {date: 2027-09-22, estimated: true}
+
+  - id: AMZN_REINVENT
+    ticker: AMZN
+    name: AWS re:Invent keynote
+    dates: [2016-11-30, 2017-11-29, 2018-11-28, 2019-12-03, 2020-12-01, 2021-11-30,
+            2022-11-29, 2023-11-28, 2024-12-03, 2025-12-02]
+    upcoming:
+      - {date: 2026-12-01, estimated: true}   # re:Invent runs Nov 30 - Dec 4
+
+  - id: AMZN_PRIME_DAY
+    ticker: AMZN
+    name: Amazon Prime Day (first day)
+    dates: [2016-07-12, 2017-07-11, 2018-07-16, 2019-07-15, 2020-10-13, 2021-06-21,
+            2022-07-12, 2023-07-11, 2024-07-16, 2025-07-08, 2026-06-23]
+    upcoming: []
+
+  - id: TSLA_EVENT
+    ticker: TSLA
+    name: Tesla product, AI or investor event
+    dates: ["2016-03-31 amc", "2017-11-16 amc", 2019-04-22, "2020-09-22 amc",
+            "2021-08-19 amc", "2022-09-30 amc", "2023-03-01 amc", "2024-10-10 amc",
+            "2025-11-06 amc"]
+    upcoming: []

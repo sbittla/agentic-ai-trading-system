@@ -1,6 +1,7 @@
-"""Momentum page (MO-20): regime, buy-stops, tracked signals, the rotation model, the
-leaderboard and the walk-forward record. Reads reports/momentum.json and
-reports/momentum_eval.json. Advisory: nothing here places an order."""
+"""Momentum page (MO-20): regime, buy-stops, tracked signals, the rotation model, leaders
+near their 200-day average (MO-27), the leaderboard, company events ahead (EV-7) and the
+walk-forward record. Reads reports/momentum.json, reports/momentum_eval.json and
+reports/events.json. Advisory: nothing here places an order."""
 
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ from trader.console.render import (
 
 REGIME_TONE = {"ON": "ok", "CAUTION": "warn", "OFF": "bad", "UNKNOWN": "neutral"}
 VERDICT_TONE = {"alert": "ok", "unproven": "neutral", "earnings": "warn", "no_slot": "warn",
-                "correlated": "warn", "busy": "neutral", "regime_off": "bad"}
+                "correlated": "warn", "busy": "neutral", "regime_off": "bad",
+                "watch_only": "neutral"}
 
 
 def _pct(v: Any) -> str:
@@ -80,7 +82,61 @@ def _record(ev: dict[str, Any] | None) -> str:
     return body
 
 
-def page(p: dict[str, Any] | None, ev: dict[str, Any] | None, csrf: str) -> str:
+def _sma200(rows: list[dict[str, Any]]) -> str:
+    """MO-27: strong stocks within a few percent above a rising 200-day average."""
+    for r in rows:
+        h = r.get("history") or {}
+        r["past"] = (f"{h['tests']} test{'s' if h['tests'] != 1 else ''}, "
+                     f"{h['held_rate'] * 100:.0f}% held, median {h['median_r20_pct']:+.1f}% in "
+                     "20 sessions") if h.get("tests") else "no past first test"
+    return table(rows, [("ticker", "Ticker"), ("close", "Close"), ("sma200", "200-day"),
+                        ("dist_pct", "Above it %"), ("atr_away", "ATRs away"),
+                        ("from_high_pct", "From 52w high %"), ("rs", "RS"),
+                        ("past", "Its past first tests")], "no leader near its 200-day average", {
+        "ticker": lambda v, row: stock_link(v), "close": lambda v, row: num(v),
+        "sma200": lambda v, row: num(v), "dist_pct": lambda v, row: num(v, 1),
+        "atr_away": lambda v, row: num(v, 1), "from_high_pct": lambda v, row: num(v, 1)},
+        compact=True)
+
+
+def _events(evp: dict[str, Any] | None) -> str:
+    """EV-7: upcoming company events, their past pattern and the dated ideas."""
+    if not evp or evp.get("error"):
+        return empty("No event report yet", (evp or {}).get("error") or (
+            "trader-core writes it at 5:05 PM ET, or run " + code("./run.sh events") + "."),
+            icon="◌")
+    ideas = [i for i in evp.get("ideas") or [] if i["status"] != "passed"]
+    body = table(ideas, [("ticker", "Ticker"), ("kind", "Idea"), ("event", "Event"),
+                         ("event_date", "Date"), ("enter", "From"), ("exit", "To"),
+                         ("mean_pct", "Past move %"), ("same_sign_rate", "Same way"),
+                         ("n", "Events"), ("p", "p"), ("basis", "Basis")],
+                 "no upcoming event has a consistent past pattern", {
+        "ticker": lambda v, row: stock_link(v),
+        "kind": lambda v, row: chip(v.replace("_", " ").lower(),
+                                    "ok" if row["side"] == "buy" else "warn"),
+        "event_date": lambda v, row: e(v) + (" (est.)" if row.get("estimated") else ""),
+        "mean_pct": lambda v, row: num(v, 1, sign=True), "same_sign_rate": lambda v, row:
+        _pct(v), "p": lambda v, row: num(v, 2)}, compact=True)
+    ups = evp.get("upcoming") or []
+    for u in ups:
+        s = u.get("summary") or {}
+        u["into"], u["event_move"], u["after"] = (s.get("run_up", u.get("basis", "")),
+                                                  s.get("reaction", ""), s.get("drift", ""))
+    body += table(ups, [("event_date", "Date"), ("ticker", "Ticker"), ("event", "Event"),
+                        ("sessions_away", "Sessions"), ("into", "Into it"),
+                        ("event_move", "Event day"), ("after", "After")], "", {
+        "ticker": lambda v, row: stock_link(v),
+        "event_date": lambda v, row: e(v) + (" (est.)" if row.get("estimated") else "")},
+        compact=True)
+    body += (f'<p class="muted small">{evp.get("patterns")} patterns in {evp.get("tests")} '
+             f'tests; about {evp.get("expected_false")} could be chance. Moves are net of SPY '
+             "and of the stock's usual move. A pattern is a tendency over a handful of events, "
+             "not a proven edge.</p>")
+    return body
+
+
+def page(p: dict[str, Any] | None, ev: dict[str, Any] | None, csrf: str,
+         evp: dict[str, Any] | None = None) -> str:
     run = cmd_button(csrf, "MOMENTUM", "", "Refresh now", primary=True)
     sub = "Leaders, buy-stops with stops and sizes, sell alerts to the exit, and the rotation model"
     if not p or p.get("error"):
@@ -88,6 +144,7 @@ def page(p: dict[str, Any] | None, ev: dict[str, Any] | None, csrf: str) -> str:
                                          + code("./run.sh momentum-history") + ".")
         return (page_head("Momentum", sub, run) + card("Today", empty("No momentum run yet",
                                                                       why, run, "◎"))
+                + card("Company events ahead", _events(evp))
                 + card("Walk-forward record", _record(ev)))
     reg = p["regime"]
     tr = p.get("tracked") or {}
@@ -146,6 +203,9 @@ def page(p: dict[str, Any] | None, ev: dict[str, Any] | None, csrf: str) -> str:
             sub=f"Top {len([h for h in rot['holdings'] if h['weight'] > 0])} by "
                 f"{', '.join(rot['factors'])}, inverse-volatility weights capped at 20% · "
                 f"{head} · {'proven' if rot.get('proven') else 'unproven: not alerted'}")
+    body += card("Near the 200-day average", _sma200(list(p.get("sma200_watch") or [])),
+                 sub="Leaders with a rising 200-day average, within a few percent above it: "
+                     "SMA200_PULLBACK arms when the low touches it (watch-only, MO-26).")
     board = p.get("leaderboard") or []
     body += card("Leaders", table(board, [
         ("rank", "#"), ("symbol", "Ticker"), ("composite", "Score"), ("rs", "RS"),
@@ -155,5 +215,8 @@ def page(p: dict[str, Any] | None, ev: dict[str, Any] | None, csrf: str) -> str:
         "close": lambda v, row: num(v), "template": lambda v, row: f"{v}/8",
         "gap_flag": lambda v, row: chip("yes", "warn") if v else ""}, compact=True),
         sub="Ranked on " + e(", ".join(p.get("rank_factors") or [])) + " (MO-5).")
+    body += card("Company events ahead", _events(evp),
+                 sub="Product launches and developer days: the past price pattern around "
+                     "each, and dated ideas where it was consistent (EV-6).")
     body += card("Walk-forward record", _record(ev))
     return body

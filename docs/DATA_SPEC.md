@@ -28,6 +28,7 @@ Defines every external data source, how often it is called, the internal tables 
 | ApeWisdom (off) | Reddit mention counts per ticker (NC-11) | `apewisdom.io/api/v1.0/filter/all-stocks/page/<n>` | 7:30 AM when enabled | Off until its terms are confirmed |
 | Alpaca Market Data (SIP history) | 10 years of consolidated daily bars for `momentum.universe` (MO-22), stored as kind `daily_sip` | REST `GET /v2/stocks/bars?feed=sip`, the request ending 16 minutes before now (free plan) | `momentum-history` once; the 16:50 job tops up stale symbols | ~115 calls a day |
 | Alpaca snapshots | Last trade and day bar for armed and open momentum signals (MO-15) | REST `GET /v2/stocks/snapshots` (IEX) | Every 5 min, 9:36–15:50 ET, only while signals are armed or open | 1 call per run |
+| Company event calendar | Past and upcoming dates of product launches, developer conferences and keynotes (EV-1) | `config/corporate_events.yaml`, kept by hand from company announcements | Edited when a company announces a date | none |
 | Macro calendar | CPI, jobs report, FOMC dates | Published BLS and Federal Reserve schedules, entered in config yearly | Yearly, checked monthly | — |
 
 **Data quality rules**

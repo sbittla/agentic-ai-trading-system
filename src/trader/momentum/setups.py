@@ -177,6 +177,35 @@ def high_52w(x: MomFrame, i: int) -> Cand | None:
                 f"tight 10-session range just under the 52-week high {_f(top)}")
 
 
+def sma200_trend(x: MomFrame, i: int) -> bool:
+    """MO-26 context: a rising 200-day average (over 20 and 60 sessions), a close at least
+    15% above it within the last 63 sessions (a leader that pulled back), and every close of
+    the prior 40 sessions above it (the first test, not a stock churning around it)."""
+    if i < 260 or math.isnan(x.sma200[i - 60]):
+        return False
+    s = x.sma200
+    if not (s[i] > s[i - 20] and s[i] > s[i - 60]):
+        return False
+    if float(x.c[i - 63:i].max()) < 1.15 * s[i]:
+        return False
+    return bool(np.all(x.c[i - 40:i] > s[i - 40:i]))
+
+
+def sma200_pullback(x: MomFrame, i: int) -> Cand | None:
+    """A leader's first pullback to a rising 200-day average: the low touches it (within 1%)
+    and the close holds (at most 2% under). Buy a move back over the day's high."""
+    if not sma200_trend(x, i):
+        return None
+    s = float(x.sma200[i])
+    if not (x.l[i] <= 1.01 * s and x.c[i] >= 0.98 * s):
+        return None
+    a = float(x.atr[i])
+    hi = float(x.c[i - 63:i].max())
+    return Cand(float(x.h[i]) + _b(x, i), min(float(x.l[i]), s) - 0.5 * a,
+                f"first pullback to the rising 200-day average {_f(s)} (low {_f(x.l[i])}, "
+                f"close {_f(x.c[i])}) after a close {hi / s - 1:.0%} above it")
+
+
 SETUPS: tuple[Setup, ...] = (
     Setup("MOMENTUM_BREAKOUT", momentum_breakout, True, "ema10",
           "tight base after a 30%+ advance (Qullamaggie)"),
@@ -187,6 +216,8 @@ SETUPS: tuple[Setup, ...] = (
     Setup("POCKET_PIVOT", pocket_pivot, True, "ema20", "pocket pivot (Kacher & Morales)"),
     Setup("DONCHIAN_55", donchian_55, True, "donchian20", "55-session breakout (Turtle S2)"),
     Setup("HIGH_52W", high_52w, True, "chandelier", "tight range under the 52-week high"),
+    Setup("SMA200_PULLBACK", sma200_pullback, False, "chandelier",
+          "a leader's first pullback to its rising 200-day average", r_max_atr=3.0),
 )
 SETUP_NAMES = tuple(s.name for s in SETUPS)
 

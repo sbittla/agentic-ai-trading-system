@@ -67,6 +67,8 @@ def eval_text(res: Mapping[str, Any]) -> str:
     for k, st in res["benchmarks"].items():
         lines.append(f"  {k}: {_c(st)}" + (f" | OOS {_c(st['oos'])}" if st.get("oos") else ""))
     lines.append("Setups passing the alert gate (MO-14): "
-                 + (", ".join(res["gate_pass"]) or "none"))
+                 + (", ".join(res["gate_pass"]) or "none")
+                 + (f"; watch-only, not alerted (MO-26): {', '.join(res['watch_only'])}"
+                    if res.get("watch_only") else ""))
     lines.append(res.get("survivorship_note", ""))
     return "\n".join(lines)

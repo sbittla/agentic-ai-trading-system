@@ -432,6 +432,17 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `MO-23` | Explainable. Every alert and leaderboard row states its numbers: the factor values, the… | A19 momentum (trader-core) | unit/test_momentum.py | — |
 | `MO-24` | Honest results. §9 records the measured results with their sample sizes, including setup… | A19 momentum (trader-core) | unit/test_momentum.py | — |
 | `MO-25` | Rotation alerts. The close job replays the rotation model over the loaded sessions with… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-26` | The 200-day pullback (SMA200_PULLBACK). A leader's first pullback to a rising 200-day… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-27` | Near the 200-day average. Leaders within sma200_watch_pct above a rising SMA200, with… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+
+| `EV-1` | Calendar file events.file, kept by hand: groups of one event kind for one ticker, past… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-2` | Reaction session: the event day when it starts during or before market hours, else the… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-3` | Windows run_up, reaction, drift around the reaction session, raw, net of SPY and of the… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-4` | Baseline: the stock's mean return net of SPY over every window of the same length… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-5` | Pattern: min_years, min_move_pct, min_hit, sign-test p <= max_p, the newer half agreeing… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-6` | Ideas for upcoming events within lookahead_days, dated from the reaction session… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-7` | Outputs: trader events, run.sh/run.cmd events, events.latest_file, the 17:05 ET job… | A20 events (trader-core) | unit/test_events.py | — |
+| `EV-8` | Config events: with defaults; out-of-range values fail validation; a missing calendar… | A20 events (trader-core) | unit/test_events.py | — |
 
 | `NC-49` | Tilt gate: the event-study tilt must beat no tilt on walk-forward Brier, else off | A17 (trader-core) | unit/test_catalyst.py | — |
 

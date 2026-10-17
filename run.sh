@@ -31,6 +31,8 @@
 #   ./run.sh forecast [TICKER] | forecast-eval   volatility, gaps, macro days, sector ranks
 #   ./run.sh momentum [--telegram] [--equity N] | momentum-eval | momentum-history   momentum
 #                            leaders, buy-stops, exits, rotation (docs/MOMENTUM_REQUIREMENTS.md)
+#   ./run.sh events [TICKER] [--telegram]   product launches, developer days: past price
+#                            pattern and dated ideas (docs/EVENT_REQUIREMENTS.md)
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -402,7 +404,7 @@ case "$cmd" in
              && "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader macro ;;
   forecast-eval) check_docker
            "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader forecast --eval "$@" ;;
-  scan|scan-eval|catalyst|catalyst-eval|macro|forecast|momentum|momentum-eval|momentum-history)
+  scan|scan-eval|catalyst|catalyst-eval|macro|forecast|momentum|momentum-eval|momentum-history|events)
            check_docker   # trader-core
            "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader "$cmd" "$@" ;;
   test)    check_docker   # developers too: nothing runs from a host venv
@@ -412,6 +414,6 @@ case "$cmd" in
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
-  help|-h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac

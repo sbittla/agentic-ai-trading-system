@@ -18,7 +18,7 @@ from sqlalchemy import select
 from trader.calendar import MarketCalendar
 from trader.config import Config
 from trader.journal import schema as s
-from trader.momentum import rotation
+from trader.momentum import rotation, sma200
 from trader.momentum.evaluate import build_panel, evaluate
 from trader.momentum.exits import ExitParams, Position, enter, step
 from trader.momentum.factors import MomFrame, Panel, crowded, regime
@@ -220,11 +220,14 @@ class MomentumAgent:
         rot = None
         if self.m.rotation:
             rot = await asyncio.to_thread(self._rotation, panel, spy, day, ev)
+        watch = sma200.watch(panel, day, max_dist=self.m.sma200_watch_pct / 100,
+                             always=tuple(self.cfg.universe.tickers))   # MO-27
         payload = {
             "generated": self.now().isoformat(), "asof": day.isoformat(),
             "regime": reg.as_dict(), "leaderboard": [r.as_dict() for r in board],
             "rank_factors": list(factors),
             "candidates": cands, "tracked": tracked, "skipped": skipped, "rotation": rot,
+            "sma200_watch": watch,
             "eval": {"generated": (ev or {}).get("generated"),
                      "gate_pass": (ev or {}).get("gate_pass", []),
                      "period": (ev or {}).get("period")},
@@ -255,6 +258,9 @@ class MomentumAgent:
                     verdict, why = "regime_off", "SPY under its 200-day average: no new entries"
                 elif not rec["proven"]:
                     verdict = "unproven"
+                elif st.name in self.m.watch_only:
+                    verdict, why = "watch_only", (
+                        "graded and tracked, not alerted: it lowered the alert stream (MO-26)")
                 n_earn = earn.get(sym)
                 if n_earn is not None and n_earn <= self.m.earnings_block_sessions and \
                         st.name != "EPISODIC_PIVOT" and verdict == "alert":
@@ -549,7 +555,8 @@ class MomentumAgent:
             max_positions=m.max_positions, max_heat_pct=m.max_heat_pct,
             max_position_pct=self.cfg.risk.max_position_pct, top_n=m.top_n,
             hold_rank=m.hold_rank, rebalance_weeks=m.rebalance_weeks,
-            max_correlated=m.max_correlated, max_weight=m.rotation_max_weight)
+            max_correlated=m.max_correlated, max_weight=m.rotation_max_weight,
+            watch_only=m.watch_only)
         res["generated"] = self.now().isoformat()
         if write:
             _write(m.eval_file, res)
@@ -616,7 +623,7 @@ def render(payload: Mapping[str, Any], *, show_unproven: bool = False, n_board: 
         lines.append("EXITS and fills:")
         lines += ["  " + render_alert(a) for a in ev]
     buys = [c for c in payload["candidates"] if c["verdict"] == "alert" or
-            (show_unproven and c["verdict"] == "unproven")]
+            (show_unproven and c["verdict"] in ("unproven", "watch_only"))]
     if buys:
         lines.append(f"BUY-STOPS for {buys[0]['session']}:")
         for c in buys:
@@ -660,6 +667,21 @@ def render(payload: Mapping[str, Any], *, show_unproven: bool = False, n_board: 
                 for h in acts))
         lines.append("  holds: " + ", ".join(
             f"{h['ticker']} {h['weight']:.0%}" for h in rot["holdings"] if h["weight"] > 0))
+    watch = payload.get("sma200_watch") or []
+    if watch:
+        rec = (payload.get("records") or {}).get("SMA200_PULLBACK") or {}
+        state = "graded" if rec.get("proven") else "unproven"
+        lines.append(f"Near the 200-day average (SMA200_PULLBACK arms on a touch; {state}, "
+                     "watch-only):")
+        for w in watch[:n_board]:
+            h = w["history"]
+            past = (f"{h['tests']} past test{'s' if h['tests'] != 1 else ''}, "
+                    f"{h['held_rate']:.0%} held, median "
+                    f"{h['median_r20_pct']:+.1f}% in 20 sessions" if h.get("tests") else
+                    "no past first test")
+            lines.append(f"  {w['ticker']} {w['close']} is {w['dist_pct']:.1f}% "
+                         f"({w['atr_away']} ATR) above its 200-day {w['sma200']} · "
+                         f"{w['from_high_pct']:+.1f}% from the 52w high · RS {w['rs']} · {past}")
     board = payload.get("leaderboard") or []
     if board:
         lines.append(f"Leaders (ranked on {', '.join(payload.get('rank_factors') or [])}):")

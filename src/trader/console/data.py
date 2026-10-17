@@ -421,6 +421,11 @@ class ConsoleData:
         m = getattr(self.cfg, "momentum", None)
         return self._report_json(m.latest_file if m else "momentum.json")
 
+    def events(self) -> dict[str, Any] | None:
+        """EV-7: the company-event report (reports/events.json)."""
+        e = getattr(self.cfg, "events", None)
+        return self._report_json(e.latest_file if e else "events.json")
+
     def momentum_eval(self) -> dict[str, Any] | None:
         """MO-11..MO-14: the walk-forward record (reports/momentum_eval.json)."""
         m = getattr(self.cfg, "momentum", None)

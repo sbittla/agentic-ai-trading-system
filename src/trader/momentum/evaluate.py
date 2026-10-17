@@ -377,7 +377,8 @@ def evaluate(series: Mapping[str, Series], spy: Series | None, *, params: ExitPa
              max_heat_pct: float = 6.0, max_position_pct: float = 25.0, top_n: int = 10,
              hold_rank: int = 20, rebalance_weeks: int = 2, policies: Sequence[str] = POLICIES,
              max_correlated: int = 2, max_weight: float = 0.2,
-             macro: Mapping[date, str] | None = None) -> dict[str, Any]:
+             macro: Mapping[date, str] | None = None, watch_only: Sequence[str] = ()
+             ) -> dict[str, Any]:
     panel = build_panel(series, spy, min_price=min_price, min_dollar=min_dollar,
                         rank_factors=rank_factors)
     sigs = signals(panel, spy, min_rs=min_rs, min_template=min_template, start=start, end=end,
@@ -413,7 +414,8 @@ def evaluate(series: Mapping[str, Series], spy: Series | None, *, params: ExitPa
         setups[st.name] = res
         if res["gate"]["pass"]:
             gate_pass.append(st.name)
-            alerted += dflt
+            if st.name not in watch_only:     # MO-26: the stream is what gets alerted
+                alerted += dflt
     bench = benchmarks(panel, spy, cal)
     bench_stats = {k: _curve_stats(cal, v, split) for k, v in bench.items()}
     stream: dict[str, Any] = {}
@@ -437,6 +439,7 @@ def evaluate(series: Mapping[str, Series], spy: Series | None, *, params: ExitPa
                    "split": split.isoformat(), "sessions": len(cal),
                    "symbols": len(panel.frames)},
         "signals": len(sigs), "setups": setups, "gate_pass": gate_pass,
+        "watch_only": [n for n in watch_only if n in setups],
         "alert_stream": stream, "rotation": rot, "benchmarks": bench_stats,
         "params": {k: v for k, v in params.__dict__.items()},
         "survivorship_note": "The universe is today's large caps (survivorship bias): compare "

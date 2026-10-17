@@ -1055,6 +1055,36 @@ def cmd_momentum_eval(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_events(a: argparse.Namespace) -> int:
+    """EV-7: recurring company events, their past price pattern and dated trade ideas."""
+    from trader.data.store import resolve_bars_path
+    from trader.events.agent import EventsAgent, render
+    from trader.momentum.agent import refresh_loader, store_loader
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    root = resolve_bars_path(cfg.storage.bars_path)
+    load = store_loader(root)
+    key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get("ALPACA_PAPER_SECRET")
+    if key and secret:
+        from trader.data.alpaca_data import AlpacaHistory
+
+        load = refresh_loader(root, AlpacaHistory(key, secret, feed=cfg.momentum.feed),
+                              lambda: datetime.now(UTC))
+    agent = EventsAgent(cfg, load, lambda: datetime.now(UTC))
+    payload = asyncio.run(agent.run(write=not a.no_write))
+    if a.json:
+        print(json.dumps(payload, indent=1, default=str))
+        return 0
+    text = render(payload, ticker=a.ticker.upper() if a.ticker else None)
+    print(text)
+    if a.telegram:
+        ok = _send_text(text, "events")
+        print("sent to Telegram" if ok else "Telegram send failed")
+        return 0 if ok else 1
+    return 0
+
+
 def cmd_backup(a: argparse.Namespace) -> int:
     """Nightly pg_dump + Parquet copy (backup container)."""
     configure_logging()
@@ -1589,6 +1619,12 @@ def build_parser() -> argparse.ArgumentParser:
     mh = sub.add_parser("momentum-history", help="SIP daily bars for momentum.universe")
     mh.add_argument("--days", type=int, help="calendar days (default momentum.history_days)")
     mh.set_defaults(fn=cmd_momentum_history)
+    evp = sub.add_parser("events", help="company events: past pattern, dated ideas (EV-7)")
+    evp.add_argument("ticker", nargs="?")
+    evp.add_argument("--json", action="store_true")
+    evp.add_argument("--telegram", action="store_true")
+    evp.add_argument("--no-write", action="store_true")
+    evp.set_defaults(fn=cmd_events)
     tc = sub.add_parser("telegram-chats", help="show chat ids that messaged the bot")
     tc.add_argument("--env-file", action="append")
     tc.set_defaults(fn=cmd_telegram_chats)

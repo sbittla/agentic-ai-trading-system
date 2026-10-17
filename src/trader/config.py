@@ -456,6 +456,8 @@ class MomentumCfg(_Frozen):
     min_rs: int = 80
     min_template: int = 7
     disabled: tuple[str, ...] = ()
+    # MO-26: graded, armed and tracked, never alerted (it lowered the alert stream's Sharpe)
+    watch_only: tuple[str, ...] = ("SMA200_PULLBACK",)
     setup_policy: dict[str, str] = Field(default_factory=dict)
     partial_frac: float = 1 / 3
     partial_r: float = 2.0
@@ -481,8 +483,26 @@ class MomentumCfg(_Frozen):
     min_pf: float = 1.2
     earnings_block_sessions: int = 3    # MO-18
     intraday_every_min: int = 5
+    sma200_watch_pct: float = 6.0       # MO-27: leaders this close above a rising 200-day
     latest_file: str = "reports/momentum.json"
     eval_file: str = "reports/momentum_eval.json"
+
+
+class EventsCfg(_Frozen):
+    """Recurring company events: event study and dated trade ideas (EVENT_REQUIREMENTS.md,
+    A20). Advisory."""
+
+    enabled: bool = True
+    file: str = "config/corporate_events.yaml"
+    pre_sessions: int = 10              # EV-3: the run-up window before the reaction day
+    post_sessions: int = 10             # EV-3: the drift window after it
+    min_years: int = 6                  # EV-5: fewer past events -> the family, else no idea
+    min_hit: float = 0.7                # EV-5: share of years with the same sign
+    max_p: float = 0.10                 # EV-5: two-sided sign-test p-value
+    min_move_pct: float = 1.0           # EV-5: mean move beyond SPY, in %
+    lookahead_days: int = 90            # EV-6: calendar days ahead
+    telegram: bool = False
+    latest_file: str = "reports/events.json"
 
 
 class Config(_Frozen):
@@ -512,6 +532,7 @@ class Config(_Frozen):
     macro: MacroCfg = MacroCfg()
     forecast: ForecastCfg = ForecastCfg()
     momentum: MomentumCfg = MomentumCfg()
+    events: EventsCfg = EventsCfg()
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
@@ -607,7 +628,7 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
     from trader.momentum.setups import SETUP_NAMES
     if set(mo.rank_factors) - set(FACTORS) or not mo.rank_factors:
         p.append(f"momentum.rank_factors: one or more of {', '.join(FACTORS)} (MO-5)")
-    for name in [*mo.disabled, *mo.setup_policy]:
+    for name in [*mo.disabled, *mo.watch_only, *mo.setup_policy]:
         if name not in SETUP_NAMES:
             p.append(f"momentum: unknown setup {name!r} (known: {', '.join(SETUP_NAMES)})")
     for pol in mo.setup_policy.values():
@@ -633,6 +654,14 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
         p.append("momentum.max_correlated >= 1 (MO-17)")
     if not 1 <= mo.intraday_every_min <= 30:
         p.append("momentum.intraday_every_min: 1-30 (MO-15)")
+    if not 0 < mo.sma200_watch_pct <= 25:
+        p.append("momentum.sma200_watch_pct: above 0, at most 25 (MO-27)")
+    ev = cfg.events                                                     # EV-8
+    if not (1 <= ev.pre_sessions <= 60 and 1 <= ev.post_sessions <= 60 and ev.min_years >= 3
+            and 0.5 < ev.min_hit <= 1 and 0 < ev.max_p < 1 and ev.min_move_pct >= 0
+            and 1 <= ev.lookahead_days <= 400):
+        p.append("events: pre/post_sessions 1-60, min_years >= 3, min_hit 0.5-1, max_p 0-1, "
+                 "min_move_pct >= 0, lookahead_days 1-400 (EV-8)")
     from trader.scanner.techniques import technique_names
     known = set(technique_names())
     for name in sc.disabled:

@@ -541,7 +541,7 @@ def create_app(
         from trader.console import momentum as mp
 
         return await html(req, ses, "Momentum", mp.page(data.momentum(), data.momentum_eval(),
-                                                        ses.csrf))
+                                                        ses.csrf, data.events()))
 
     @page
     async def catalysts(req: Request, ses: Session) -> Response:

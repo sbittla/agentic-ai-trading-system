@@ -269,6 +269,9 @@ class TradingEngine:
                         until=time(23, 59), retry_min=10)                        # MO-15
                 sch.add("momentum_eval", time(19, 0), self.job_momentum_eval,
                         when="sunday", until=time(23, 59))                       # MO-11..14
+            if self.cfg.events.enabled:                                         # A20
+                sch.add("events_close", time(17, 5), self.job_events,
+                        until=time(23, 59))                                      # EV-7
             # after the 4:30-5:30 reports: free the GPU and ~3 GB RAM overnight; QW-4 reloads
             # the model at 8:55 and the news service loads it on its first call from 7:15
             sch.add("llm_unload", LLM_UNLOAD_AT, self._unload_llm, when="daily",
@@ -982,6 +985,23 @@ class TradingEngine:
         if proc.returncode:
             log.warning("momentum_eval_failed", code=proc.returncode,
                         error=err.decode(errors="replace")[-400:])
+        return True
+
+    async def job_events(self, now: datetime) -> bool:
+        """EV-7: refresh the company-event report after the momentum job has topped up the
+        bars; with ``events.telegram``, send the ideas whose window opens next session."""
+        from trader.events.agent import EventsAgent, render
+
+        load = self.momentum_agent().load
+        try:
+            payload = await EventsAgent(self.cfg, load, self.now, cal=self.cal).run()
+        except Exception as exc:   # noqa: BLE001 - a bad calendar entry must not stop the day
+            log.warning("events_failed", error=str(exc))
+            return True
+        nxt = self.cal.next_trading_day(et_date(now)).isoformat()
+        due = [i for i in payload.get("ideas") or [] if i["enter"] == nxt and i["side"] == "buy"]
+        if self.cfg.events.telegram and due:
+            await self.say(render({**payload, "ideas": due}), kind="events")
         return True
 
     async def job_catalyst_grade(self, now: datetime) -> bool:
