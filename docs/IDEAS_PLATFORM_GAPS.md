@@ -62,13 +62,6 @@ Non-functional requirements: NFR-003 (secrets), NFR-005 (determinism), NFR-006 (
 
 `./run.sh restart` rebuilds the images and runs `trader migrate`, which creates `event_ideas` in the deployed database.
 
-## 5. Suggested order for the rest
+## 5. Order of work
 
-The full requirements, including the trade lifecycle, stop-loss alerts and analysis gaps, are in [RELIABILITY_REQUIREMENTS.md](RELIABILITY_REQUIREMENTS.md).
-
-
-1. **One ledger and one outcome contract** (G-01, G-03, FR-001, FR-002): a `signals` table that every module writes, holding candidates, rejections with reasons, alerts and outcomes, each graded by its declared contract.
-2. **Frozen holdout and hysteresis** (G-08, X-4).
-3. **Cross-module de-duplication and conflicts** (G-15, X-2): one idea per ticker per day, with the modules that agree and disagree.
-4. **After-tax, total-return and your-fill reporting** (X-6, X-7).
-5. **Calendar expiry warnings** (X-5) and forward paper criteria for the advisory streams (G-10).
+Every open item above is mapped to an epic in [BACKLOG.md](BACKLOG.md) §5, the single order of work. The requirements are in [RELIABILITY_REQUIREMENTS.md](RELIABILITY_REQUIREMENTS.md) and [EDGE_PORTFOLIO_REQUIREMENTS.md](EDGE_PORTFOLIO_REQUIREMENTS.md).

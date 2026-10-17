@@ -29,6 +29,9 @@ gantt
 
 ## Milestones
 
+From October 17, 2026, the remaining work, including M8 (backlog B10) and M9 (B18), is ordered in [BACKLOG.md](BACKLOG.md).
+
+
 ### M0 — Repository and tooling (1 week)
 
 - [ ] Python package skeleton under `src/trader/` per ARCHITECTURE.md §2

@@ -1,0 +1,50 @@
+# Threshold registry (CA-1, docs/EDGE_PORTFOLIO_REQUIREMENTS.md §5).
+#
+# Every numeric threshold of a planned requirement, with its status:
+#   policy      the owner's preference: decided, not calibrated (loss limits, risk, attention)
+#   initial     a reasonable starting value, to be calibrated on in-sample or paper data (CA-2),
+#               never on the frozen holdout (RL-5), and checked at -25%/+25% (CA-3)
+#   calibrated  changed or confirmed with evidence (cite the report)
+# Seeded October 17, 2026 from the CA-5 table. Code wiring (reading these instead of literals)
+# and the test that every requirement's threshold is listed are backlog B02. Thresholds of
+# built features stay in config.py and are added here as B02 migrates them.
+
+thresholds:
+  - {id: gate_hysteresis, value: 1.15, unit: "x gate bar, 2 grades", used_by: RL-5, type: statistical, status: initial}
+  - {id: holdout_months, value: 12, unit: months, used_by: RL-5, type: statistical, status: initial}
+  - {id: demotion_window, value: 30, unit: forward signals, used_by: RL-6, type: statistical, status: initial}
+  - {id: demotion_upper_r, value: 0.1, unit: R (upper end of interval), used_by: RL-6, type: statistical, status: initial}
+  - {id: grade_size_factors, value: {A: 1.0, B: 0.75, C: 0.5}, unit: x base risk, used_by: DC-2, type: policy, status: initial}
+  - {id: kelly_fraction_cap, value: 0.25, unit: x shrunk Kelly, used_by: DC-2, type: policy, status: initial}
+  - {id: risk_floor_pct, value: 0.25, unit: "% of equity", used_by: DC-2, type: policy, status: initial}
+  - {id: dsr_bar_a, value: 0.95, unit: probability, used_by: OV-6, type: statistical, status: initial}
+  - {id: dsr_bar_b, value: 0.90, unit: probability, used_by: OV-6, type: statistical, status: initial}
+  - {id: pbo_max, value: 0.20, unit: probability, used_by: OV-6, type: statistical, status: initial}
+  - {id: cscv_blocks, value: 16, unit: time blocks, used_by: OV-5, type: statistical, status: initial}
+  - {id: cscv_max_splits, value: 2000, unit: sampled splits, used_by: OV-5, type: statistical, status: initial}
+  - {id: new_feature_t, value: 3.0, unit: Newey-West t of IC, used_by: ER-7, type: statistical, status: initial}
+  - {id: embargo_sessions, value: 5, unit: sessions, used_by: ER-5, type: statistical, status: initial}
+  - {id: earnings_max_age_days, value: 4, unit: days, used_by: MO-18, type: policy, status: initial}
+  - {id: quote_age_orders_s, value: 2, unit: seconds, used_by: "IR-4, DQ-8", type: policy, status: initial}
+  - {id: quote_age_monitor_s, value: 120, unit: seconds, used_by: IR-4, type: policy, status: initial}
+  - {id: bars_final_by, value: "17:30", unit: ET, used_by: IR-4, type: policy, status: initial}
+  - {id: news_max_age_min, value: 30, unit: minutes in a window, used_by: IR-4, type: policy, status: initial}
+  - {id: p1_repeat_s, value: 60, unit: seconds, used_by: "IR-3, SL-4", type: policy, status: initial}
+  - {id: p1_latency_p95_s, value: 30, unit: seconds, used_by: IR-3, type: policy, status: initial}
+  - {id: p2_latency_p95_s, value: 300, unit: seconds, used_by: IR-3, type: policy, status: initial}
+  - {id: near_stop_note_r, value: -0.75, unit: R, used_by: SL-3, type: policy, status: initial}
+  - {id: cool_off_sessions, value: 2, unit: sessions, used_by: HU-3, type: policy, status: initial}
+  - {id: no_chase_r, value: 0.5, unit: R above trigger, used_by: "EN-1, MO-8", type: statistical, status: initial}
+  - {id: second_chance, value: {atr: 0.25, sessions: 3}, unit: ATR / sessions, used_by: EN-9, type: statistical, status: initial}
+  - {id: sleeve_vol_target, value: 0.15, unit: annualised, used_by: PC-2, type: policy, status: initial}
+  - {id: sleeve_dd_cut, value: 0.15, unit: drawdown, used_by: PC-6, type: statistical, status: initial}
+  - {id: no_trade_band, value: {sleeve: 0.02, target: 0.25}, unit: fractions, used_by: PC-4, type: statistical, status: initial}
+  - {id: sector_cap_sleeve, value: 0.30, unit: fraction of sleeve, used_by: PC-3, type: policy, status: initial}
+  - {id: sector_cap_risk, value: 0.40, unit: fraction of open risk, used_by: RL-14, type: policy, status: initial}
+  - {id: scan_min_price, value: 10, unit: USD, used_by: UB-1, type: policy, status: initial}
+  - {id: scan_min_dollar_volume, value: 50000000, unit: USD 20-session average, used_by: UB-1, type: policy, status: initial}
+  - {id: scan_max_symbols, value: 1500, unit: symbols, used_by: UB-2, type: policy, status: initial}
+  - {id: close_job_budget_min, value: 25, unit: minutes, used_by: UB-4, type: policy, status: initial}
+  - {id: postmortem_loss, value: {r: 2.0, equity_pct: 1.0}, unit: R / %, used_by: LN-14, type: policy, status: initial}
+  - {id: loss_cluster_min, value: 20, unit: trades, used_by: LN-8, type: statistical, status: initial}
+  - {id: llm_eval_after_cutoff_days, value: 30, unit: days, used_by: LM-3, type: policy, status: initial}

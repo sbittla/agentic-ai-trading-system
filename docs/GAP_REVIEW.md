@@ -4,7 +4,7 @@
 
 The earlier review ([REQUIREMENTS_REVIEW.md](REQUIREMENTS_REVIEW.md)) asked whether the requirements help a day trader at the moment of decision. This one asks a different question: **what would a prop-trading risk desk, or a careful trader running their own money, expect that the requirements still leave out?**
 
-A second review against the owner's *Trading Ideas Platform* supplement (October 17) is in [IDEAS_PLATFORM_GAPS.md](IDEAS_PLATFORM_GAPS.md).
+A second review against the owner's *Trading Ideas Platform* supplement (October 17) is in [IDEAS_PLATFORM_GAPS.md](IDEAS_PLATFORM_GAPS.md). Open items from both reviews are ordered in [BACKLOG.md](BACKLOG.md).
 
 ## Verdict
 

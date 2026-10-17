@@ -663,6 +663,59 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `UB-6` | Alert volume stays fixed. More candidates do not mean more alerts. RL-7 consolidates pe… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 | `UB-7` | Complete analysis for every scanned name: the sector map (TA-4), liquidity (TA-8) and t… | universe scan (trader-core) | Planned (RELIABILITY_REQUIREMENTS.md) | — |
 
+### Edge research, portfolio and spec quality (EDGE_PORTFOLIO_REQUIREMENTS.md)
+
+| `ER-1` | Preregistration. Before any test, a hypothesis is written to research_hypotheses. It ho… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-2` | Point-in-time feature store. Every feature value is stored with as_of (the session it w… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-3` | Candidate families with published evidence, tested first because they have survived aca… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-4` | Labels. The primary label is the forward 21-session return relative to the stock's sect… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-5` | Leak-free validation: purged, embargoed cross-validation (López de Prado, *Advances in… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-6` | Cross-sectional metrics. Per date: the rank information coefficient (Spearman, score ag… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-7` | A higher bar for new features. A new feature or family passes only with a Newey–West t-… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-8` | Model ladder. Each step must beat the one before on the frozen holdout, after costs, wi… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-9` | Stability checks. Feature importance and coefficient signs are reported per walk-forwar… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-10` | LLM text features, where an LLM can add value. From filings, guidance and earnings-call… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-11` | Ranking feeds the existing machinery. A model that passes produces a daily score per sy… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-12` | Time-box and kill rule. A hypothesis gets at most 2 weeks of work. One that fails its p… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-13` | Research log. reports/research.md is generated from research_hypotheses and trials. It… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `ER-14` | Reproducible runs. Each research run stores its data snapshot ids, feature versions, co… | edge research | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-1` | A target book, not a stream of alerts. Each sleeve (DC-6) turns its ranked ideas into t… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-2` | Risk-based sizing. Weights come from a volatility target for the sleeve, using an ex-an… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-3` | Constraints. No leverage (risk.max_leverage). Per-name caps by sleeve: 20% for rotation… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-4` | No-trade bands. A holding is traded only when its target differs from its current weigh… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-5` | Tax-aware selling in taxable accounts (TP-5). When a sale is discretionary, lots are ch… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-6` | Drawdown control by rule. When a sleeve's drawdown passes pc.dd_cut (initial 15%, CA),… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-7` | End-of-day order lists for owners who cannot trade intraday (TP-2): limit or market-on-… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-8` | Portfolio backtest with the same code, after costs (RL-12) and tax (RL-11), against the… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-9` | Fractional shares where the broker supports them, so small accounts can hold the target… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `PC-10` | One risk view across sleeves. The engine's trades, the advisory sleeves and the owner's… | portfolio construction | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-1` | A versioned profile (profile: in config): capital, account type (cash, margin, IRA), br… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-2` | Alerts fit the schedule. An alert type the owner cannot act on in time is not sent as a… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-3` | Drawdown tolerance sets size. Volatility targets (PC-2) and per-trade risk (DC-2) are s… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-4` | Attention budget. At most profile.max_alerts_per_day action alerts (P2) and profile.max… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-5` | Account rules. In an IRA, tax logic (PC-5, RL-11) is off and wash-sale logic follows th… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-6` | Onboarding questions (trader profile-setup) fill TP-1 and show the consequences before… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `TP-7` | Profile advice from behaviour. From HU-2 adherence data, the system may *suggest* a pro… | trader profile | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-1` | Data inventory in DATA_SPEC: every source with its content, point-in-time quality, cove… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-2` | Decision record for a paid point-in-time dataset (an owner decision, BACKLOG D-04). Cri… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-3` | available_at on everything stored: bars (session end), news (received_at), filings (EDG… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-4` | Total-return series derived from dividend and corporate-action records, alongside split… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-5` | Licence compliance. Each source's use is limited to its licence: personal research, no… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-6` | Quality checks on every ingest: missing sessions, duplicates, outliers beyond 10 standa… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-7` | Raw vendor files kept (immutable, with checksums) for 7 years or the licence's limit, a… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `DA-8` | Grade cap until point-in-time data exists. While results rest on survivorship-biased da… | data plan | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `CA-1` | Threshold registry (config/thresholds.yaml): every numeric threshold in a requirement.… | threshold calibration | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `CA-2` | Policy against statistics. *Policy* thresholds express the owner's preferences and are… | threshold calibration | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `CA-3` | Sensitivity on every gate. Each gate and grade decision is recomputed with every statis… | threshold calibration | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `CA-4` | Quarterly review. initial thresholds become calibrated (with the evidence) or are confi… | threshold calibration | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `CA-5` | The initial thresholds in the planned specs, all initial until reviewed (table below). | threshold calibration | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `SQ-1` | Definition of ready. A requirement may be built when it has an ID, a priority, an ownin… | spec quality (tools) | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `SQ-2` | Definition of done. The code is built. Tests are marked @pytest.mark.rule("<ID>"). The… | spec quality (tools) | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `SQ-3` | One order of work. [BACKLOG.md](BACKLOG.md) is the only place that orders work. Require… | spec quality (tools) | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+| `SQ-4` | Two-way traceability, enforced. tools/check_traceability.py also fails when an ID defin… | spec quality (tools) | unit/test_traceability_tool.py | — |
+| `SQ-5` | Every planned item maps to a backlog epic. A check lists planned IDs that no epic refer… | spec quality (tools) | unit/test_traceability_tool.py | — |
+| `SQ-6` | Measured, not asserted. A requirement that claims an effect (for example "reduces turno… | spec quality (tools) | Planned (EDGE_PORTFOLIO_REQUIREMENTS.md) | — |
+
 ## How to use
 
 - Mark each test: `@pytest.mark.rule("CK-6")`. One test can cover several IDs; every ID needs at least one test.

@@ -1,6 +1,6 @@
 # Reliability, Trade Lifecycle and Analysis Requirements
 
-**Version:** 0.1 (October 17, 2026) · Status: **specified, not built** (every ID is `Planned` in [TRACEABILITY.md](TRACEABILITY.md)) · Follows [IDEAS_PLATFORM_GAPS.md](IDEAS_PLATFORM_GAPS.md) and [GAP_REVIEW.md](GAP_REVIEW.md)
+**Version:** 0.1 (October 17, 2026) · Status: **specified, not built** (every ID is `Planned` in [TRACEABILITY.md](TRACEABILITY.md)) · Follows [IDEAS_PLATFORM_GAPS.md](IDEAS_PLATFORM_GAPS.md) and [GAP_REVIEW.md](GAP_REVIEW.md) · Build order: [BACKLOG.md](BACKLOG.md) · Companion: [EDGE_PORTFOLIO_REQUIREMENTS.md](EDGE_PORTFOLIO_REQUIREMENTS.md)
 
 This document specifies what the system needs to become a **reliable and consistent** trade alert system. It covers four areas, all equally important:
 
@@ -454,16 +454,6 @@ Selecting the best of many backtested variants guarantees a good-looking winner 
 
 ## 14. Order of work
 
-| Phase | Requirements | Why first |
-| --- | --- | --- |
-| 1. Protect money already at risk | SL-1..SL-13, IR-3, IR-6, FM-24..FM-34, LC-1..LC-3, RL-10 | Stops and reconciliation on the owner's real positions matter more than better entries |
-| 2. Follow every trade end to end | EN-1..EN-8, RD-1..RD-4, HU-1..HU-2, RL-1, RL-2 | One lifecycle and one ledger for every source |
-| 2b. Make the record provable | PR-1..PR-4, PR-6, then PR-5, PR-7, PR-8 | Built with the ledger (RL-1): the chain must exist before the first alert it is meant to prove |
-| 3. Make it run unattended | IR-1, IR-2, IR-4, IR-5, IR-7..IR-10 | Missed jobs are missed alerts |
-| 4. Earn the right to alert | RL-3..RL-7, RL-9, RL-11, RL-12, DC-1..DC-3, DC-5..DC-7, then DC-4, DC-8 | Forward proof, a frozen holdout, one idea per ticker, and a grade and size that follow the evidence |
-| 4b. Count every trial | OV-1..OV-6, LM-1..LM-3, LM-5, LM-7, then OV-7..OV-9, LM-4, LM-6 | With phase 4: the grades (DC-1) depend on DSR and PBO, and on post-cutoff LLM evidence |
-| 5. See the whole stock | TA-19, TA-8, TA-9, then TA-1, TA-2, TA-4..TA-7, TA-13..TA-15, then the P2 rows | Coverage and the critical components first |
-| 6. Learn from every outcome | LN-1..LN-7, LN-13, LN-14 first, then LN-8..LN-12, LN-17, then the P2 rows | Needs the ledger (phase 2) and the event tags; attribution before any rule changes |
-| 7. Broaden the edge | RL-13, RL-14, RL-15, EN-9..EN-12, RD-5..RD-10, UB-1..UB-7 | New uncorrelated strategies and a wider universe, through the same gates (UB-5 needs OV) |
+The build order, with dependencies, acceptance checks and the minimum reliable system, is in [BACKLOG.md](BACKLOG.md) (epics B01–B19). The phases first sketched here are merged into it.
 
 **Definition of done for "reliable":** twelve months of forward results in which every alert, entry, stop and exit is in the ledger. The owner's fills track the plan within the measured slippage. Every alerting stream is `limited` or `full` with its RL-3 criteria met. No P1 went unacknowledged. No scheduled job was missed without a P1. Every closed trade has a cause class. Technical errors and human deviations together cost under 10% of gross R. Every adopted rule change came through LN-9. `verify-ledger` passes over the whole year against the external anchors. Every alerting stream has PBO ≤ 0.20 and DSR at its grade's bar. The after-tax result beats the total-return benchmark it was promoted against.
