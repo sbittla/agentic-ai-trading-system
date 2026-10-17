@@ -43,6 +43,8 @@ Start with **REQUIREMENTS.md**, then read in the order below. Requirement IDs (f
 | [HARDWARE.md](HARDWARE.md) | System requirements, the reference machine it is set up and tested on, and choosing the Qwen model for your GPU |
 | [ALERTS.md](ALERTS.md) | Standalone lightweight Telegram price alerts (`trader alerts`): setup, alerts, commands |
 | [TRADING_DECISIONS.md](TRADING_DECISIONS.md) | Every trading decision (context, setup, size, exits, discipline), the rule that makes it, and where the console shows it |
+| [MOMENTUM_REQUIREMENTS.md](MOMENTUM_REQUIREMENTS.md) | Momentum A19 (`./run.sh momentum`): leaders, RS rating, trend template; 7 setups with buy-stop and sell alerts; exit policies; the rotation model; walk-forward results against SPY and equal weight |
+| [MACRO_FORECAST_REQUIREMENTS.md](MACRO_FORECAST_REQUIREMENTS.md) | Macro agent (`./run.sh macro`): FRED data, Fed and economy news, daily regime; graded forecasts (volatility, gaps, macro days, sectors); accumulation/distribution, base breakout, distribution days |
 | [NEWS_CATALYST_REQUIREMENTS.md](NEWS_CATALYST_REQUIREMENTS.md) | News catalysts (`./run.sh catalyst`): strength, a 1-day to 1-month outlook with ranges, social sentiment, confluence and a position view; models chosen and why; walk-forward grading |
 | [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md) | Technical scanner (`./run.sh scan`): why a TA-Lib-identical engine and not an LLM, the technique catalog, score, walk-forward grading, measured results |
 | [ACCOUNT_SETUP.md](ACCOUNT_SETUP.md) | Step by step: Docker + NVIDIA GPU, Alpaca, Finnhub, SEC EDGAR, Reddit, Telegram/WhatsApp, Postgres names and passwords, env files, first start, connection checks |

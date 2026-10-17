@@ -16,6 +16,10 @@ A disciplined, agent-based day and swing trading system for a fixed list of 10 l
 
 **News catalysts:** `./run.sh catalyst [TICKER]` scores how strong a stock's news is (0-100), gives P(up), the typical move and a 10-90% range for 1 day, 1 week, 2 weeks and 1 month, reads social sentiment next to the news, checks technicals, options, analysts, earnings, insiders and short volume, and suggests a view (stock, call or put spread, or no trade) sized by the risk rules. Run `./run.sh backfill-catalysts 365` once so the ranges are measured on a year of past events; outlooks say UNCALIBRATED until the walk-forward record earns the label. See [docs/NEWS_CATALYST_REQUIREMENTS.md](docs/NEWS_CATALYST_REQUIREMENTS.md).
 
+**Momentum:** `./run.sh momentum-history` once (10 years of SIP daily bars for about 110 liquid stocks), then `./run.sh momentum-eval` grades every setup, exit policy and the rotation model walk-forward. `./run.sh momentum` shows the leaders, the next session's buy-stops (trigger, stop, shares, partial target, trail and time stop) and the rotation model's holdings. trader-core sends buy-stops, fills, stop hits, partials, trend breaks and rebalances to Telegram, but only for what passed the walk-forward gate. See [docs/MOMENTUM_REQUIREMENTS.md](docs/MOMENTUM_REQUIREMENTS.md).
+
+**Macro and forecasts:** `./run.sh macro` gives the daily macro regime (risk-on, neutral, risk-off) from free FRED data (yield curve, credit spreads, VIX, Sahm rule, inflation trend, dollar, oil, market trend), the latest releases and Fed and economy headlines. `./run.sh forecast` gives each stock's usual 1-day and 5-day move, gap fill odds, its typical move on FOMC/CPI/jobs days and its sector's rank; `./run.sh forecast-eval` grades them. Run `./run.sh macro-backfill` once. See [docs/MACRO_FORECAST_REQUIREMENTS.md](docs/MACRO_FORECAST_REQUIREMENTS.md).
+
 **Just want day-trading price alerts on Telegram?** Run the standalone alerts bot: one ~50 MB
 container, no GPU, LLM or database. See [docs/ALERTS.md](docs/ALERTS.md):
 `./run.sh alerts`
@@ -26,7 +30,7 @@ Start with [docs/README.md](docs/README.md). The source of truth is [docs/REQUIR
 
 ## Key documents
 
-- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Technical scanner](docs/SCANNER_REQUIREMENTS.md) · [News catalysts](docs/NEWS_CATALYST_REQUIREMENTS.md) · [Gap review](docs/GAP_REVIEW.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
+- [Requirements](docs/REQUIREMENTS.md) · [Strategy spec](docs/STRATEGY_SPEC.md) · [Technical scanner](docs/SCANNER_REQUIREMENTS.md) · [News catalysts](docs/NEWS_CATALYST_REQUIREMENTS.md) · [Macro and forecasts](docs/MACRO_FORECAST_REQUIREMENTS.md) · [Momentum](docs/MOMENTUM_REQUIREMENTS.md) · [Gap review](docs/GAP_REVIEW.md) · [Architecture](docs/ARCHITECTURE.md) · [Implementation plan](docs/IMPLEMENTATION_PLAN.md) · [Runbook](docs/RUNBOOK.md) · [Account setup](docs/ACCOUNT_SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Build status](docs/BUILD_STATUS.md)
 
 ## Status
 

@@ -139,18 +139,30 @@ def alert_gate(ms: dict[int, dict[str, Any]], min_graded: int,
     return {"pass": bool(per) and all(v["pass"] for v in per.values()), "horizons": per}
 
 
+NO_TILT_K = 1e12    # shrinkage so strong the mean is zero: the volatility range alone
+
+
 def evaluate(obs: Sequence[EventObs], horizons: Sequence[int], *, k: float = 30,
              stance_p: float = 0.56, min_graded: int = 100,
              coverage: tuple[float, float] = (0.75, 0.85)) -> dict[str, Any]:
     kept, detail = feature_gate(obs, horizons, k, stance_p)
     graded = walk_forward(obs, horizons, k=k, adjustments=kept, stance_p=stance_p)
     ms = {h: metrics(v) for h, v in graded.items()}
+    # NC-49 tilt gate: the measured tilt must beat no tilt at all, or it is switched off
+    flat = {h: metrics(v) for h, v in walk_forward(obs, horizons, k=NO_TILT_K,
+                                                   stance_p=stance_p).items()}
+    tilt_brier, flat_brier = _score(ms)[0], _score(flat)[0]
+    tilt = tilt_brier < flat_brier
+    if not tilt:
+        kept, ms = [], flat
+    detail["tilt"] = {"with_tilt_brier": round(tilt_brier, 4),
+                      "no_tilt_brier": round(flat_brier, 4), "kept": tilt}
     gate = alert_gate(ms, min_graded, coverage)
     tickers = sorted({o.ticker for o in obs})
     return {"events": len(obs), "tickers": len(tickers),
             "from": min((o.d0 for o in obs), default=None),
             "to": max((o.d0 for o in obs), default=None),
             "horizons": {str(h): m for h, m in ms.items()},
-            "adjustments": kept, "feature_gate": detail, "gate": gate,
+            "tilt": tilt, "adjustments": kept, "feature_gate": detail, "gate": gate,
             "note": ("Outlooks are graded walk-forward; overlapping horizons on the same "
                      "ticker are not independent, so treat the counts as optimistic.")}

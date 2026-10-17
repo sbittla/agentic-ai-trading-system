@@ -188,6 +188,16 @@ def regime(spy: Series | None, sector: Series | None, d_index_spy: int | None,
     return out
 
 
+def macro_regime(reg: Mapping[str, Any] | None, direction: str) -> list[Check]:
+    """MA-7: the A18 macro regime next to the news."""
+    if not reg or not reg.get("label"):
+        return []
+    lab = str(reg["label"])
+    sign = 1 if lab == "RISK_ON" else -1 if lab == "RISK_OFF" else 0
+    return [_c("Regime", "Macro regime", lab, _v(sign, direction),
+               f"score {float(reg.get('score') or 0):+.0f} on {reg.get('date')}")]
+
+
 def tally(checks: Sequence[Check]) -> dict[str, int]:
     return {k: sum(1 for c in checks if c["verdict"] == k)
             for k in ("supports", "against", "neutral")}

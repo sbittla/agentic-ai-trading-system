@@ -138,6 +138,11 @@ catalyst:                         # NEWS_CATALYST_REQUIREMENTS.md (advisory, A17
   telegram: false                 # NC-28: also needs the walk-forward gate (NC-34)
   history_universe: extended      # universe + the 40 large caps in news/names.py
 
+macro:                            # MACRO_FORECAST_REQUIREMENTS.md (A18, advisory)
+  enabled: true
+  risk_on_at: 25                  # MA-6
+  risk_off_at: -25
+
 services:                         # ADR-010
   heartbeat_sec: 30
   news_stale_after_min: 5
@@ -176,3 +181,41 @@ scanner:                           # docs/SCANNER_REQUIREMENTS.md (advisory: ide
   eval_file: reports/scanner_eval.json   # written by `trader scan-eval`, read by the scan
   alert_after_close: true          # trader-core sends the scan to Telegram at 16:20 ET
   latest_file: reports/technical_scan.json   # newest scan, for the console's Technical scan page
+
+momentum:                          # docs/MOMENTUM_REQUIREMENTS.md (A19, advisory: alerts, no orders)
+  enabled: true
+  telegram: true                   # MO-14: buy-stops only for gated setups; every exit of an alerted signal
+  alert_unproven: false
+  feed: sip                        # MO-22: consolidated history (free when 15+ minutes old)
+  history_days: 3700               # momentum-history: about 10 years
+  min_price: 10
+  min_dollar_volume: 50000000      # 20-session average
+  rank_factors: [r12_1, clenow, high52, resid]   # leaderboard fallback before momentum-eval
+  min_rs: 80                       # leader filter (MO-7)
+  min_template: 7
+  disabled: []
+  setup_policy: {}                 # e.g. {DONCHIAN_55: sma50}; defaults in MOMENTUM_REQUIREMENTS §6
+  partial_frac: 0.3333             # MO-9
+  partial_r: 2.0
+  partial_days: 5
+  climax_atr: 7.0
+  climax_frac: 0.5
+  time_stop_days: 10
+  max_hold_days: 250
+  max_loss_pct: 8.0
+  cost_bps: 10
+  max_positions: 8                 # MO-17
+  max_heat_pct: 6.0
+  max_correlated: 2
+  top_n: 10                        # MO-13 rotation model
+  hold_rank: 20
+  rebalance_weeks: 2
+  rotation: true
+  rotation_factors: []             # [] = the eval's in-sample choice
+  rotation_max_weight: 0.2
+  min_trades: 30                   # MO-14 gate
+  min_pf: 1.2
+  earnings_block_sessions: 3
+  intraday_every_min: 5
+  eval_file: reports/momentum_eval.json
+  latest_file: reports/momentum.json

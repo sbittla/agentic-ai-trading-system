@@ -549,7 +549,8 @@ def cmd_fetch_history(a: argparse.Namespace) -> int:
 
         syms = dict.fromkeys([*cfg.universe.tickers, *cfg.universe.context_symbols,
                               *cfg.scanner.symbols, *extended_tickers(cfg),
-                              *set(SECTOR.values())])   # NC-30: event-study history
+                              *set(SECTOR.values()),    # NC-30: event-study history
+                              *cfg.forecast.sector_etfs])   # FC-5
         for sym in syms:
             daily = await hist.daily_bars(sym, end - timedelta(days=a.days), end)
             store.write("daily", sym, daily)
@@ -796,6 +797,9 @@ def cmd_catalyst_eval(a: argparse.Namespace) -> int:
                   f"{m['coverage']:.0%}")
         else:
             print(f"  {h:>2} sessions: not enough history to grade yet")
+    t = res["feature_gate"]["tilt"]
+    print(f"news tilt (NC-49): {'kept' if t['kept'] else 'OFF'} (Brier with tilt "
+          f"{t['with_tilt_brier']}, without {t['no_tilt_brier']})")
     print(f"adjustments kept (NC-33): {', '.join(res['adjustments']) or 'none'}")
     print(f"alert gate (NC-34): {'PASS' if res['gate']['pass'] else 'not passed'}")
     print(f"wrote {cfg.catalyst.eval_file}")
@@ -848,6 +852,206 @@ def cmd_backfill_catalysts(a: argparse.Namespace) -> int:
             print(f"  {name}: {err}")
         if feed.off:
             print(f"  not on this plan (skipped): {', '.join(sorted(feed.off))}")
+    return 0
+
+
+def _bar_loader(cfg: config_mod.Config) -> Any:
+    """Bar store first, Alpaca for what it lacks (catalyst, macro and forecast commands)."""
+    from trader.catalyst.agent import combined_loader, history_loader, parquet_loader
+    from trader.data.store import resolve_bars_path
+
+    fallback = None
+    key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get("ALPACA_PAPER_SECRET")
+    if key and secret:
+        from trader.data.alpaca_data import AlpacaHistory
+
+        fallback = history_loader(AlpacaHistory(key, secret, feed=cfg.data.alpaca_feed))
+    return combined_loader(parquet_loader(resolve_bars_path(cfg.storage.bars_path)), fallback)
+
+
+def _macro_calendar(a: argparse.Namespace, cfg: config_mod.Config) -> Any:
+    from trader.calendar import MacroCalendar
+
+    base = Path(a.config or os.environ.get("TRADER_CONFIG") or "config/config.yaml"
+                ).resolve().parent.parent
+    try:
+        return MacroCalendar.load(base / cfg.windows.macro_calendar_file)
+    except Exception:   # noqa: BLE001
+        return None
+
+
+def cmd_macro(a: argparse.Namespace) -> int:
+    """MA-8 / MA-9: today's macro regime, releases and headlines (trader-core container)."""
+    from trader.macro.agent import MacroAgent, render
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = MacroAgent(cfg, _journal(create=False), _bar_loader(cfg), lambda: datetime.now(UTC))
+    if a.eval:
+        print(json.dumps(asyncio.run(agent.evaluate()), indent=1, default=str))
+        return 0
+    payload = asyncio.run(agent.run(date.fromisoformat(a.date) if a.date else None,
+                                    write=not a.no_write and not a.date))
+    if a.json:
+        print(json.dumps(payload, indent=1, default=str))
+        return 0
+    text = render(payload)
+    print(text)
+    if a.telegram:
+        ok = _send_text(text, "macro")
+        print("sent to Telegram" if ok else "Telegram send failed")
+        return 0 if ok else 1
+    return 0
+
+
+def cmd_macro_collect(a: argparse.Namespace) -> int:
+    """MA-2 / MA-4: FRED series and macro headlines into the journal (news container)."""
+    from trader.agents.a03_news import make_scorer
+    from trader.macro.agent import collect
+    from trader.macro.sources import MacroFeeds
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    feeds = MacroFeeds(os.environ.get("FINNHUB_TOKEN"),
+                       os.environ.get("SEC_USER_AGENT") or cfg.data.sec_user_agent)
+    got = asyncio.run(collect(_journal(create=False), feeds, cfg.macro.series, make_scorer(),
+                              history=a.history, categories=cfg.macro.news_categories))
+    print("stored: " + ", ".join(f"{k} {v}" for k, v in got.items()))
+    for k, v in feeds.errors.items():
+        print(f"  {k}: {v}")
+    return 0
+
+
+def cmd_forecast(a: argparse.Namespace) -> int:
+    """FC-6: volatility range, gap odds, macro-day reactions and sector ranks."""
+    from trader.forecast.agent import ForecastAgent, render
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = ForecastAgent(cfg, _bar_loader(cfg), _macro_calendar(a, cfg),
+                          lambda: datetime.now(UTC))
+    tks = [a.ticker.upper()] if a.ticker else None
+    if a.eval:
+        res = asyncio.run(agent.evaluate(tks))
+        for t, v in res["volatility"].items():
+            est = v["estimators"]
+            print(f"{t}: best {v['best']} · " + ", ".join(
+                f"{m} QLIKE {e['qlike']} cover {e['coverage_80']}" for m, e in est.items()
+                if e["qlike"] is not None))
+        rot = res["rotation"]
+        if rot.get("months"):
+            print(f"sector rotation: top 3 minus bottom 3 {rot['avg_top_minus_bottom_pct']:+.2f}%"
+                  f" a month over {rot['months']} months, hit rate {rot['hit_rate']:.0%}, "
+                  f"t {rot['t_stat']}")
+        print(f"wrote {cfg.forecast.eval_file}")
+        return 0
+    payload = asyncio.run(agent.run(tks, write=not a.no_write and tks is None))
+    if a.json:
+        print(json.dumps(payload, indent=1, default=str))
+        return 0
+    print(render(payload, tks[0] if tks else None))
+    return 0
+
+
+def _momentum_agent(a: argparse.Namespace, cfg: config_mod.Config, *, fetch: bool = True
+                    ) -> Any:
+    """A19 with the SIP store (topped up from Alpaca when keys are set) and, in trader-core's
+    container, the journal for the tracker."""
+    from trader.data.store import resolve_bars_path
+    from trader.momentum.agent import MomentumAgent, refresh_loader, store_loader
+    from trader.scanner.checks import simple_sizer
+
+    root = resolve_bars_path(cfg.storage.bars_path)
+    load = store_loader(root)
+    key, secret = os.environ.get("ALPACA_PAPER_KEY"), os.environ.get("ALPACA_PAPER_SECRET")
+    if fetch and key and secret:
+        from trader.data.alpaca_data import AlpacaHistory
+
+        load = refresh_loader(root, AlpacaHistory(key, secret, feed=cfg.momentum.feed),
+                              lambda: datetime.now(UTC))
+    equity = getattr(a, "equity", None)
+    sizer = simple_sizer(equity, cfg.momentum.risk_pct or cfg.risk.risk_per_trade_pct,
+                         cfg.risk.max_position_pct, cfg.risk.max_leverage) if equity else None
+    db = _journal(create=False) if os.environ.get("DATABASE_URL") else None
+    journal = db
+    label = None
+    if db is not None:
+        from trader.macro.agent import latest_label
+
+        try:
+            label = (latest_label(db, date.today()) or {}).get("label")
+        except Exception:   # noqa: BLE001 - the regime then ignores the macro view
+            label = None
+    return MomentumAgent(cfg, journal, load, lambda: datetime.now(UTC), sizer=sizer,
+                         equity=equity, macro_label=label)
+
+
+def cmd_momentum_history(a: argparse.Namespace) -> int:
+    """MO-22: SIP daily bars for momentum.universe + SPY into the bar store (kind daily_sip)."""
+    from trader.data.alpaca_data import AlpacaHistory
+    from trader.data.store import BarStore, resolve_bars_path
+
+    cfg = _cfg(a.config)
+    hist = AlpacaHistory(os.environ["ALPACA_PAPER_KEY"], os.environ["ALPACA_PAPER_SECRET"],
+                         feed=cfg.momentum.feed)
+    store = BarStore(resolve_bars_path(cfg.storage.bars_path))
+    end = datetime.now(UTC) - timedelta(minutes=16)
+    start = date.today() - timedelta(days=a.days or cfg.momentum.history_days)
+    syms = list(dict.fromkeys([*cfg.momentum.universe, *cfg.universe.tickers, "SPY"]))
+
+    async def go() -> int:
+        bad = 0
+        for sym in syms:
+            try:
+                bars = await hist.daily_bars_until(sym, start, end)
+            except Exception as exc:   # noqa: BLE001
+                print(f"{sym}: failed ({exc})")
+                bad += 1
+                continue
+            store.write("daily_sip", sym, bars)
+            print(f"{sym}: {len(bars)} daily bars"
+                  + (f" from {bars[0].ts.date()}" if bars else ""))
+        return bad
+    bad = asyncio.run(go())
+    print(f"{len(syms) - bad} of {len(syms)} symbols stored (kind daily_sip)")
+    return 0 if bad < len(syms) else 1
+
+
+def cmd_momentum(a: argparse.Namespace) -> int:
+    """MO-20: leaderboard, buy-stops and (with the journal) the tracked signals."""
+    from trader.momentum.agent import render
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = _momentum_agent(a, cfg)
+    asof = date.fromisoformat(a.date) if a.date else None
+    payload = asyncio.run(agent.run(asof, write=not a.no_write and asof is None,
+                                    track=a.track and asof is None))
+    if a.json:
+        print(json.dumps(payload, indent=1, default=str))
+        return 0
+    text = render(payload, show_unproven=a.all or cfg.momentum.alert_unproven)
+    print(text)
+    if a.telegram:
+        ok = _send_text(text, "momentum")
+        print("sent to Telegram" if ok else "Telegram send failed")
+        return 0 if ok else 1
+    return 0
+
+
+def cmd_momentum_eval(a: argparse.Namespace) -> int:
+    """MO-11..MO-13: walk-forward grading; writes momentum.eval_file (the alert gate)."""
+    from trader.momentum.report import eval_text
+
+    configure_logging(os.environ.get("LOG_LEVEL", "WARNING"), json_logs=False)
+    cfg = _cfg(a.config)
+    agent = _momentum_agent(a, cfg, fetch=False)
+    res = asyncio.run(agent.evaluate(date.fromisoformat(a.start) if a.start else None,
+                                     date.fromisoformat(a.end) if a.end else None,
+                                     write=not a.no_write))
+    print(eval_text(res))
+    if not a.no_write:
+        print(f"wrote {cfg.momentum.eval_file}")
     return 0
 
 
@@ -1351,6 +1555,40 @@ def build_parser() -> argparse.ArgumentParser:
     cb.add_argument("--days", type=int, default=365)
     cb.add_argument("--skip-fundamentals", action="store_true")
     cb.set_defaults(fn=cmd_backfill_catalysts)
+    mc = sub.add_parser("macro", help="macro regime, releases and headlines (MA-8)")
+    mc.add_argument("--date", help="regime as of this day (no write)")
+    mc.add_argument("--json", action="store_true")
+    mc.add_argument("--telegram", action="store_true")
+    mc.add_argument("--eval", action="store_true", help="what followed each label (MA-9)")
+    mc.add_argument("--no-write", action="store_true")
+    mc.set_defaults(fn=cmd_macro)
+    mk = sub.add_parser("macro-collect", help="FRED series + macro news (news container)")
+    mk.add_argument("--history", action="store_true", help="full history of every series")
+    mk.set_defaults(fn=cmd_macro_collect)
+    fc = sub.add_parser("forecast", help="volatility, gaps, macro days, sectors (FC-6)")
+    fc.add_argument("ticker", nargs="?")
+    fc.add_argument("--json", action="store_true")
+    fc.add_argument("--eval", action="store_true", help="walk-forward grading (FC-2, FC-5)")
+    fc.add_argument("--no-write", action="store_true")
+    fc.set_defaults(fn=cmd_forecast)
+    mo = sub.add_parser("momentum", help="momentum leaders, buy-stops, signals (MO-20)")
+    mo.add_argument("--date", help="as of this session (stored bars, no tracking)")
+    mo.add_argument("--json", action="store_true")
+    mo.add_argument("--telegram", action="store_true")
+    mo.add_argument("--equity", type=float, help="size the buy-stops for this equity ($)")
+    mo.add_argument("--all", action="store_true", help="also list unproven setups")
+    mo.add_argument("--track", action="store_true",
+                    help="update the journal's tracked signals (trader-core does this daily)")
+    mo.add_argument("--no-write", action="store_true")
+    mo.set_defaults(fn=cmd_momentum)
+    me = sub.add_parser("momentum-eval", help="walk-forward grading of momentum (MO-11..13)")
+    me.add_argument("--start")
+    me.add_argument("--end")
+    me.add_argument("--no-write", action="store_true")
+    me.set_defaults(fn=cmd_momentum_eval)
+    mh = sub.add_parser("momentum-history", help="SIP daily bars for momentum.universe")
+    mh.add_argument("--days", type=int, help="calendar days (default momentum.history_days)")
+    mh.set_defaults(fn=cmd_momentum_history)
     tc = sub.add_parser("telegram-chats", help="show chat ids that messaged the bot")
     tc.add_argument("--env-file", action="append")
     tc.set_defaults(fn=cmd_telegram_chats)

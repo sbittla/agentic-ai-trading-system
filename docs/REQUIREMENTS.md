@@ -19,6 +19,8 @@ Gaps against professional practice ([GAP_REVIEW.md](GAP_REVIEW.md)) are now requ
 - **Evidence:** Sharpe, Sortino, Calmar and SQN; SPY benchmark; bootstrap interval of the edge; Monte Carlo drawdown; a statistical go-live gate (PA-1..PA-3, SV-1..SV-3, §6.4).
 - **Governance:** a model inventory and a rule for adding models (MR-1, MR-2, GAP_REVIEW.md).
 - **News catalysts:** a new advisory agent A17 ([NEWS_CATALYST_REQUIREMENTS.md](NEWS_CATALYST_REQUIREMENTS.md)).
+- **Momentum:** agent A19. It provides a momentum leaderboard (RS rating, trend template, stage), seven published momentum setups with buy-stop alerts, and sell alerts to the exit (stop, partial, trail, climax, time stop). A rotation model of the 10 strongest stocks completes it. Everything is graded walk-forward on 10 years of SIP bars, and only what passes is alerted ([MOMENTUM_REQUIREMENTS.md](MOMENTUM_REQUIREMENTS.md)).
+- **Macro and forecasts:** a macro agent A18 (FRED data, Fed and economy news, daily regime), graded forecasts (volatility, gaps, macro-day reactions, sector rotation) and new technicals (accumulation/distribution, base breakout, distribution days) ([MACRO_FORECAST_REQUIREMENTS.md](MACRO_FORECAST_REQUIREMENTS.md)).
 
 ### What changed in 1.3
 

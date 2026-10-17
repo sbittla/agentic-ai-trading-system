@@ -127,6 +127,8 @@ class SqlJournal:
         for t in s.NEWS_WRITES:
             stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {news}")
             stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {news}")
+        for t in s.NEWS_UPDATES:
+            stmts.append(f"GRANT UPDATE ON {s.SCHEMA}.{t} TO {news}")
         for t in s.NOTIFIER_WRITES:
             stmts.append(f"GRANT INSERT, SELECT ON {s.SCHEMA}.{t} TO {notifier}")
             stmts.append(f"GRANT USAGE ON SEQUENCE {s.SCHEMA}.{t}_id_seq TO {notifier}")

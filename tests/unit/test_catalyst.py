@@ -339,6 +339,20 @@ def test_walk_forward_has_no_look_ahead_and_grades() -> None:
     assert again[:20] == rows[:20]
 
 
+@pytest.mark.rule("NC-49")
+def test_tilt_is_switched_off_when_it_does_not_beat_no_tilt() -> None:
+    noise = synthetic_events(250, 0.0, seed=21)          # no real tilt: pure noise
+    res = evaluate(noise, (5,), k=5, min_graded=50)       # weak shrinkage overfits
+    t = res["feature_gate"]["tilt"]
+    assert res["tilt"] is (t["with_tilt_brier"] < t["no_tilt_brier"])
+    real = synthetic_events(250, 0.6, seed=22)            # a real, persistent tilt
+    assert evaluate(real, (5,), k=30, min_graded=50)["tilt"] is True
+    probe = synthetic_events(1, 0.0)[0]
+    skewed = Pool(synthetic_events(200, 0.6, seed=23))
+    v = horizon_view(skewed, probe, 5, 0.02, k=1e12)      # tilt off: exactly no view
+    assert v.p_up == pytest.approx(0.5, abs=0.01) and v.median_pct == pytest.approx(0, abs=1e-9)
+
+
 @pytest.mark.rule("NC-34")
 def test_alert_gate_needs_count_brier_and_coverage() -> None:
     good = {5: {"graded": 150, "brier": 0.24, "coverage": 0.8}}
@@ -563,6 +577,7 @@ def test_items_must_name_the_company() -> None:
 @pytest.mark.rule("NC-48")
 @pytest.mark.parametrize("head", [
     "Nvidia to Report Q3 Earnings: What's in the Cards?",
+    "Ahead of Taiwan Semiconductor Earnings, Here's What Barchart Data Says Comes Next",
     "Tesla Roadster probably won't drive an earnings beat",
     "Should You Buy Apple Stock Before Earnings?",
     "Elon Musk's net worth could reach $2 trillion after a Tesla merger",

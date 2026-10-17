@@ -20,10 +20,11 @@ from trader.timeutil import to_et
 
 # (group, [(href, label)]) - the sidebar
 NAV: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
-    ("Overview", (("/", "Today"), ("/market", "Market recap"), ("/scanner", "Scanner"))),
+    ("Overview", (("/", "Today"), ("/market", "Market recap"), ("/macro", "Macro"),
+                  ("/scanner", "Scanner"))),
     ("Research", (("/stock", "Stock lookup"), ("/ratings", "Analyst ratings"),
                   ("/news", "News"), ("/technical", "Technical scan"),
-                  ("/catalysts", "Catalysts"),
+                  ("/catalysts", "Catalysts"), ("/momentum", "Momentum"),
                   ("/ideas", "Next-day ideas"), ("/options", "Options"),
                   ("/ask", "Ask"))),
     ("Trading", (("/approvals", "Approvals"), ("/controls", "Controls"),

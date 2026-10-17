@@ -25,6 +25,7 @@ from sqlalchemy import (
     Table,
     Text,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.engine import Dialect
 from sqlalchemy.types import TypeEngine
@@ -513,9 +514,50 @@ catalyst_grades = Table("catalyst_grades", metadata, _id(),       # NC-35 (core 
                         Column("in_range", Boolean), Column("up", Boolean),
                         Column("graded_at", UtcDateTime))
 
+# --- macro (MACRO_FORECAST_REQUIREMENTS.md §5) ---------------------------------------------
+macro_series = Table("macro_series", metadata, _id(),             # MA-1 (news writes)
+                     Column("series_id", String(24), index=True),
+                     Column("date", Date, index=True),
+                     Column("value", Float),
+                     UniqueConstraint("series_id", "date", name="uq_macro_series_date"))
+
+macro_news = Table("macro_news", metadata, _id(),                 # MA-4 (news writes)
+                   Column("item_id", String(64), unique=True),
+                   Column("ts", UtcDateTime, index=True),
+                   Column("source", String(16)),
+                   Column("headline", Text), Column("cleaned_text", Text),
+                   Column("theme", String(16)), Column("tone", String(10)),
+                   Column("sentiment", Float), Column("suspicious", Boolean))
+
+macro_daily = Table("macro_daily", metadata, _id(),               # MA-6 (core writes)
+                    Column("date", Date, unique=True),
+                    Column("score", Float), Column("label", String(10)),
+                    Column("indicators", JSON), Column("releases", JSON))
+
+momentum_signals = Table("momentum_signals", metadata, _id(),     # MO-15 (core writes)
+                         Column("signal_id", String(64), unique=True),
+                         Column("ticker", String(10), index=True),
+                         Column("setup", String(24)), Column("policy", String(12)),
+                         Column("asof", Date, index=True),       # the close it was armed on
+                         Column("state", String(10), index=True),  # ARMED OPEN CLOSED ...
+                         Column("entry_type", String(6)),
+                         Column("trigger", Float), Column("stop", Float),
+                         Column("rs", Integer), Column("template", Integer),
+                         Column("proven", Boolean), Column("alerted", Boolean),
+                         Column("shares", Integer), Column("risk_usd", Float),
+                         Column("entry_date", Date), Column("entry_price", Float),
+                         Column("exit_date", Date), Column("r", Float),
+                         Column("exit_reason", String(16)),
+                         Column("position", JSON),     # exits.Position state
+                         Column("sent", JSON),         # alert keys already sent (MO-15)
+                         Column("events", JSON),
+                         Column("why", Text),
+                         Column("updated", UtcDateTime))
+
 # Writers by role (DATA_SPEC §3, SEC-17): applied by `trader migrate` on Postgres.
 NEWS_WRITES = ("news_items", "event_flags", "llm_calls", "analyst_actions", "news_embeddings",
-               "social_posts", "fundamentals_daily")
+               "social_posts", "fundamentals_daily", "macro_series", "macro_news")
+NEWS_UPDATES = ("fundamentals_daily",)   # NC-16: same-day refresh of a snapshot
 NOTIFIER_WRITES = ("commands",)
 CONSOLE_WRITES = ("owner_notes", "console_chats", "llm_calls")   # llm_calls: UI-8c log
 NEWS_READS = ("positions", "game_plans")   # NW-1: tickers with a position or a plan setup

@@ -30,6 +30,7 @@ from trader.timeutil import ET
 Z = NormalDist()
 BUCKETS = ((80, "major"), (60, "strong"), (40, "moderate"), (0, "weak"))
 ADJUSTMENTS = ("pead", "priced_in", "crowding", "trend")
+NO_TILT = 1e9      # shrinkage at or above this means "tilt switched off" (NC-49)
 
 
 def bucket(strength: float) -> str:
@@ -286,6 +287,8 @@ def horizon_view(pool: Pool, o: EventObs, h: int, sigma_daily: float, *, k: floa
         m, n = _shrunk_mean(pool, h, keys, k, raw)
         m += _adjust(pool, h, o, adjustments, k, raw)
         res, where = _residuals(pool, h, keys, raw)
+        if res is not None and k >= NO_TILT:   # NC-49 off: no directional view at all
+            res = res - float(np.median(res))
         for a in adjustments:   # an adjustment that applies also brings its own shape
             if a in o.flags:
                 sub = pool.samples(h, keys[1], 1, raw, (a, o.flags[a]))

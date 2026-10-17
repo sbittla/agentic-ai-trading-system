@@ -396,6 +396,95 @@ class CatalystCfg(_Frozen):
         return tuple(sorted(set(v)))
 
 
+class MacroCfg(_Frozen):
+    """Macro agent A18 (MACRO_FORECAST_REQUIREMENTS.md §2). Advisory."""
+
+    enabled: bool = True
+    series: tuple[str, ...] = (
+        "CPIAUCSL", "CPILFESL", "PCEPILFE", "UNRATE", "PAYEMS", "ICSA", "INDPRO", "RSAFS",
+        "UMCSENT", "DFF", "DGS2", "DGS10", "T10Y2Y", "T10Y3M", "BAMLH0A0HYM2", "VIXCLS",
+        "VXVCLS", "DTWEXBGS", "DCOILWTICO")
+    risk_on_at: float = 25
+    risk_off_at: float = -25
+    news_categories: tuple[str, ...] = ("general",)
+    news_days: int = 3                  # macro headlines shown
+    latest_file: str = "reports/macro.json"
+
+
+class ForecastCfg(_Frozen):
+    """Forecasts (MACRO_FORECAST_REQUIREMENTS.md §3). Advisory."""
+
+    sector_etfs: tuple[str, ...] = ("XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLB",
+                                    "XLU", "XLRE", "XLC", "SMH")
+    sector_of: dict[str, str] = Field(default_factory=lambda: {
+        "NVDA": "SMH", "AVGO": "SMH", "TSM": "SMH", "AAPL": "XLK", "MSFT": "XLK",
+        "GOOGL": "XLC", "META": "XLC", "AMZN": "XLY", "TSLA": "XLY", "SPCX": "XLI"})
+    gap_buckets_atr: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)
+    min_events: int = 5                 # FC-4
+    latest_file: str = "reports/forecast.json"
+    eval_file: str = "reports/forecast_eval.json"
+
+
+# MO-1: liquid US stocks across sectors (today's large caps: survivorship bias, see MO-1)
+MOMENTUM_UNIVERSE: tuple[str, ...] = (
+    "AAPL", "MSFT", "NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "MU", "AMAT", "LRCX", "KLAC",
+    "ADI", "MRVL", "ASML", "TSM", "ORCL", "CRM", "ADBE", "NOW", "INTU", "IBM", "CSCO", "ANET",
+    "PANW", "CRWD", "FTNT", "SNPS", "CDNS", "PLTR", "SHOP", "UBER", "NFLX", "META", "GOOGL",
+    "AMZN", "TSLA", "SMCI", "DELL", "DIS", "CMCSA", "TMUS", "BKNG", "ABNB", "MELI", "COST",
+    "WMT", "HD", "LOW", "NKE", "SBUX", "MCD", "CMG", "LULU", "TJX", "JPM", "BAC", "GS", "MS",
+    "WFC", "C", "SCHW", "BLK", "AXP", "V", "MA", "PYPL", "COIN", "LLY", "UNH", "JNJ", "ABBV",
+    "MRK", "PFE", "TMO", "ISRG", "VRTX", "REGN", "AMGN", "GILD", "DXCM", "MRNA", "CAT", "DE",
+    "GE", "HON", "BA", "LMT", "RTX", "UPS", "UNP", "ETN", "XOM", "CVX", "COP", "SLB", "OXY",
+    "FCX", "NEM", "LIN", "ENPH", "CELH", "ZM", "ROKU", "DDOG", "NET", "TTD", "APP", "VST",
+    "CEG", "AXON", "ANF", "DECK")
+
+
+class MomentumCfg(_Frozen):
+    """Momentum leaders, setups, exits and alerts (MOMENTUM_REQUIREMENTS.md, A19). Advisory."""
+
+    enabled: bool = True
+    telegram: bool = True               # MO-14: entry alerts for gated setups, all exit alerts
+    alert_unproven: bool = False
+    universe: tuple[str, ...] = MOMENTUM_UNIVERSE
+    history_days: int = 3700            # MO-22: about 10 years of SIP daily bars
+    feed: Literal["sip", "iex"] = "sip"
+    min_history: int = 260
+    min_price: float = 10.0
+    min_dollar_volume: float = 50e6
+    rank_factors: tuple[str, ...] = ("r12_1", "clenow", "high52", "resid")
+    leaderboard_n: int = 15
+    min_rs: int = 80
+    min_template: int = 7
+    disabled: tuple[str, ...] = ()
+    setup_policy: dict[str, str] = Field(default_factory=dict)
+    partial_frac: float = 1 / 3
+    partial_r: float = 2.0
+    partial_days: int = 5
+    climax_atr: float = 7.0
+    climax_frac: float = 0.5
+    time_stop_days: int = 10
+    max_hold_days: int = 250
+    max_loss_pct: float = 8.0
+    cost_bps: float = 10.0
+    risk_pct: float | None = None       # None: risk.risk_per_trade_pct
+    max_positions: int = 8
+    max_heat_pct: float = 6.0
+    max_correlated: int = 2             # MO-17: alerted signals with 60-day correlation > 0.7
+    top_n: int = 10
+    hold_rank: int = 20
+    rebalance_weeks: int = 2            # MO-13: last session of every 2nd ISO week
+    rotation: bool = True               # MO-25: rebalance alerts (only if the gate passes)
+    rotation_factors: tuple[str, ...] = ()   # () = the eval's in-sample choice, else rank_factors
+    rotation_regime_filter: bool | None = None   # None = the eval's in-sample choice
+    rotation_max_weight: float = 0.2    # MO-13: per-name cap in the model portfolio
+    min_trades: int = 30
+    min_pf: float = 1.2
+    earnings_block_sessions: int = 3    # MO-18
+    intraday_every_min: int = 5
+    latest_file: str = "reports/momentum.json"
+    eval_file: str = "reports/momentum_eval.json"
+
+
 class Config(_Frozen):
     mode: ModeCfg = ModeCfg()
     universe: UniverseCfg
@@ -420,6 +509,9 @@ class Config(_Frozen):
     options: OptionsCfg = OptionsCfg()
     scanner: ScannerCfg = ScannerCfg()
     catalyst: CatalystCfg = CatalystCfg()
+    macro: MacroCfg = MacroCfg()
+    forecast: ForecastCfg = ForecastCfg()
+    momentum: MomentumCfg = MomentumCfg()
 
     def style_mode(self, style: str) -> StyleMode:
         return self.mode.day_trades if style == "day" else self.mode.swing_trades
@@ -502,9 +594,45 @@ def validate(cfg: Config, *, base_dir: Path | None = None, check_env: bool = Fal
     bad_src = set(ca.social_sources) - {"reddit", "stocktwits", "apewisdom"}
     if bad_src:
         p.append(f"catalyst.social_sources: unknown {sorted(bad_src)}")
+    if not cfg.macro.risk_off_at < 0 < cfg.macro.risk_on_at <= 100:
+        p.append("macro: risk_off_at < 0 < risk_on_at <= 100 (MA-6)")
+    if any(not re.fullmatch(r"[A-Z0-9]{2,20}", x) for x in cfg.macro.series):
+        p.append("macro.series: FRED ids are 2-20 upper-case letters/digits (MA-1)")
     bad_adj = set(ca.adjustments) - {"pead", "priced_in", "crowding", "trend"}
     if bad_adj:
         p.append(f"catalyst.adjustments: unknown {sorted(bad_adj)} (NC-20)")
+    mo = cfg.momentum                                                   # MO-21
+    from trader.momentum.exits import POLICIES
+    from trader.momentum.factors import FACTORS
+    from trader.momentum.setups import SETUP_NAMES
+    if set(mo.rank_factors) - set(FACTORS) or not mo.rank_factors:
+        p.append(f"momentum.rank_factors: one or more of {', '.join(FACTORS)} (MO-5)")
+    for name in [*mo.disabled, *mo.setup_policy]:
+        if name not in SETUP_NAMES:
+            p.append(f"momentum: unknown setup {name!r} (known: {', '.join(SETUP_NAMES)})")
+    for pol in mo.setup_policy.values():
+        if pol not in POLICIES:
+            p.append(f"momentum.setup_policy: unknown policy {pol!r} ({', '.join(POLICIES)})")
+    if not (0 < mo.partial_frac < 1 and 0 < mo.climax_frac <= 1 and mo.partial_r > 0
+            and 0 < mo.max_loss_pct <= 25 and mo.climax_atr > 0):
+        p.append("momentum: partial_frac 0-1, climax_frac 0-1, partial_r > 0, "
+                 "max_loss_pct 0-25, climax_atr > 0 (MO-9)")
+    if not (1 <= mo.min_rs <= 99 and 0 <= mo.min_template <= 8 and mo.min_history >= 260):
+        p.append("momentum: min_rs 1-99, min_template 0-8, min_history >= 260 (MO-3, MO-4)")
+    if mo.max_positions < 1 or mo.max_heat_pct <= 0 or mo.top_n < 1 \
+            or mo.hold_rank < mo.top_n or mo.rebalance_weeks < 1 or mo.min_trades < 10:
+        p.append("momentum: max_positions >= 1, max_heat_pct > 0, top_n >= 1, hold_rank >= "
+                 "top_n, rebalance_weeks >= 1, min_trades >= 10 (MO-12..MO-14)")
+    if set(mo.rotation_factors) - set(FACTORS):
+        p.append(f"momentum.rotation_factors: from {', '.join(FACTORS)} (MO-25)")
+    if mo.risk_pct is not None and not 0 < mo.risk_pct <= cfg.risk.risk_per_trade_pct:
+        p.append("momentum.risk_pct: above 0 and at most risk.risk_per_trade_pct (MO-17)")
+    if not 0 < mo.rotation_max_weight <= 1:
+        p.append("momentum.rotation_max_weight: above 0, at most 1 (MO-13)")
+    if mo.max_correlated < 1:
+        p.append("momentum.max_correlated >= 1 (MO-17)")
+    if not 1 <= mo.intraday_every_min <= 30:
+        p.append("momentum.intraday_every_min: 1-30 (MO-15)")
     from trader.scanner.techniques import technique_names
     known = set(technique_names())
     for name in sc.disabled:

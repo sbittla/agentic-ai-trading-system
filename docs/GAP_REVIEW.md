@@ -60,6 +60,8 @@ The gaps were in three places:
 | all-MiniLM-L6-v2 | A3 story embeddings | story grouping and novelty | anything on the order path | NC-1/NC-2 tests | word-hash vectors |
 | Event study (statistics) | A17 outlook | P(up), ranges | orders | walk-forward Brier and coverage (NC-32), alert gate (NC-34) | volatility range with no tilt |
 | Technique engine | scanner | ideas | orders | TA-Lib parity, walk-forward (TS-11) | — |
+| Macro regime (fixed rules) | A18 | regime label, a confluence check | orders, trade blocks | what followed each label (MA-9) | no label (check left out) |
+| Volatility estimators (EWMA, Parkinson, HAR) | forecast | the usual 1- and 5-day move | orders | walk-forward QLIKE and 80% coverage (FC-2) | EWMA |
 
 **MR-2:** a new model or adjustment ships only with (a) an entry in this table, (b) a walk-forward or replay test showing it helps, and (c) a fallback that fails safe.
 

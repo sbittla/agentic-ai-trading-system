@@ -48,6 +48,8 @@ The question was: which free, open-source model "knows all the trading technique
 | `TS-19` | Console and command. trader-core and `trader scan` (latest session, unless `--no-write`) write `scanner.latest_file` (`reports/technical_scan.json`); the Owner Console's **Technical scan** page (UI-37) shows it. The `SCAN` command (Telegram, console button) scans the newest stored session now. |
 | `TS-16` | Data: daily bars from the Parquet store (`trader fetch-history`, which also downloads `scanner.symbols`). A ticker needs 210 sessions (SMA200 + slope); with less, or with no bar on the requested day, it is listed as skipped with the reason, never guessed. |
 
+Added in [MACRO_FORECAST_REQUIREMENTS.md](MACRO_FORECAST_REQUIREMENTS.md) §4: **TS-20** accumulation/distribution (OBV slope, A/D line, Chaikin Money Flow) in every idea's context; **TS-21** the `BASE_BREAKOUT` / `BASE_BREAKDOWN` technique (volatility-contraction base); **TS-22** SPY distribution days in the context; **TS-23** no look-ahead for all three. They are measured by `scan-eval` before they carry score weight (TS-8).
+
 ## 3. Technique rules
 
 Notation: `c, o, h, l, v` = today's bar; ATR = ATR14 (daily); buffer `b` = 0.05 × ATR. Unless stated otherwise the trigger is a next-session stop entry at today's high + b (long) or today's low − b (short). "Uptrend" = c > SMA50 > SMA200. Shorts mirror every rule (highs ↔ lows, above ↔ below); reversal candles use the bearish TA-Lib patterns.

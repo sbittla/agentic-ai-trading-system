@@ -4,7 +4,7 @@
 
 Every rule ID maps to the agent that enforces it, the test that proves it, and the reason code the journal records when it blocks or changes a trade. CI runs `tools/check_traceability.py`, which fails if any ID below without a "Manual" test has no test marked `@pytest.mark.rule("<ID>")`.
 
-**Totals:** 272 requirement IDs (16 from [GAP_REVIEW.md](GAP_REVIEW.md) and 48 news-catalyst IDs added in REQUIREMENTS 1.4; 44 added in REQUIREMENTS 1.3, most of them planned; 19 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md); UI-37).
+**Totals:** 317 requirement IDs (25 momentum IDs from [MOMENTUM_REQUIREMENTS.md](MOMENTUM_REQUIREMENTS.md); 19 macro, forecast and technical IDs from [MACRO_FORECAST_REQUIREMENTS.md](MACRO_FORECAST_REQUIREMENTS.md); 16 from [GAP_REVIEW.md](GAP_REVIEW.md) and 48 news-catalyst IDs added in REQUIREMENTS 1.4; 44 added in REQUIREMENTS 1.3, most of them planned; 19 technical-scanner IDs from [SCANNER_REQUIREMENTS.md](SCANNER_REQUIREMENTS.md); UI-37).
 
 | ID | Requirement | Enforced by | Test | Journal reason code |
 | --- | --- | --- | --- | --- |
@@ -386,6 +386,54 @@ The console container reads with the `console_rw` role and trader-core's interna
 | `NC-38` | Determinism: the same inputs give the same scores and ranges; models pinned by hash; Qwe… | A17 (trader-core) | unit/test_catalyst.py | — |
 | `NC-39` | Security: social text is untrusted (DQ-4); cleaned before any model; never shown raw in … | A17 (trader-core) | unit/test_catalyst.py | — |
 | `NC-40` | Tests: unit tests per factor and the event-study math; a look-ahead test; injection test… | A17 (trader-core) | Manual: CI runs ruff, mypy, pytest | — |
+
+| `MA-1` | Series. Stored per date in macro_series: CPI and core CPI (CPIAUCSL, CPILFESL), core PCE… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-2` | Collection. news-sentiment downloads each series at 7:00 ET and after 4:30 PM ET (once a… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-3` | Releases. A new observation of a monthly or weekly series is a release. Its surprise is … | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-4` | Macro news. Fed press releases (RSS) and Finnhub general news are cleaned (DQ-4), scored… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-5` | Regime indicators. Each indicator gives −1 (risk-off), 0 or +1 (risk-on) with its value … | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-6` | Regime. Score = sum of indicators ÷ the number with data × 100 (−100…+100). RISK_ON ≥ +2… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-7` | Use. The regime is a check in the catalyst confluence panel (NC-16), in the scanner cont… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-8` | Outputs. trader macro (text, --json, --telegram), the MACRO command, the console Macro p… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `MA-9` | Grading. trader macro --eval reports, for each past regime label, the next 21-session SP… | A18 macro (news + trader-core) | unit/test_macro_forecast.py | — |
+| `FC-1` | Volatility. For each ticker, the next-session and next-5-session volatility from three e… | forecast | unit/test_macro_forecast.py | — |
+| `FC-2` | Volatility grading. Walk-forward over the stored history: QLIKE loss per estimator and c… | forecast | unit/test_macro_forecast.py | — |
+| `FC-3` | Gap odds. From daily bars: for opening gaps grouped by size in ATR (0.25–0.5, 0.5–1, 1–2… | forecast | unit/test_macro_forecast.py | — |
+| `FC-4` | Macro-event reactions. For each ticker, the average absolute return and absolute excess … | forecast | unit/test_macro_forecast.py | — |
+| `FC-5` | Sector rotation. For the 11 SPDR sector ETFs plus SMH: momentum = 6-month return excludi… | forecast | unit/test_macro_forecast.py | — |
+| `FC-6` | Outputs. trader forecast [TICKER] (text and --json), reports/forecast.json, a forecast c… | forecast | unit/test_macro_forecast.py | — |
+| `TS-20` | Accumulation / distribution. Per bar: OBV slope over 20 sessions vs price slope, the Acc… | scanner | unit/test_macro_forecast.py | — |
+| `TS-21` | Base breakout (VCP). A swing technique: a base of 20–60 sessions no deeper than 25% from… | scanner | unit/test_macro_forecast.py | — |
+| `TS-22` | Distribution days. For SPY: sessions in the last 25 that closed down ≥ 0.2% on higher vo… | scanner | unit/test_macro_forecast.py | — |
+| `TS-23` | No look-ahead for TS-20..TS-22, tested as TS-10. | scanner | unit/test_macro_forecast.py | — |
+
+| `MO-1` | Universe. momentum.universe: about 110 liquid US stocks across every sector (the default… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-2` | Factors per symbol and session, pure functions of the bars up to that session: r12_1 (re… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-3` | RS rating 1–99: the percentile, across the universe on that session, of 0.4 × r3 + 0.2 ×… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-4` | Trend template (Minervini): (1) close > SMA150 and SMA200, (2) SMA150 > SMA200, (3) SMA2… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-5` | Leaderboard. Composite = the average percentile of momentum.rank_factors (default r12_1,… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-6` | Market regime for new entries. OFF when SPY closes under its 200-day average (no new ent… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-7` | Setups, long only (ADR-008). Each is armed at the close as a buy-stop for the next sessi… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-8` | Entry. A buy-stop fills on the next session only, at max(open, trigger). An open more th… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-9` | Exit state machine. The same code runs live and in the backtest, one session at a time,… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-10` | Policies. momentum.policies names the trail rules. Each setup has a default (§6, overrid… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-11` | Walk-forward grading. Every setup on every past session, from the same code as the live… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-12` | Alert-stream portfolio. The graded trades of the alerted setups (default policies), take… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-13` | Rotation model. On the last session of every rebalance_weeks-th (2nd) ISO week, hold the… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-14` | Alert gate. Telegram entry alerts are sent only for setups whose default policy, after c… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-15` | Live tracker. Signals live in momentum_signals with the states ARMED → OPEN → CLOSED, or… | A19 momentum (trader-core) | unit/test_momentum.py, replay/test_momentum_job.py | — |
+| `MO-16` | Alert content. Entry: ticker, setup, buy-stop, stop, risk %, shares and dollars at risk,… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-17` | Size and concentration. Shares = equity × risk % ÷ R, using trader-core's risk rules (Ri… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-18` | Advisory. No orders are placed (ADR-006). Long stock only (ADR-008). A setup with earnin… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-19` | No look-ahead. Factors, ratings, setups and exit decisions for session D depend only on… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-20` | Outputs. trader momentum (--json, --telegram, --date, --equity, --all, --track); trader… | A19 momentum (trader-core) | unit/test_momentum.py, replay/test_momentum_job.py | — |
+| `MO-21` | Config. momentum: with enabled, telegram, universe, the filters, factors, setup threshol… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-22` | Data. Daily bars from the consolidated SIP feed (free for history older than 15 minutes)… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-23` | Explainable. Every alert and leaderboard row states its numbers: the factor values, the… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-24` | Honest results. §9 records the measured results with their sample sizes, including setup… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+| `MO-25` | Rotation alerts. The close job replays the rotation model over the loaded sessions with… | A19 momentum (trader-core) | unit/test_momentum.py | — |
+
+| `NC-49` | Tilt gate: the event-study tilt must beat no tilt on walk-forward Brier, else off | A17 (trader-core) | unit/test_catalyst.py | — |
 
 ## How to use
 

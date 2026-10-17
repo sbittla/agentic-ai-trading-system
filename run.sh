@@ -27,6 +27,10 @@
 #   ./run.sh catalyst [TICKER] [--telegram]   news catalysts: strength, 1d-1m outlook, view
 #   ./run.sh catalyst-eval   grade past outlooks walk-forward; writes reports/catalyst_eval.json
 #   ./run.sh backfill-catalysts [days]   once: a year of news + bars, then catalyst-eval
+#   ./run.sh macro [--telegram]   macro regime, releases, Fed/economy headlines (macro-backfill once)
+#   ./run.sh forecast [TICKER] | forecast-eval   volatility, gaps, macro days, sector ranks
+#   ./run.sh momentum [--telegram] [--equity N] | momentum-eval | momentum-history   momentum
+#                            leaders, buy-stops, exits, rotation (docs/MOMENTUM_REQUIREMENTS.md)
 #
 # Secrets stay local: env files and secrets/ are git-ignored and this script refuses to start
 # if git tracks any of them. Docs: docs/RUNBOOK.md (operations), docs/ACCOUNT_SETUP.md (keys).
@@ -393,7 +397,13 @@ case "$cmd" in
            "${COMPOSE[@]}" --profile replay run --rm replay backtest --history --days "${1:-500}" ;;
   backfill) cmd_backfill "$@" ;;
   backfill-catalysts) cmd_backfill_catalysts "$@" ;;
-  scan|scan-eval|catalyst|catalyst-eval) check_docker   # trader-core has the bar store
+  macro-backfill) check_docker   # MA-2: full FRED history + headlines (news container)
+           "${COMPOSE[@]}" run --rm -T --no-deps news-sentiment trader macro-collect --history \
+             && "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader macro ;;
+  forecast-eval) check_docker
+           "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader forecast --eval "$@" ;;
+  scan|scan-eval|catalyst|catalyst-eval|macro|forecast|momentum|momentum-eval|momentum-history)
+           check_docker   # trader-core
            "${COMPOSE[@]}" run --rm -T --no-deps trader-core trader "$cmd" "$@" ;;
   test)    check_docker   # developers too: nothing runs from a host venv
            "${COMPOSE[@]}" --profile dev build -q dev >/dev/null || die "dev image build failed"
@@ -402,6 +412,6 @@ case "$cmd" in
              'ruff check --no-cache src tests && mypy --cache-dir /tmp/mypy &&
               pytest -q -p no:cacheprovider "$@" &&
               python tools/check_traceability.py docs/TRACEABILITY.md tests' sh "$@" ;;
-  help|-h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|-h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$cmd' (./run.sh help)" ;;
 esac
